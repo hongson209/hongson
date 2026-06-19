@@ -3,10 +3,11 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 
-local GITHUB_RAW = "local GITHUB_RAW = "https://raw.githubusercontent.com/hongson209/hongson/main/Modules/"
+local GITHUB_RAW = "https://raw.githubusercontent.com/hongson209/hongson/main/Modules/"
 
 local function LoadModule(path)
     local url = GITHUB_RAW .. path
+    print("Loading: " .. url)
     local success, result = pcall(function()
         return game:HttpGet(url)
     end)
