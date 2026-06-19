@@ -3,7 +3,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 
-local GITHUB_RAW = "https://raw.githubusercontent.com/YOUR_USERNAME/SON-HUB-V3.5/main/Modules/"
+local GITHUB_RAW = "https://raw.githubusercontent.com/hongson209/hongson/main/Main.lua"
 
 local function LoadModule(path)
     local url = GITHUB_RAW .. path
