@@ -1,4 +1,4 @@
--- SON HUB V3.5 - WindUI Version
+-- SON HUB V4 - WindUI Version
 -- Created by SonDepTrai
 
 local WindUI
@@ -28,12 +28,13 @@ local VirtualUser = game:GetService("VirtualUser")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local Player = Players.LocalPlayer
+local TeleportService = game:GetService("TeleportService")
+local GuiService = game:GetService("GuiService")
 
 local isMobile = UserInputService.TouchEnabled
 local screenSize = workspace.CurrentCamera.ViewportSize
 local isSmallScreen = screenSize.X < 800 or screenSize.Y < 600 or isMobile
 
--- Variables
 local FarmEnabled = false
 local ChestEnabled = false
 local SelectedWeapon = nil
@@ -56,10 +57,12 @@ local ESPEnabled = false
 local ESPFolder = nil
 local ESPConnection = nil
 local menuVisible = true
+local AutoHakiEnabled = false
+local TweenSpeed = 1.0
 
 local AutoSkillEnabled = false
 local SelectedSkills = {}
-local AvailableSkills = {"Z", "X", "C", "V", "B", "N", "F", "L", "H", "J", "K", "G"}
+local AvailableSkills = {"Z", "X", "C", "V", "B", "N", "Y", "G", "H", "J", "K", "L", "Q", "T", "F", "U", "P", "E", "R"}
 
 local AutoBringNormalFruit = false
 local AutoBringDemonFruit = false
@@ -67,10 +70,16 @@ local AutoBringDemonFruit = false
 local NormalFruitNames = {
     ["apple"]=true, ["banana"]=true, ["greenapple"]=true,
     ["melon"]=true, ["pumpkin"]=true,
-    ["cantaloupe"]=true, ["coconut"]=true, ["prickly pear"]=true
+    ["cantaloupe"]=true, ["prickly pear"]=true
 }
 
 local RAYLEIGH_POSITION = Vector3.new(-1009.7536010742188, 4011.46484375, 10135.1171875)
+local SHOP_EMOTES_POSITION = Vector3.new(1514.7469482421875, 260.38421630859375, 2163.8037109375)
+
+local OldBookCollected = false
+local AutoChestForOldBook = false
+local IsSearchingOldBook = false
+local OldBookMonitoringEnabled = false
 
 local hardcoreMobs = {
     ["Lv2000 Crocodile"] = true, ["Lv20000 Whitebeard"] = true,
@@ -111,7 +120,183 @@ local FruitNames = {
     "Chilly Fruit", "Candy Fruit", "Bomb Fruit", "Buddha Fruit"
 }
 
--- Helper Functions
+local _old_getgc = getgc
+if _old_getgc then
+    getgc = function(...)
+        local result = {_old_getgc(...)}
+        return {}
+    end
+end
+
+local _old_getgenv = getgenv
+if _old_getgenv then
+    getgenv = function(...)
+        local env = _old_getgenv(...)
+        local safe_env = {}
+        for k, v in pairs(env) do
+            if type(v) ~= "function" and type(v) ~= "table" then
+                safe_env[k] = v
+            end
+        end
+        return safe_env
+    end
+end
+
+local _old_hookfunction = hookfunction
+if _old_hookfunction then
+    hookfunction = function(...)
+        return ...
+    end
+end
+
+local _old_RemoteEvent = Instance.new("RemoteEvent")
+local protectedRemotes = {}
+
+local _old_humanoid = Instance.new("Humanoid")
+local function protectHumanoid(humanoid)
+    if not humanoid then return end
+    local oldWS = humanoid.WalkSpeed
+    local oldJP = humanoid.JumpPower
+    
+    humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+        if humanoid.WalkSpeed > 100 then
+            humanoid.WalkSpeed = 16
+        end
+    end)
+    
+    humanoid:GetPropertyChangedSignal("JumpPower"):Connect(function()
+        if humanoid.JumpPower > 100 then
+            humanoid.JumpPower = 50
+        end
+    end)
+end
+
+local function protectTeleport()
+    local function onCFrameChange(root)
+        if not root then return end
+        local oldCF = root.CFrame
+        root:GetPropertyChangedSignal("CFrame"):Connect(function()
+            local newPos = root.Position
+            local oldPos = oldCF.Position
+            local distance = (newPos - oldPos).Magnitude
+            
+            if distance > 500 and not root:GetAttribute("AllowTeleport") then
+                root.CFrame = oldCF
+            end
+            oldCF = root.CFrame
+        end)
+    end
+end
+
+local function protectEnvironment()
+    local env = getfenv()
+    local protected = {
+        "loadstring", "pcall", "xpcall", "task", "coroutine",
+        "setfenv", "getfenv", "newproxy"
+    }
+    
+    for _, name in ipairs(protected) do
+        if env[name] then
+            env[name] = nil
+        end
+    end
+end
+
+local function protectHooks()
+    local critical = {
+        "require", "print", "warn", "error",
+        "tostring", "tonumber", "type", "typeof"
+    }
+    
+    for _, name in ipairs(critical) do
+        if _G[name] then
+            local original = _G[name]
+            _G[name] = function(...)
+                return original(...)
+            end
+        end
+    end
+end
+
+local function protectMemory()
+    local function randomizeTable(t)
+        if type(t) ~= "table" then return end
+        for i = 1, 10 do
+            local key = math.random(1, 1000000)
+            t[key] = key
+        end
+    end
+    
+    local protectedTables = {
+        _G, game, workspace, Players, ReplicatedStorage
+    }
+    
+    for _, tbl in ipairs(protectedTables) do
+        randomizeTable(tbl)
+    end
+end
+
+local function protectExecutor()
+    local executors = {
+        "Synapse", "Krnl", "Scriptware", "Arceus", "Nova",
+        "Fluxus", "Vega", "Azusa", "Crack", "Aegis"
+    }
+    
+    for _, name in ipairs(executors) do
+        if _G[name] then
+            _G[name] = nil
+        end
+        if _G["_" .. name] then
+            _G["_" .. name] = nil
+        end
+    end
+end
+
+local function applyAntiCheat()
+    pcall(function()
+        protectEnvironment()
+        protectHooks()
+        protectMemory()
+        protectExecutor()
+        protectTeleport()
+    end)
+end
+
+local function monitorDetection()
+    local function checkSuspicious()
+        local gc = pcall(getgc)
+        if gc then
+            if getgc then
+                getgc = nil
+            end
+        end
+        
+        local genv = pcall(getgenv)
+        if genv then
+            if getgenv then
+                getgenv = nil
+            end
+        end
+    end
+    
+    task.spawn(function()
+        while true do
+            task.wait(5)
+            pcall(checkSuspicious)
+        end
+    end)
+end
+
+applyAntiCheat()
+monitorDetection()
+
+Player.CharacterAdded:Connect(function(char)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        protectHumanoid(hum)
+    end
+end)
+
 local function getCharacter()
     return Player.Character or Player.CharacterAdded:Wait()
 end
@@ -185,7 +370,52 @@ local function equipWeapon(toolName)
     return tool.Parent == char
 end
 
--- Auto equip loop
+local function tweenToPosition(position, offset, silent)
+    silent = silent or false
+    offset = offset or Vector3.new(0, 3, 0)
+    local char = getCharacter()
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    
+    hrp:SetAttribute("AllowTeleport", true)
+    
+    local targetCFrame = CFrame.new(position + offset)
+    local distance = (hrp.Position - targetCFrame.Position).Magnitude
+    local baseDuration = math.min(0.3 + (distance / 1000), 2.5)
+    local duration = baseDuration / TweenSpeed
+    
+    local tweenInfo = TweenInfo.new(
+        duration,
+        Enum.EasingStyle.Quad,
+        Enum.EasingDirection.Out
+    )
+    
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    
+    local completed = false
+    tween.Completed:Connect(function()
+        completed = true
+        hrp:SetAttribute("AllowTeleport", false)
+    end)
+    
+    tween:Play()
+    
+    local timeout = duration + 0.5
+    local start = tick()
+    while not completed and tick() - start < timeout do
+        task.wait(0.05)
+    end
+    
+    if not completed then
+        hrp:SetAttribute("AllowTeleport", false)
+        pcall(function()
+            hrp.CFrame = targetCFrame
+        end)
+    end
+    
+    return true
+end
+
 task.spawn(function()
     while task.wait(0.5) do
         if ForceEquip and SelectedWeapon then
@@ -200,7 +430,6 @@ task.spawn(function()
     end
 end)
 
--- Auto skill loop
 task.spawn(function()
     local function pressKey(key)
         local keyCode = Enum.KeyCode[key]
@@ -240,7 +469,6 @@ task.spawn(function()
     end
 end)
 
--- Auto Haki loop
 task.spawn(function()
     while true do
         task.wait(2)
@@ -259,7 +487,6 @@ task.spawn(function()
     end
 end)
 
--- Auto bring loops
 task.spawn(function()
     while true do
         task.wait(0.7)
@@ -267,18 +494,30 @@ task.spawn(function()
         local char = getCharacter()
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
+        
         for _, v in pairs(workspace:GetDescendants()) do
             if not v then continue end
             local name = v.Name
             if type(name) ~= "string" then continue end
-            if NormalFruitNames[string.lower(name)] then
+            local lowerName = string.lower(name)
+            if lowerName == "coconut" then continue end
+            if NormalFruitNames[lowerName] then
                 local part = v:FindFirstChildWhichIsA("BasePart")
                 if not part and v:IsA("BasePart") then
                     part = v
                 end
                 if part then
                     pcall(function()
-                        part.CFrame = hrp.CFrame * CFrame.new(0, -2.5, 0)
+                        local isHeld = false
+                        for _, plr in pairs(Players:GetPlayers()) do
+                            if plr.Character and plr.Character:FindFirstChild(v.Name) then
+                                isHeld = true
+                                break
+                            end
+                        end
+                        if not isHeld then
+                            part.CFrame = hrp.CFrame * CFrame.new(0, -2.5, 0)
+                        end
                     end)
                 end
             end
@@ -293,10 +532,21 @@ task.spawn(function()
         local char = getCharacter()
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
+        
         for _, obj in pairs(Workspace:GetChildren()) do
             if not obj or not obj:IsA("Tool") then continue end
             local name = obj.Name
             if type(name) ~= "string" then continue end
+            
+            local isHeld = false
+            for _, plr in pairs(Players:GetPlayers()) do
+                if plr.Character and plr.Character:FindFirstChild(name) then
+                    isHeld = true
+                    break
+                end
+            end
+            if isHeld then continue end
+            
             for _, fn in ipairs(FruitNames) do
                 if name == fn then
                     local part = obj:FindFirstChildWhichIsA("BasePart")
@@ -322,12 +572,22 @@ task.spawn(function()
         local char = getCharacter()
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
+        
         for _, obj in pairs(Workspace:GetDescendants()) do
             if not obj then continue end
             local name = obj.Name
             if type(name) ~= "string" then continue end
             local lowerName = string.lower(name)
             if lowerName == "oldbook" or lowerName == "old book" or string.find(lowerName, "oldbook") then
+                local isHeld = false
+                for _, plr in pairs(Players:GetPlayers()) do
+                    if plr.Character and plr.Character:FindFirstChild(obj.Name) then
+                        isHeld = true
+                        break
+                    end
+                end
+                if isHeld then continue end
+                
                 local part = obj:FindFirstChildWhichIsA("BasePart")
                 if not part and obj:IsA("BasePart") then
                     part = obj
@@ -349,12 +609,22 @@ task.spawn(function()
         local char = getCharacter()
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
+        
         for _, obj in pairs(Workspace:GetDescendants()) do
             if not obj then continue end
             local name = obj.Name
             if type(name) ~= "string" then continue end
             local lowerName = string.lower(name)
             if lowerName == "compass" or string.find(lowerName, "compass") then
+                local isHeld = false
+                for _, plr in pairs(Players:GetPlayers()) do
+                    if plr.Character and plr.Character:FindFirstChild(obj.Name) then
+                        isHeld = true
+                        break
+                    end
+                end
+                if isHeld then continue end
+                
                 local part = obj:FindFirstChildWhichIsA("BasePart")
                 if not part and obj:IsA("BasePart") then
                     part = obj
@@ -369,7 +639,100 @@ task.spawn(function()
     end
 end)
 
--- Farm functions
+local function checkOldBookInWorkspace()
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if not obj then continue end
+        local name = obj.Name
+        if type(name) ~= "string" then continue end
+        local lowerName = string.lower(name)
+        if lowerName == "oldbook" or lowerName == "old book" or string.find(lowerName, "oldbook") then
+            local isHeld = false
+            for _, plr in pairs(Players:GetPlayers()) do
+                if plr.Character and plr.Character:FindFirstChild(obj.Name) then
+                    isHeld = true
+                    break
+                end
+            end
+            if not isHeld then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function checkOldBookInInventory()
+    local backpack = Player:FindFirstChild("Backpack")
+    if backpack then
+        for _, obj in pairs(backpack:GetChildren()) do
+            if obj:IsA("Tool") then
+                local name = obj.Name
+                if type(name) ~= "string" then continue end
+                local lowerName = string.lower(name)
+                if lowerName == "oldbook" or lowerName == "old book" or string.find(lowerName, "oldbook") then
+                    return true
+                end
+            end
+        end
+    end
+    local char = getCharacter()
+    if char then
+        for _, obj in pairs(char:GetChildren()) do
+            if obj:IsA("Tool") then
+                local name = obj.Name
+                if type(name) ~= "string" then continue end
+                local lowerName = string.lower(name)
+                if lowerName == "oldbook" or lowerName == "old book" or string.find(lowerName, "oldbook") then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        
+        if not AutoBringOldBook then 
+            if OldBookMonitoringEnabled then
+                OldBookMonitoringEnabled = false
+                if AutoChestForOldBook then
+                    ChestEnabled = false
+                    AutoChestForOldBook = false
+                end
+            end
+            continue 
+        end
+        
+        OldBookMonitoringEnabled = true
+        
+        if checkOldBookInInventory() then
+            if AutoChestForOldBook then
+                ChestEnabled = false
+                AutoChestForOldBook = false
+            end
+            if HakiQuestEnabled then
+                tweenToPosition(RAYLEIGH_POSITION, nil, true)
+                HakiQuestEnabled = false
+                WindUI:Notify({ Title = "OldBook", Content = "Found! Teleported to Rayleigh", Duration = 2 })
+            end
+            continue
+        end
+        
+        if checkOldBookInWorkspace() then
+            continue
+        else
+            if not ChestEnabled and not AutoChestForOldBook then
+                ChestEnabled = true
+                AutoChestForOldBook = true
+                WindUI:Notify({ Title = "OldBook", Content = "No OldBook found! Auto Chest enabled", Duration = 2 })
+            end
+        end
+    end
+end)
+
 local function findMob()
     local aliveFolder = workspace:FindFirstChild("Alive")
     if not aliveFolder then return nil, nil, nil end
@@ -475,7 +838,6 @@ local function attack()
     end)
 end
 
--- Farm loop
 task.spawn(function()
     while task.wait(0.05) do
         if not FarmEnabled then
@@ -508,7 +870,6 @@ task.spawn(function()
     end
 end)
 
--- Chest farm
 task.spawn(function()
     while task.wait(0.2) do
         if not ChestEnabled then continue end
@@ -531,7 +892,6 @@ task.spawn(function()
     end
 end)
 
--- Haki Quest functions
 local function getAllRings()
     local rings = {}
     local mapFolder = workspace:FindFirstChild("MapFolder")
@@ -557,20 +917,29 @@ local function getAllRings()
 end
 
 local function teleportToRayleigh()
-    local char = getCharacter()
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp then pcall(function() hrp.CFrame = CFrame.new(RAYLEIGH_POSITION) + Vector3.new(0, 3, 0) end) end
+    tweenToPosition(RAYLEIGH_POSITION, nil, true)
+end
+
+local function teleportToShopEmotes()
+    tweenToPosition(SHOP_EMOTES_POSITION, nil, true)
 end
 
 local currentRingIndex = 1
 local RingTweenActive = false
+local RingCollecting = false
 
 task.spawn(function()
     while true do
         task.wait(0.5)
         if not HakiQuestEnabled then 
             currentRingIndex = 1
+            RingCollecting = false
             continue 
+        end
+        
+        if RingCollecting then
+            task.wait(0.2)
+            continue
         end
         
         local rings = getAllRings()
@@ -592,36 +961,37 @@ task.spawn(function()
             HakiQuestEnabled = false
             CollectedRings = {}
             currentRingIndex = 1
+            RingCollecting = false
             WindUI:Notify({ Title = "Haki Quest", Content = "Completed!", Duration = 3 })
             continue
         end
         
-        if currentRingIndex > #rings then
-            currentRingIndex = 1
+        local targetRing = nil
+        for _, ring in ipairs(rings) do
+            if not CollectedRings[ring.Name] then
+                targetRing = ring
+                break
+            end
         end
         
-        local ring = rings[currentRingIndex]
-        if not ring then
-            currentRingIndex = currentRingIndex + 1
+        if not targetRing then
+            task.wait(0.5)
             continue
         end
         
-        if CollectedRings[ring.Name] then
-            currentRingIndex = currentRingIndex + 1
-            continue
-        end
-        
-        if ring.Object and ring.Object.Parent and ring.CFrame and not RingTweenActive then
+        if targetRing.Object and targetRing.Object.Parent and targetRing.CFrame and not RingTweenActive then
+            RingCollecting = true
             local char = getCharacter()
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 RingTweenActive = true
                 
-                local targetPos = ring.CFrame.Position + Vector3.new(0, 2.5, 0)
-                local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+                local targetPos = targetRing.CFrame.Position + Vector3.new(0, 2.5, 0)
+                local duration = 0.4 / TweenSpeed
+                local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
                 local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos)})
                 pcall(function() tween:Play() end)
-                task.wait(0.4)
+                task.wait(duration + 0.1)
                 
                 local hum = char:FindFirstChildOfClass("Humanoid")
                 if hum then
@@ -636,17 +1006,25 @@ task.spawn(function()
                 end
                 
                 task.wait(0.2)
-                CollectedRings[ring.Name] = true
-                WindUI:Notify({ Title = "Ring", Content = "Collected " .. ring.Name .. " (" .. currentRingIndex .. "/" .. #rings .. ")", Duration = 2 })
-                currentRingIndex = currentRingIndex + 1
+                CollectedRings[targetRing.Name] = true
+                local ringNum = 0
+                for i, r in ipairs(rings) do
+                    if r.Name == targetRing.Name then
+                        ringNum = i
+                        break
+                    end
+                end
+                WindUI:Notify({ Title = "Ring", Content = "Collected " .. targetRing.Name .. " (" .. ringNum .. "/" .. #rings .. ")", Duration = 2 })
                 RingTweenActive = false
-                task.wait(0.1)
+                RingCollecting = false
+                task.wait(0.3)
+            else
+                RingCollecting = false
             end
         end
     end
 end)
 
--- Anti AFK
 local afkConnection = nil
 local function setupAntiAFK()
     if afkConnection then afkConnection:Disconnect() end
@@ -661,7 +1039,6 @@ local function setupAntiAFK()
 end
 setupAntiAFK()
 
--- Fly functions
 local FlyAttachment = nil
 local FlyLinearVelocity = nil
 local FlyBodyGyro = nil
@@ -767,7 +1144,6 @@ local function toggleFly()
     end
 end
 
--- Noclip
 local function toggleNoclip()
     NoclipEnabled = not NoclipEnabled
     if NoclipEnabled then
@@ -795,7 +1171,6 @@ local function toggleNoclip()
     end
 end
 
--- ESP
 local function toggleESP()
     ESPEnabled = not ESPEnabled
     if ESPEnabled then
@@ -842,7 +1217,6 @@ local function toggleESP()
     end
 end
 
--- Player functions
 local function GetPlayerList()
     local list = {"None"}
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -914,15 +1288,11 @@ local function TeleportToPlayer(playerName)
         WindUI:Notify({ Title = "Teleport", Content = "No root part!", Duration = 2 })
         return
     end
-    local myChar = getCharacter()
-    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    if myRoot then
-        pcall(function()
-            myRoot.CFrame = targetRoot.CFrame + Vector3.new(0, 1.5, 1.5)
-        end)
-        WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. target.Name, Duration = 2 })
-    end
+    tweenToPosition(targetRoot.Position, Vector3.new(0, 1.5, 1.5), true)
+    WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. target.Name, Duration = 2 })
 end
+
+local KillLoopConnection = nil
 
 local function StartKill(playerName)
     local target = Players:FindFirstChild(playerName)
@@ -991,7 +1361,6 @@ local function StopKill()
     WindUI:Notify({ Title = "Kill", Content = "Stopped", Duration = 2 })
 end
 
--- Auto Fishing
 local AutoFishingEnabled = false
 local AutoMinigameEnabled = false
 local FishingState = "IDLE"
@@ -1050,7 +1419,7 @@ local function ClickSelectedButton()
 end
 
 local function SetupMinigameListener()
-    local minigameGui = PlayerGui:FindFirstChild("FishingMinigame")
+    local minigameGui = Player.PlayerGui:FindFirstChild("FishingMinigame")
     if not minigameGui or not minigameGui.Enabled then return false end
     if MinigameActive then return true end
     MinigameActive = true
@@ -1145,7 +1514,7 @@ task.spawn(function()
                 end
             end
             if FishingState == "MINIGAME" then
-                local mg = PlayerGui:FindFirstChild("FishingMinigame")
+                local mg = Player.PlayerGui:FindFirstChild("FishingMinigame")
                 if not mg or not mg.Enabled then
                     FishingState = "IDLE"
                 end
@@ -1162,7 +1531,6 @@ task.spawn(function()
     end
 end)
 
--- Admin detection
 local AdminUserIds = { [1425918021] = true, [3160094389] = true }
 local function CheckForAdmins()
     for _, player in ipairs(Players:GetPlayers()) do
@@ -1170,7 +1538,7 @@ local function CheckForAdmins()
             WindUI:Notify({ Title = "Admin Detected", Content = player.Name .. " joined! Leaving...", Duration = 3 })
             task.wait(1)
             pcall(function()
-                game:GetService("TeleportService"):Teleport(game.PlaceId)
+                TeleportService:Teleport(game.PlaceId)
             end)
             return true
         end
@@ -1178,7 +1546,6 @@ local function CheckForAdmins()
     return false
 end
 
--- Hide nametag
 local function HideNametag()
     pcall(function()
         for _, obj in ipairs(Player.PlayerGui:GetDescendants()) do
@@ -1190,9 +1557,8 @@ local function HideNametag()
     end)
 end
 
--- Create WindUI Window
 local Window = WindUI:CreateWindow({
-    Title = "SON HUB V3.5",
+    Title = "SON HUB V4",
     Author = "by SonDepTrai",
     Icon = "solar:star-bold",
     Folder = "SON_HUB",
@@ -1212,9 +1578,8 @@ local Window = WindUI:CreateWindow({
     },
 })
 
--- Tags
 Window:Tag({
-    Title = "v3.5",
+    Title = "v4",
     Color = Color3.fromHex("#FF6B35"),
 })
 
@@ -1223,7 +1588,6 @@ Window:Tag({
     Color = Color3.fromHex("#FFD700"),
 })
 
--- Helper to get available weapons
 local function getAvailableWeapons()
     local weapons = {"None"}
     local backpack = Player:FindFirstChild("Backpack")
@@ -1237,7 +1601,6 @@ local function getAvailableWeapons()
     return weapons
 end
 
--- Variables for UI elements
 local weaponDropdown = nil
 local killToggleObj = nil
 local spectateToggleObj = nil
@@ -1246,7 +1609,79 @@ local flyToggleObj = nil
 local noclipToggleObj = nil
 local espToggleObj = nil
 
--- Define tabs
+local Islands = {
+    ["Sam"] = Vector3.new(-1282.53, 218.00, -1347.59),
+    ["Fisher"] = Vector3.new(-1689.73, 216.00, -320.37),
+    ["Sector G9"] = Vector3.new(-2681.07, 216.00, -943.29),
+    ["Marine Ford"] = Vector3.new(-3310.71, 300.75, -3286.47),
+    ["Purple Island"] = Vector3.new(-5273.88, 519.50, -7845.15),
+    ["Water Tower"] = Vector3.new(-233.99, 226.00, -1026.76),
+    ["Wind Mills"] = Vector3.new(65.12, 224.00, -35.69),
+    ["One House"] = Vector3.new(720.87, 241.00, 1214.81),
+    ["Restaurant"] = Vector3.new(1954.35, 218.00, 610.74),
+    ["King Crab"] = Vector3.new(1215.75, 243.00, -268.88),
+    ["Cave Island"] = Vector3.new(2052.59, 491.00, -656.71),
+    ["Big Tree"] = Vector3.new(2051.62, 288.00, -1871.25),
+    ["Krizma Island"] = Vector3.new(-1072.04, 361.00, 1677.36),
+    ["Gun Island"] = Vector3.new(-1846.41, 222.00, 3402.44),
+    ["Ancient Island"] = Vector3.new(-2721.82, 252.69, 1153.06),
+    ["C Island"] = Vector3.new(2953.90, 217.00, 1394.13),
+    ["Bar Island"] = Vector3.new(1481.25, 263.90, 2117.69),
+    ["Anna House"] = Vector3.new(1118.05, 217.20, 3353.08),
+    ["Crocodile Land"] = Vector3.new(948.70, 392.59, 5014.60),
+    ["Three Tree"] = Vector3.new(-5703.31, 216.00, 123.44),
+    ["Hole Land"] = Vector3.new(-10913.88, 551.00, 5063.75),
+    ["Many Land"] = Vector3.new(-9258.29, 216.00, -3025.81),
+    ["Haki Land"] = Vector3.new(-1002.16, 4010.97, 10158.25),
+    ["Vokun Land"] = Vector3.new(4685.26, 217.00, 4817.13),
+    ["Big Snow"] = Vector3.new(6275.28, 487.00, -1829.30),
+}
+
+local DailyQuest = {
+    ["C0"] = Vector3.new(904.962, 270.000, 1219.497),
+    ["Cooker"] = Vector3.new(1982.699, 218.594, 564.230),
+    ["Fisherman"] = Vector3.new(-1700.615, 216.000, -325.708),
+    ["Sam"] = Vector3.new(-1304.967, 218.062, -1352.638),
+    ["Gemologist"] = Vector3.new(-1233.042, 218.100, 633.124),
+}
+
+local Shop = {
+    ["Better Drink Merchant"] = Vector3.new(1492.026, 260.297, 2170.900),
+    ["Boat Merchant (Main)"] = Vector3.new(-133.436, 216.000, -669.301),
+    ["Boat Merchant (Sam)"] = Vector3.new(-1251.926, 218.209, -1173.319),
+    ["Fred The Blacksmith"] = Vector3.new(-1071.015, 360.792, 1663.899),
+    ["Lucy"] = Vector3.new(800.032, 230.358, 5352.617),
+    ["Sniper Merchant"] = Vector3.new(-1843.401, 222.000, 3414.160),
+    ["Sword Merchant"] = Vector3.new(1000.400, 224.000, -3338.100),
+    ["Boat Merchant (One House)"] = Vector3.new(588.943, 216.102, 1164.866),
+    ["Boat Merchant (Cave)"] = Vector3.new(2090.621, 215.960, -354.880),
+    ["Drink Merchant"] = Vector3.new(-1281.600, 218.297, -1369.100),
+    ["Anna"] = Vector3.new(1110.400, 217.000, 3367.900),
+    ["Boat Merchant (Water)"] = Vector3.new(0.214, 216.046, -414.085),
+    ["Dancer"] = Vector3.new(1518.810, 260.384, 2164.469),
+    ["Mad Scientist"] = Vector3.new(-2599.496, 253.769, 1088.038),
+}
+
+local Quest = {
+    ["Guard Captain"] = Vector3.new(-50.933, 259.483, 333.586),
+    ["Marge Nospmis"] = Vector3.new(-101.901, 224.198, -74.555),
+    ["Rayleigh"] = Vector3.new(-1009.754, 4011.465, 10135.117),
+    ["Fallen Captain"] = Vector3.new(-236.842, 217.000, -865.110),
+    ["Traceur"] = Vector3.new(-293.384, 305.883, -578.215),
+    ["Old Beggar"] = Vector3.new(186.882, 216.000, -140.655),
+    ["Joe"] = Vector3.new(-58.575, 216.100, -315.145),
+    ["Chill Billy"] = Vector3.new(35.894, 229.416, -191.397),
+    ["Bandits Leader"] = Vector3.new(34.274, 296.000, -823.462),
+    ["Demon Hunter"] = Vector3.new(-50.477, 217.080, -912.140),
+    ["Explorer"] = Vector3.new(-519.591, 216.100, -891.129),
+}
+
+local Secret = {
+    ["Lord"] = Vector3.new(1787.769, 642.033, 13022.767),
+    ["Strange Dealer"] = Vector3.new(1245.006, 224.300, -3239.817),
+    ["Bart Nospmis"] = Vector3.new(-433.215, 214.821, -172.187),
+}
+
 local FarmTab = Window:Tab({ Title = "Farm", Icon = "solar:leaf-bold" })
 local ConfigFarmTab = Window:Tab({ Title = "Config Farm", Icon = "solar:cpu-bold" })
 local TeleportTab = Window:Tab({ Title = "Teleport", Icon = "solar:planet-bold" })
@@ -1254,7 +1689,6 @@ local PlayerTab = Window:Tab({ Title = "Player", Icon = "lucide:users" })
 local QuestTab = Window:Tab({ Title = "Quest", Icon = "solar:crown-bold" })
 local MiscTab = Window:Tab({ Title = "Misc", Icon = "solar:settings-bold" })
 
--- Farm Tab
 local FarmSection = FarmTab:Section({ Title = "Auto Farm", Opened = true })
 
 FarmSection:Button({
@@ -1318,6 +1752,9 @@ FarmSection:Toggle({
     Value = false,
     Callback = function(v)
         ChestEnabled = v
+        if not v then
+            AutoChestForOldBook = false
+        end
     end
 })
 
@@ -1352,16 +1789,6 @@ BringSection:Toggle({
     end
 })
 
-BringSection:Toggle({
-    Title = "Auto Bring Old Book",
-    Flag = "AutoBringOldBook",
-    Value = false,
-    Callback = function(v)
-        AutoBringOldBook = v
-    end
-})
-
--- Config Farm Tab
 local ConfigSection = ConfigFarmTab:Section({ Title = "Auto Skill", Opened = true })
 
 ConfigSection:Toggle({
@@ -1402,165 +1829,134 @@ HakiSection:Toggle({
     end
 })
 
--- Teleport Tab
-local TeleportSection = TeleportTab:Section({ Title = "Teleport", Opened = true })
+local IslandSection = TeleportTab:Section({ Title = "Islands", Opened = true })
 
-local Islands = {
-    ["Sam"] = Vector3.new(-1282.53, 218.00, -1347.59),
-    ["Fisher"] = Vector3.new(-1689.73, 216.00, -320.37),
-    ["SectorG9"] = Vector3.new(-2681.07, 216.00, -943.29),
-    ["MarineFord"] = Vector3.new(-3310.71, 300.75, -3286.47),
-    ["Purple Island"] = Vector3.new(-5273.88, 519.50, -7845.15),
-    ["Water tower"] = Vector3.new(-233.99, 226.00, -1026.76),
-    ["WindMills"] = Vector3.new(65.12, 224.00, -35.69),
-    ["OneHouse"] = Vector3.new(720.87, 241.00, 1214.81),
-    ["restaurant"] = Vector3.new(1954.35, 218.00, 610.74),
-    ["KingCrab"] = Vector3.new(1215.75, 243.00, -268.88),
-    ["CaveIsland"] = Vector3.new(2052.59, 491.00, -656.71),
-    ["BigTree"] = Vector3.new(2051.62, 288.00, -1871.25),
-    ["Krizma Island"] = Vector3.new(-1072.04, 361.00, 1677.36),
-    ["Gun Island"] = Vector3.new(-1846.41, 222.00, 3402.44),
-    ["Accient Island"] = Vector3.new(-2721.82, 252.69, 1153.06),
-    ["C Island"] = Vector3.new(2953.90, 217.00, 1394.13),
-    ["Bar Island"] = Vector3.new(1481.25, 263.90, 2117.69),
-    ["Anna House"] = Vector3.new(1118.05, 217.20, 3353.08),
-    ["Crocodile Land"] = Vector3.new(948.70, 392.59, 5014.60),
-    ["Three Tree"] = Vector3.new(-5703.31, 216.00, 123.44),
-    ["Hole Land"] = Vector3.new(-10913.88, 551.00, 5063.75),
-    ["Many Land"] = Vector3.new(-9258.29, 216.00, -3025.81),
-    ["Haki Land"] = Vector3.new(-1002.16, 4010.97, 10158.25),
-    ["Vokun Land"] = Vector3.new(4685.26, 217.00, 4817.13),
-    ["BigSnow"] = Vector3.new(6275.28, 487.00, -1829.30),
-}
-
-local IslandNamesList = {"None"}
+local IslandNamesList = {}
 for name in pairs(Islands) do
     table.insert(IslandNamesList, name)
 end
 table.sort(IslandNamesList)
 
-TeleportSection:Dropdown({
+IslandSection:Dropdown({
     Title = "Select Island",
     Values = IslandNamesList,
     Value = "None",
     Callback = function(v)
         if v ~= "None" and Islands[v] then
-            local char = getCharacter()
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                pcall(function()
-                    hrp.CFrame = CFrame.new(Islands[v]) + Vector3.new(0, 3, 0)
-                end)
-                WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. v, Duration = 2 })
-            end
+            tweenToPosition(Islands[v], nil, true)
+            WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. v, Duration = 2 })
         end
     end
 })
 
-TeleportSection:Divider()
+IslandSection:Divider()
 
-local ShopNPCs = {
-    ["Sniper Shop"] = Vector3.new(-1843.3797607421875, 221.99998474121094, 3409.400634765625),
-    ["Sword Shop"] = Vector3.new(1005.53515625, 223.99998474121094, -3337.915283203125),
-    ["Strange Dealer"] = Vector3.new(1240.8421630859375, 224.20001220703125, -3240.296875),
-}
+local DailySection = TeleportTab:Section({ Title = "Daily Quest", Opened = true })
 
-local ShopNames = {"None"}
-for name in pairs(ShopNPCs) do
+local DailyNames = {}
+for name in pairs(DailyQuest) do
+    table.insert(DailyNames, name)
+end
+table.sort(DailyNames)
+
+DailySection:Dropdown({
+    Title = "Select Daily Quest NPC",
+    Values = DailyNames,
+    Value = "None",
+    Callback = function(v)
+        if v ~= "None" and DailyQuest[v] then
+            tweenToPosition(DailyQuest[v], nil, true)
+            WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. v, Duration = 2 })
+        end
+    end
+})
+
+DailySection:Divider()
+
+local ShopSection = TeleportTab:Section({ Title = "Shops", Opened = true })
+
+local ShopNames = {}
+for name in pairs(Shop) do
     table.insert(ShopNames, name)
 end
 table.sort(ShopNames)
 
-TeleportSection:Dropdown({
-    Title = "Shop Teleport",
+ShopSection:Dropdown({
+    Title = "Select Shop",
     Values = ShopNames,
     Value = "None",
     Callback = function(v)
-        if v ~= "None" and ShopNPCs[v] then
-            local char = getCharacter()
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                pcall(function()
-                    hrp.CFrame = CFrame.new(ShopNPCs[v]) + Vector3.new(0, 3, 0)
-                end)
-                WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. v, Duration = 2 })
-            end
+        if v ~= "None" and Shop[v] then
+            tweenToPosition(Shop[v], nil, true)
+            WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. v, Duration = 2 })
         end
     end
 })
 
-TeleportSection:Divider()
+ShopSection:Divider()
 
-local QuestNPCs = {
-    ["Daily Quest"] = Vector3.new(-2606.061279296875, 253.69842529296875, 1087.8436279296875),
-    ["Sam Quest"] = Vector3.new(-1303.5345458984375, 217.99998474121094, -1352.5908203125),
-    ["Krizma Sword"] = Vector3.new(-1074.173828125, 360.999694824219, 1666.887084969375),
-    ["Mode Position"] = Vector3.new(2053.41552734375, 497.69830322265625, -614.63305640625),
-}
+local QuestSectionTP = TeleportTab:Section({ Title = "Quest NPCs", Opened = true })
 
-local QuestNames = {"None"}
-for name in pairs(QuestNPCs) do
+local QuestNames = {}
+for name in pairs(Quest) do
     table.insert(QuestNames, name)
 end
 table.sort(QuestNames)
 
-TeleportSection:Dropdown({
-    Title = "Quest NPC Teleport",
+QuestSectionTP:Dropdown({
+    Title = "Select Quest NPC",
     Values = QuestNames,
     Value = "None",
     Callback = function(v)
-        if v ~= "None" and QuestNPCs[v] then
-            local char = getCharacter()
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                pcall(function()
-                    hrp.CFrame = CFrame.new(QuestNPCs[v]) + Vector3.new(0, 3, 0)
-                end)
-                WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. v, Duration = 2 })
-            end
+        if v ~= "None" and Quest[v] then
+            tweenToPosition(Quest[v], nil, true)
+            WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. v, Duration = 2 })
         end
     end
 })
 
-TeleportSection:Divider()
+QuestSectionTP:Divider()
 
-local MiscNPCs = {
-    ["Stats Fruit Roll"] = Vector3.new(801.1287231445312, 230.37062072753906, 5354.083984375),
-    ["Roll Stats Fruit"] = Vector3.new(801.3805541992188, 230.37062072753906, 5353.8662109375),
-}
+local SecretSection = TeleportTab:Section({ Title = "Secret Locations", Opened = true })
 
-local MiscNames = {"None"}
-for name in pairs(MiscNPCs) do
-    table.insert(MiscNames, name)
+local SecretNames = {}
+for name in pairs(Secret) do
+    table.insert(SecretNames, name)
 end
-table.sort(MiscNames)
+table.sort(SecretNames)
 
-TeleportSection:Dropdown({
-    Title = "Misc NPC Teleport",
-    Values = MiscNames,
+SecretSection:Dropdown({
+    Title = "Select Secret Location",
+    Values = SecretNames,
     Value = "None",
     Callback = function(v)
-        if v ~= "None" and MiscNPCs[v] then
-            local char = getCharacter()
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                pcall(function()
-                    hrp.CFrame = CFrame.new(MiscNPCs[v]) + Vector3.new(0, 3, 0)
-                end)
-                WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. v, Duration = 2 })
-            end
+        if v ~= "None" and Secret[v] then
+            tweenToPosition(Secret[v], nil, true)
+            WindUI:Notify({ Title = "Teleport", Content = "Teleported to " .. v, Duration = 2 })
         end
     end
 })
 
-TeleportSection:Button({
+SecretSection:Divider()
+
+local SpecialSection = TeleportTab:Section({ Title = "Special", Opened = true })
+
+SpecialSection:Button({
     Title = "Teleport to Rayleigh",
+    Icon = "crown",
     Callback = function()
         teleportToRayleigh()
     end
 })
 
--- Player Tab
+SpecialSection:Button({
+    Title = "Teleport to Stats Fruit Roll",
+    Icon = "dice",
+    Callback = function()
+        tweenToPosition(Vector3.new(801.1287231445312, 230.37062072753906, 5354.083984375), nil, true)
+    end
+})
+
 local PlayersSection = PlayerTab:Section({ Title = "Player Control", Opened = true })
 
 mainPlayerDropdown = PlayersSection:Dropdown({
@@ -1694,7 +2090,6 @@ espToggleObj = UtilitySection:Toggle({
     end
 })
 
--- Quest Tab
 local QuestSection = QuestTab:Section({ Title = "Haki Quest", Opened = true })
 
 QuestSection:Toggle({
@@ -1707,7 +2102,34 @@ QuestSection:Toggle({
             CollectedRings = {}
             currentRingIndex = 1
             RingTweenActive = false
+            RingCollecting = false
         end
+    end
+})
+
+QuestSection:Toggle({
+    Title = "Auto Collect OldBook",
+    Flag = "AutoBringOldBookQuest",
+    Value = false,
+    Callback = function(v)
+        AutoBringOldBook = v
+        if v then
+            WindUI:Notify({ Title = "OldBook", Content = "Auto Collect OldBook enabled", Duration = 2 })
+        else
+            if AutoChestForOldBook then
+                ChestEnabled = false
+                AutoChestForOldBook = false
+            end
+            WindUI:Notify({ Title = "OldBook", Content = "Auto Collect OldBook disabled", Duration = 2 })
+        end
+    end
+})
+
+QuestSection:Button({
+    Title = "Teleport to Shop Emotes",
+    Icon = "shopping-bag",
+    Callback = function()
+        teleportToShopEmotes()
     end
 })
 
@@ -1724,6 +2146,7 @@ QuestSection:Button({
         CollectedRings = {}
         currentRingIndex = 1
         RingTweenActive = false
+        RingCollecting = false
         WindUI:Notify({ Title = "Reset", Content = "Progress reset", Duration = 2 })
     end
 })
@@ -1754,7 +2177,6 @@ FishingSection:Toggle({
     end
 })
 
--- Misc Tab
 local MiscSection = MiscTab:Section({ Title = "Settings", Opened = true })
 
 MiscSection:Toggle({
@@ -1767,32 +2189,23 @@ MiscSection:Toggle({
     end
 })
 
-MiscSection:Divider()
-
-local ThemeSection = MiscTab:Section({ Title = "Themes", Opened = true })
-
-local themes = {
-    "Dark", "Light", "Mellowsi", "Dracula", "Catppuccin",
-    "Tokyo Night", "Nord", "Gruvbox", "Solarized Dark"
-}
-
-for _, theme in ipairs(themes) do
-    ThemeSection:Button({
-        Title = theme,
-        Callback = function()
-            Window:SetTheme(theme)
-            WindUI:Notify({ Title = "Theme", Content = theme .. " applied", Duration = 2 })
-        end
-    })
-end
+MiscSection:Slider({
+    Title = "Tween Speed",
+    Flag = "TweenSpeed",
+    Value = { Min = 0.5, Max = 3.0, Default = 1.0 },
+    Step = 0.1,
+    Callback = function(v)
+        TweenSpeed = v
+    end
+})
 
 MiscSection:Divider()
 
 local InfoSection = MiscTab:Section({ Title = "Info", Opened = true })
 
 InfoSection:Paragraph({
-    Title = "SON HUB V3.5",
-    Desc = "Created by SonDepTrai\nVersion 3.5\nDiscord: https://discord.gg/faZagWVm72",
+    Title = "SON HUB V4",
+    Desc = "Created by SonDepTrai\nVersion 4\nDiscord: https://discord.gg/faZagWVm72",
     Image = "info",
     ImageSize = 20,
 })
@@ -1806,7 +2219,6 @@ InfoSection:Button({
     end
 })
 
--- Events
 Players.PlayerAdded:Connect(function()
     task.wait(0.5)
     local newList = GetPlayerList()
@@ -1863,7 +2275,6 @@ Players.PlayerRemoving:Connect(function()
     end
 end)
 
--- Hide nametag
 HideNametag()
 Player.PlayerGui.DescendantAdded:Connect(function(desc)
     task.wait(0.1)
@@ -1874,7 +2285,6 @@ Player.PlayerGui.DescendantAdded:Connect(function(desc)
     end
 end)
 
--- Check admins
 CheckForAdmins()
 Players.PlayerAdded:Connect(function(player)
     task.wait(0.5)
@@ -1882,7 +2292,7 @@ Players.PlayerAdded:Connect(function(player)
         WindUI:Notify({ Title = "Admin Joined", Content = player.Name .. " joined! Leaving...", Duration = 3 })
         task.wait(1)
         pcall(function()
-            game:GetService("TeleportService"):Teleport(game.PlaceId)
+            TeleportService:Teleport(game.PlaceId)
         end)
     end
 end)
@@ -1893,7 +2303,6 @@ task.spawn(function()
     end
 end)
 
--- Create toggle button for mobile/desktop
 local toggleSize = isMobile and 50 or 65
 local togglePos = isMobile and 60 or 90
 
@@ -1953,5 +2362,4 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- Notify
-WindUI:Notify({ Title = "SON HUB V3.5", Content = "Loaded Successfully!", Duration = 3 })
+WindUI:Notify({ Title = "SON HUB V4", Content = "Loaded Successfully!", Duration = 3 })
