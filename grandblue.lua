@@ -1,6 +1,6 @@
 -- SON HUB v19 | Nexomia snapshot rebuild | hongson
 
-local VERSION = "19.0.0"
+local VERSION = "20.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -91,7 +91,75 @@ local Workspace = workspace
 local ExecutorCaps = {
     Http = false,
     Request = type(requestFn) == "function",
+    VirtualInput = VirtualInputManager ~= nil,
+    FireSignal = type(fireSignalFn) == "function",
+    FirePrompt = type(firePromptFn) == "function",
+    Clipboard = type(clipboardFn) == "function",
 }
+
+local Compat = {}
+
+local function markCap(name, ok)
+    if ok == false then
+        ExecutorCaps[name] = false
+    elseif ExecutorCaps[name] == nil then
+        ExecutorCaps[name] = ok == true
+    end
+    return ok
+end
+
+function Compat.Key(held, key)
+    if not ExecutorCaps.VirtualInput or not VirtualInputManager or not key then
+        return false
+    end
+    local ok = pcall(function()
+        VirtualInputManager:SendKeyEvent(held, key, false, game)
+    end)
+    markCap("VirtualInput", ok)
+    return ok
+end
+
+function Compat.Mouse(x, y, held)
+    if not ExecutorCaps.VirtualInput or not VirtualInputManager then
+        return false
+    end
+    local ok = pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, held, game, 0)
+    end)
+    markCap("VirtualInput", ok)
+    return ok
+end
+
+function Compat.FireSignal(signal)
+    if not ExecutorCaps.FireSignal or not fireSignalFn or not signal then
+        return false
+    end
+    local ok = pcall(fireSignalFn, signal)
+    markCap("FireSignal", ok)
+    return ok
+end
+
+function Compat.FirePrompt(prompt, holdDuration)
+    if not ExecutorCaps.FirePrompt or not firePromptFn or not prompt then
+        return false
+    end
+    local ok = pcall(
+        firePromptFn,
+        prompt,
+        math.max(0, tonumber(holdDuration) or 0)
+    )
+    markCap("FirePrompt", ok)
+    return ok
+end
+
+function Compat.Clipboard(text)
+    if not ExecutorCaps.Clipboard or not clipboardFn then
+        return false
+    end
+    local ok = pcall(clipboardFn, tostring(text or ""))
+    markCap("Clipboard", ok)
+    return ok
+end
 
 local function fetchText(url)
     local okHttp, body = pcall(function()
@@ -161,6 +229,7 @@ local Core = {
     Connections = {},
     Instances = {},
     CollisionBackup = setmetatable({}, {__mode = "k"}),
+    HitboxBackup = setmetatable({}, {__mode = "k"}),
 }
 
 local Config = {
@@ -205,6 +274,9 @@ local Config = {
     -- Combat
     AutoBlock = false,
     BlockHealthPercent = 40,
+    MobHitbox = false,
+    MobHitboxSize = 10,
+    MobHitboxTransparency = 0.72,
 
     -- Stats
     AutoStats = false,
@@ -623,11 +695,11 @@ local function pressKey(key, holdTime)
 
     holdTime = holdTime or 0.035
 
-    return pcall(function()
-        VirtualInputManager:SendKeyEvent(true, key, false, game)
-        task.wait(holdTime)
-        VirtualInputManager:SendKeyEvent(false, key, false, game)
-    end)
+    if not Compat.Key(true, key) then
+        return false
+    end
+    task.wait(holdTime)
+    return Compat.Key(false, key)
 end
 
 local function mouseClickAt(x, y)
@@ -635,11 +707,11 @@ local function mouseClickAt(x, y)
         return false
     end
 
-    return pcall(function()
-        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
-        task.wait(0.025)
-        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
-    end)
+    if not Compat.Mouse(x, y, true) then
+        return false
+    end
+    task.wait(0.025)
+    return Compat.Mouse(x, y, false)
 end
 
 local function mouseClickCenter()
@@ -653,9 +725,7 @@ local function mouseButtonAt(x, y, held)
         return false
     end
 
-    return pcall(function()
-        VirtualInputManager:SendMouseButtonEvent(x, y, 0, held, game, 0)
-    end)
+    return Compat.Mouse(x, y, held)
 end
 
 local function screenPointOf(object)
@@ -678,14 +748,8 @@ local function clickButton(button, allowHiddenSignal)
         return false
     end
 
-    if type(fireSignalFn) == "function" then
-        local ok = pcall(function()
-            fireSignalFn(button.Activated)
-        end)
-
-        if ok then
-            return true
-        end
+    if Compat.FireSignal(button.Activated) then
+        return true
     end
 
     if allowHiddenSignal ~= true and not isGuiVisible(button) then
@@ -3232,14 +3296,8 @@ function InteractionService.FirePrompt(prompt)
         return false
     end
 
-    if firePromptFn then
-        local ok = pcall(function()
-            firePromptFn(prompt, math.max(0, prompt.HoldDuration or 0))
-        end)
-
-        if ok then
-            return true
-        end
+    if Compat.FirePrompt(prompt, prompt.HoldDuration) then
+        return true
     end
 
     return pressKey(
@@ -3527,10 +3585,7 @@ function InteractionService.InteractWithQuestNPC(object, questName)
     end
 
     -- Executor helper is only fallback because some custom prompts ignore it.
-    if firePromptFn then
-        pcall(function()
-            firePromptFn(prompt, math.max(0, prompt.HoldDuration or 0))
-        end)
+    if Compat.FirePrompt(prompt, prompt.HoldDuration) then
         task.wait(0.08)
     end
 
@@ -3551,7 +3606,7 @@ local function setBlock(held)
     Runtime.BlockHeld = held
 
     pcall(function()
-        VirtualInputManager:SendKeyEvent(held, Enum.KeyCode.F, false, game)
+        Compat.Key(held, Enum.KeyCode.F)
     end)
 end
 
@@ -3888,14 +3943,7 @@ local function setFishingMouseHeld(held)
     local viewport = camera and camera.ViewportSize or Vector2.new(800, 600)
 
     pcall(function()
-        VirtualInputManager:SendMouseButtonEvent(
-            viewport.X / 2,
-            viewport.Y / 2,
-            0,
-            held,
-            game,
-            0
-        )
+        Compat.Mouse(viewport.X / 2, viewport.Y / 2, held)
     end)
 end
 
@@ -3908,7 +3956,7 @@ local function releaseFishingKey()
     Runtime.FishingKeyHeld = nil
 
     pcall(function()
-        VirtualInputManager:SendKeyEvent(false, key, false, game)
+        Compat.Key(false, key)
     end)
 end
 
@@ -3921,7 +3969,7 @@ local function holdFishingKey(key)
     Runtime.FishingKeyHeld = key
 
     pcall(function()
-        VirtualInputManager:SendKeyEvent(true, key, false, game)
+        Compat.Key(true, key)
     end)
 end
 
@@ -6517,6 +6565,109 @@ function AutoFarmController.Step()
 end
 
 -- ============================================================
+-- Mob hitbox (local, reversible)
+-- ============================================================
+
+HitboxService = {}
+
+local function hitboxPart(model)
+    if not model or not model.Parent then
+        return nil
+    end
+    local part = model:FindFirstChild("HumanoidRootPart")
+        or model.PrimaryPart
+        or model:FindFirstChild("UpperTorso")
+        or model:FindFirstChild("Torso")
+    return part and part:IsA("BasePart") and part or nil
+end
+
+function HitboxService.RestorePart(part)
+    local backup = Core.HitboxBackup[part]
+    if not backup then
+        return
+    end
+    if part and part.Parent then
+        pcall(function()
+            part.Size = backup.Size
+            part.Transparency = backup.Transparency
+            part.CanCollide = backup.CanCollide
+            part.CanTouch = backup.CanTouch
+            part.Massless = backup.Massless
+        end)
+    end
+    Core.HitboxBackup[part] = nil
+end
+
+function HitboxService.RestoreAll()
+    local parts = {}
+    for part in pairs(Core.HitboxBackup) do
+        table.insert(parts, part)
+    end
+    for _, part in ipairs(parts) do
+        HitboxService.RestorePart(part)
+    end
+end
+
+function HitboxService.Apply(model)
+    if not Config.MobHitbox or not TargetService.IsAliveNPC(model)
+        or TargetService.IsDialogueNPC(model) then
+        return false
+    end
+
+    local part = hitboxPart(model)
+    if not part then
+        return false
+    end
+
+    if not Core.HitboxBackup[part] then
+        Core.HitboxBackup[part] = {
+            Size = part.Size,
+            Transparency = part.Transparency,
+            CanCollide = part.CanCollide,
+            CanTouch = part.CanTouch,
+            Massless = part.Massless,
+        }
+    end
+
+    local size = math.clamp(tonumber(Config.MobHitboxSize) or 10, 4, 20)
+    pcall(function()
+        part.Size = Vector3.new(size, size, size)
+        part.Transparency = math.clamp(tonumber(Config.MobHitboxTransparency) or 0.72, 0, 1)
+        part.CanCollide = false
+        part.CanTouch = false
+        part.Massless = true
+    end)
+    return true
+end
+
+function HitboxService.Step()
+    if not Config.MobHitbox then
+        HitboxService.RestoreAll()
+        return
+    end
+
+    local active = {}
+    for model in pairs(Runtime.Entities) do
+        if TargetService.IsHostile(model) then
+            local part = hitboxPart(model)
+            if part and HitboxService.Apply(model) then
+                active[part] = true
+            end
+        end
+    end
+
+    local stale = {}
+    for part in pairs(Core.HitboxBackup) do
+        if not active[part] or not part.Parent then
+            table.insert(stale, part)
+        end
+    end
+    for _, part in ipairs(stale) do
+        HitboxService.RestorePart(part)
+    end
+end
+
+-- ============================================================
 -- ESP
 -- ============================================================
 
@@ -7141,6 +7292,17 @@ end)
 
 task.spawn(function()
     while Core.Running do
+        if Config.MobHitbox then
+            safeWorker("Hitbox", HitboxService.Step)
+        elseif next(Core.HitboxBackup) ~= nil then
+            safeWorker("Hitbox", HitboxService.RestoreAll)
+        end
+        task.wait(Config.MobHitbox and 0.25 or 1.0)
+    end
+end)
+
+task.spawn(function()
+    while Core.Running do
         local active =
             Config.CurrentTargetESP
             or Config.PlayerESP
@@ -7488,6 +7650,7 @@ local function workerHealth()
         "Stats",
         "Block",
         "Claims",
+        "Hitbox",
         "ESP",
     }
 
@@ -7518,13 +7681,14 @@ local function executorStatus()
         "loadstring: " .. tostring(type(loadstring) == "function"),
         "HTTP: " .. tostring(ExecutorCaps.Http),
         "request fallback: " .. tostring(ExecutorCaps.Request),
-        "VirtualInputManager: " .. tostring(VirtualInputManager ~= nil),
-        "fireproximityprompt: " .. tostring(type(firePromptFn) == "function"),
-        "firesignal: " .. tostring(type(fireSignalFn) == "function"),
-        "setclipboard: " .. tostring(type(clipboardFn) == "function"),
-        "WebSocket: unused",
-        "getscriptclosure: unused",
-        "filesystem addons: unused",
+        "VirtualInput: " .. tostring(ExecutorCaps.VirtualInput),
+        "fireproximityprompt: " .. tostring(ExecutorCaps.FirePrompt),
+        "firesignal: " .. tostring(ExecutorCaps.FireSignal),
+        "setclipboard: " .. tostring(ExecutorCaps.Clipboard),
+        "UNC mode: capability-based (partial support OK)",
+        "WebSocket: not required",
+        "getscriptclosure: not required",
+        "filesystem: not required",
     }, "\n")
 end
 
@@ -7704,6 +7868,19 @@ end)
 bindSlider(CombatSection, "FarmAnchorHeight", "Anchor Y Offset", 0, 3, Config.FarmAnchorHeight, function(value)
     Config.FarmAnchorHeight = value
     MobGatherService.Reset()
+end)
+
+bindToggle(CombatSection, "MobHitbox", "Mob Hitbox", Config.MobHitbox, function(value)
+    Config.MobHitbox = value
+    if not value then
+        HitboxService.RestoreAll()
+    else
+        HitboxService.Step()
+    end
+end)
+
+bindSlider(CombatSection, "MobHitboxSize", "Hitbox Size", 4, 20, Config.MobHitboxSize, function(value)
+    Config.MobHitboxSize = value
 end)
 
 local HomeState = Tabs.Home:AddSection("State")
@@ -8092,6 +8269,29 @@ TestSection:AddButton({
     end,
 })
 
+local CleanSection = Tabs.Settings:AddSection("Clean / Compatibility")
+CleanSection:AddButton({
+    Title = "Clean Runtime State",
+    Callback = function()
+        HitboxService.RestoreAll()
+        restoreCollision()
+        MotionController.Release(Runtime.Motion.Owner, true)
+        FishingService.Reset("Manual clean")
+        MiningQTEService.Reset("Manual clean")
+        Runtime.CurrentTarget = nil
+        Runtime.CurrentWantedMob = nil
+        MobGatherService.Reset("Manual clean")
+        notify("Clean", "Runtime state restored", 4)
+    end,
+})
+
+CleanSection:AddButton({
+    Title = "Executor Compatibility",
+    Callback = function()
+        notify("Compatibility", executorStatus(), 10)
+    end,
+})
+
 local RiskSection = Tabs.Test:AddSection("Duplicate Risk")
 RiskSection:AddButton({
     Title = "Scan Duplicate-Risk Surfaces",
@@ -8120,6 +8320,7 @@ local function unload()
     Config.AutoFarming = false
     Config.AutoStats = false
     Config.AutoBlock = false
+    Config.MobHitbox = false
 
     pcall(function()
         FishingService.Reset("Unload")
@@ -8127,9 +8328,6 @@ local function unload()
 
     pcall(function()
         MiningQTEService.Reset("Unload")
-    end)
-
-    pcall(function()
     end)
 
     pcall(function()
@@ -8142,6 +8340,10 @@ local function unload()
 
     pcall(function()
         restoreCollision()
+    end)
+
+    pcall(function()
+        HitboxService.RestoreAll()
     end)
 
     Runtime.BlockHeld = false
