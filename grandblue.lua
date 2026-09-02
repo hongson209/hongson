@@ -14,7 +14,7 @@
       - Large Workspace scan occurs once; caches update incrementally.
 ]]
 
-local VERSION = "12.1.0"
+local VERSION = "13.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -187,7 +187,7 @@ local Config = {
     SelectedMob = "Nearest Hostile",
 
     -- Auto Farm combat
-    AutoAttack = true,
+    AutoAttack = false,
     AttackRate = 8,
     SelectedWeapon = "Auto",
     AutoMastery = true,
@@ -215,19 +215,19 @@ local Config = {
     PlatformNoclip = true,
 
     -- Bring + hitbox
-    BringMobs = true,
+    BringMobs = false,
     BringRadius = 135,
     BringLimit = 12,
     MobBelowFeet = 9,
     BringSpread = 1.5,
 
-    MobHitbox = true,
+    MobHitbox = false,
     HitboxSize = 24,
     HitboxTransparency = 0.72,
     HitboxRange = 190,
 
     -- Combat
-    AutoAim = true,
+    AutoAim = false,
     AutoBlock = false,
     BlockHealthPercent = 40,
 
@@ -325,6 +325,12 @@ local Runtime = {
         InteractionArrivedAt = 0,
         PromptAttemptAt = 0,
         PromptAttemptCount = 0,
+
+        LockedQuestId = nil,
+        LockedTaskOrder = nil,
+        LockedTaskKind = nil,
+        LockedTaskTarget = nil,
+        LockedTaskUntil = 0,
     },
 
     FarmMovePart = nil,
@@ -340,6 +346,7 @@ local Runtime = {
 
     LootRouteTarget = nil,
     LootRouteKind = nil,
+    PromptUseAt = setmetatable({}, {__mode = "k"}),
 
     CurrentTarget = nil,
     CurrentWantedMob = nil,
@@ -1196,6 +1203,78 @@ function QuestService.GetNextTask()
     return bestQuest, bestTask
 end
 
+
+local function sameQuestId(a, b)
+    return tostring(a) == tostring(b)
+end
+
+function QuestService.ClearTaskLock()
+    local fsm = Runtime.FarmFSM
+    fsm.LockedQuestId = nil
+    fsm.LockedTaskOrder = nil
+    fsm.LockedTaskKind = nil
+    fsm.LockedTaskTarget = nil
+    fsm.LockedTaskUntil = 0
+end
+
+local function lockQuestTask(quest, taskData)
+    local fsm = Runtime.FarmFSM
+    fsm.LockedQuestId = quest and quest.Id or nil
+    fsm.LockedTaskOrder = taskData and taskData.LayoutOrder or nil
+    fsm.LockedTaskKind = taskData and taskData.Kind or nil
+    fsm.LockedTaskTarget = taskData and taskData.Target or nil
+
+    if taskData and taskData.EventGated then
+        fsm.LockedTaskUntil = os.clock() + 1.6
+    else
+        fsm.LockedTaskUntil = math.huge
+    end
+end
+
+local function findLockedTask()
+    local fsm = Runtime.FarmFSM
+
+    if fsm.LockedQuestId == nil then
+        return nil, nil
+    end
+
+    if os.clock() > (fsm.LockedTaskUntil or 0) then
+        QuestService.ClearTaskLock()
+        return nil, nil
+    end
+
+    for _, quest in ipairs(QuestService.GetActiveQuests()) do
+        if sameQuestId(quest.Id, fsm.LockedQuestId) then
+            for _, taskData in ipairs(quest.Tasks) do
+                if not taskData.Complete
+                    and taskData.LayoutOrder == fsm.LockedTaskOrder
+                    and taskData.Kind == fsm.LockedTaskKind
+                    and taskData.Target == fsm.LockedTaskTarget then
+                    return quest, taskData
+                end
+            end
+        end
+    end
+
+    QuestService.ClearTaskLock()
+    return nil, nil
+end
+
+function QuestService.GetStableTask()
+    local quest, taskData = findLockedTask()
+    if quest and taskData then
+        return quest, taskData
+    end
+
+    quest, taskData = QuestService.GetNextTask()
+
+    if quest and taskData then
+        lockQuestTask(quest, taskData)
+    end
+
+    return quest, taskData
+end
+
 function QuestService.GetCompletedQuest()
     for _, quest in ipairs(QuestService.GetActiveQuests()) do
         if quest.Complete then
@@ -1234,9 +1313,16 @@ function QuestService.StateKey()
         return "complete|" .. tostring(completed.Id) .. "|" .. completed.Name
     end
 
-    local quest, taskData = QuestService.GetNextTask()
+    local quest, taskData = QuestService.GetStableTask()
     if quest and taskData then
-        return "task|" .. tostring(quest.Id) .. "|" .. quest.Name .. "|" .. taskData.Text
+        return "task|"
+            .. tostring(quest.Id)
+            .. "|"
+            .. tostring(taskData.LayoutOrder)
+            .. "|"
+            .. taskData.Kind
+            .. "|"
+            .. taskData.Target
     end
 
     local recommended = QuestService.GetRecommended()
@@ -2046,7 +2132,7 @@ function PlatformTransport.Ensure()
     part = Instance.new("Part")
     part.Name = PLATFORM_NAME
     part.Anchored = true
-    part.CanCollide = true
+    part.CanCollide = false
     part.CanTouch = false
     part.CanQuery = false
     part.CastShadow = false
@@ -2411,67 +2497,8 @@ local function farmAnchorGround(anchor)
 end
 
 function BringService.Step(wanted, anchor)
-    if not Config.BringMobs or not anchor then
-        return 0
-    end
-
-    local now = os.clock()
-    if now - Runtime.LastBring < 0.14 then
-        return 0
-    end
-    Runtime.LastBring = now
-
-    local ground = farmAnchorGround(anchor)
-    if not ground then
-        return 0
-    end
-
-    local count = 0
-    local bossAllowed = farmTargetAllowsBoss(wanted)
-
-    for model in pairs(Runtime.Entities) do
-        if count >= Config.BringLimit then
-            break
-        end
-
-        if model
-            and model.Parent
-            and TargetService.IsFarmMob(model, wanted)
-            and (
-                not TargetService.IsBoss(model)
-                or bossAllowed
-            ) then
-
-            local part = model:FindFirstChild("HumanoidRootPart")
-                or objectRoot(model)
-
-            if part
-                and not part.Anchored
-                and (part.Position - ground).Magnitude
-                    <= Config.BringRadius then
-
-                count += 1
-
-                local column = ((count - 1) % 3) - 1
-                local row = math.floor((count - 1) / 3)
-
-                local destination = anchor * CFrame.new(
-                    column * Config.BringSpread,
-                    -Config.MobBelowFeet,
-                    row * Config.BringSpread
-                )
-
-                pcall(function()
-                    part.AssemblyLinearVelocity = Vector3.zero
-                    part.AssemblyAngularVelocity = Vector3.zero
-                    part.CFrame = destination
-                end)
-            end
-        end
-    end
-
-    Runtime.LastBringCount = count
-    return count
+    Runtime.LastBringCount = 0
+    return 0
 end
 
 HitboxService = {}
@@ -2550,52 +2577,9 @@ function HitboxService.Apply(model, wanted)
 end
 
 function HitboxService.Step(wanted, anchor)
-    local now = os.clock()
-    if now - Runtime.LastHitbox < 0.15 then
-        return Runtime.LastHitboxCount
-    end
-    Runtime.LastHitbox = now
-
-    local keep = {}
-    local count = 0
-    local ground = farmAnchorGround(anchor)
-    local bossAllowed = farmTargetAllowsBoss(wanted)
-
-    if Config.MobHitbox then
-        for model in pairs(Runtime.Entities) do
-            if model
-                and model.Parent
-                and TargetService.IsFarmMob(model, wanted)
-                and (
-                    not TargetService.IsBoss(model)
-                    or bossAllowed
-                ) then
-
-                local part = objectRoot(model)
-                local inRange = not ground
-                    or (
-                        part
-                        and (part.Position - ground).Magnitude
-                            <= Config.HitboxRange
-                    )
-
-                if inRange then
-                    keep[model] = true
-                    count += 1
-                    HitboxService.Apply(model, wanted)
-                end
-            end
-        end
-    end
-
-    for model in pairs(Runtime.ExpandedHitboxes) do
-        if not keep[model] then
-            HitboxService.Restore(model)
-        end
-    end
-
-    Runtime.LastHitboxCount = count
-    return count
+    HitboxService.Clear()
+    Runtime.LastHitboxCount = 0
+    return 0
 end
 
 -- ============================================================
@@ -3153,56 +3137,16 @@ local function setBlock(held)
 end
 
 function CombatService.AimAt(model)
-    if not Config.AutoAim then
-        return
-    end
-
-    local root = rootPart()
-    local target = objectRoot(model)
-
-    if root and target then
-        local position = root.Position
-
-        pcall(function()
-            root.CFrame = CFrame.lookAt(
-                position,
-                Vector3.new(
-                    target.Position.X,
-                    position.Y,
-                    target.Position.Z
-                )
-            )
-        end)
-    end
+    return false
 end
 
 function CombatService.AttackStep()
-    if not Config.AutoAttack then
-        return
-    end
-
-    local now = os.clock()
-    local minimumDelay = 1 / math.max(1, Config.AttackRate)
-
-    if now - Runtime.LastAttack >= minimumDelay then
-        Runtime.LastAttack = now
-        mouseClickCenter()
-    end
+    return false
 end
 
 function CombatService.BlockStep()
-    if not Config.AutoBlock then
-        setBlock(false)
-        return
-    end
-
-    local target = Runtime.CurrentTarget
-    local shouldBlock = target
-        and target.Parent
-        and distanceTo(target) <= 25
-        and PlayerState.GetHealthPercent() <= Config.BlockHealthPercent
-
-    setBlock(shouldBlock == true)
+    setBlock(false)
+    return false
 end
 
 -- ============================================================
@@ -4510,6 +4454,22 @@ function LifeSkillService.FindNearestEnabledPrompt()
     return best, bestDistance
 end
 
+local function usePromptWithCooldown(prompt, cooldown)
+    if not prompt or not prompt.Parent then
+        return false
+    end
+
+    local now = os.clock()
+    local last = Runtime.PromptUseAt[prompt] or 0
+
+    if now - last < (cooldown or 0.75) then
+        return false
+    end
+
+    Runtime.PromptUseAt[prompt] = now
+    return InteractionService.FirePrompt(prompt)
+end
+
 function LifeSkillService.StepPrompts()
     local prompt, distance =
         LifeSkillService.FindNearestEnabledPrompt()
@@ -4553,7 +4513,22 @@ function LifeSkillService.StepPrompts()
         end
 
         if distance <= allowedDistance then
-            InteractionService.FirePrompt(prompt)
+            usePromptWithCooldown(
+                prompt,
+                isChest and 1.15 or 0.75
+            )
+        elseif isChest
+            and Config.AutoChestRoute
+            and (
+                Runtime.ProgressState == "QUEST_WAIT"
+                or Runtime.ProgressState == "REACH_WAIT_EVENT"
+                or Runtime.ProgressState == "MANUAL_COMBAT"
+            ) then
+            FarmMovement.GoNear(
+                prompt,
+                2.5,
+                2.5
+            )
         end
 
         return
@@ -4582,7 +4557,7 @@ function LifeSkillService.StepPrompts()
         end
 
         FarmMovement.Stop(false, true)
-        InteractionService.FirePrompt(prompt)
+        usePromptWithCooldown(prompt, 1.15)
         return
     end
 
@@ -4596,7 +4571,7 @@ function LifeSkillService.StepPrompts()
         )
     else
         FarmMovement.Stop(false, true)
-        InteractionService.FirePrompt(prompt)
+        usePromptWithCooldown(prompt, 0.75)
     end
 end
 
@@ -6171,7 +6146,8 @@ function AutoFarmController.Step()
         Runtime.ProgressLifeSkill = nil
 
         farmResetRoute(true)
-        FarmMovement.Stop(false, true)
+        QuestService.ClearTaskLock()
+        FarmMovement.Stop(true, true)
 
         farmSetState(
             "IDLE",
@@ -6206,18 +6182,6 @@ function AutoFarmController.Step()
         return
     end
 
-    local stateKey = QuestService.StateKey()
-
-    if stateKey ~= Runtime.FarmFSM.QuestKey then
-        Runtime.FarmFSM.QuestKey = stateKey
-        Runtime.FarmFSM.TaskKey = nil
-        Runtime.FarmFSM.InteractionAttempts = 0
-        Runtime.FarmFSM.LastInteraction = 0
-
-        farmResetRoute(true)
-        FarmMovement.Stop(false, true)
-    end
-
     local completed =
         QuestService.GetCompletedQuest()
 
@@ -6231,7 +6195,7 @@ function AutoFarmController.Step()
     end
 
     local quest, taskData =
-        QuestService.GetNextTask()
+        QuestService.GetStableTask()
 
     if quest and taskData then
         local taskKey =
@@ -6252,7 +6216,18 @@ function AutoFarmController.Step()
         end
 
         if taskData.Kind == "Defeat" then
-            stepDefeatTask(taskData.Target)
+            Runtime.ProgressLifeSkill = nil
+            Runtime.CurrentTarget = nil
+            Runtime.CurrentWantedMob = nil
+            Runtime.FarmAnchorCFrame = nil
+
+            FarmMovement.Stop(true, true)
+            HitboxService.Clear()
+
+            farmSetState(
+                "MANUAL_COMBAT",
+                taskData.Target
+            )
             return
         elseif taskData.Kind == "Talk"
             or taskData.Kind == "Return"
@@ -6523,7 +6498,9 @@ function MovementService.Step()
     local transportNoclip =
         Config.PlatformNoclip
         and (
-            Runtime.FarmMoveActive
+            Config.AutoProgress
+            or Runtime.FarmMoveActive
+            or Runtime.FarmMoveHold
             or Runtime.TransportMoving
         )
 
@@ -6707,7 +6684,8 @@ task.spawn(function()
             )
 
             Runtime.FarmAnchorCFrame = nil
-            FarmMovement.Stop(false, true)
+            QuestService.ClearTaskLock()
+            FarmMovement.Stop(true, true)
         end
 
         task.wait(0.55)
@@ -6724,7 +6702,7 @@ local function currentQuestSummary()
         return completed.Name .. " → ready to turn in"
     end
 
-    local quest, taskData = QuestService.GetNextTask()
+    local quest, taskData = QuestService.GetStableTask()
     if quest and taskData then
         return quest.Name .. " → " .. taskData.Text
     end
@@ -7076,7 +7054,9 @@ local FarmMaster = bindToggle(
             Runtime.CurrentWantedMob = nil
 
             HitboxService.Clear()
-            FarmMovement.Stop(false, true)
+            QuestService.ClearTaskLock()
+            FarmMovement.Stop(true, true)
+            restoreCollision()
 
             notify(
                 "Auto Farm",
@@ -7206,246 +7186,21 @@ bindSlider(
     end
 )
 
-local MobControl = Tabs.Farm:AddSection("Mob Control")
+local QuestOnlySection = Tabs.Farm:AddSection("Quest Routing")
 
-bindToggle(
-    MobControl,
-    "BringMobsV12",
-    "Bring Matching Mobs",
-    Config.BringMobs,
-    function(value)
-        Config.BringMobs = value
-    end,
-    "Only the exact current farm target is stacked. Dialogue NPCs and players are excluded."
-)
-
-bindSlider(
-    MobControl,
-    "BringRadiusV12",
-    "Bring Radius",
-    40,
-    220,
-    Config.BringRadius,
-    function(value)
-        Config.BringRadius = value
-    end
-)
-
-bindSlider(
-    MobControl,
-    "BringLimitV12",
-    "Max Mobs",
-    1,
-    18,
-    Config.BringLimit,
-    function(value)
-        Config.BringLimit = value
-    end
-)
-
-bindSlider(
-    MobControl,
-    "MobBelowFeetV12",
-    "Mobs Below Platform",
-    5,
-    18,
-    Config.MobBelowFeet,
-    function(value)
-        Config.MobBelowFeet = value
-    end
-)
-
-bindToggle(
-    MobControl,
-    "MobHitboxV12",
-    "Large Mob Hitbox",
-    Config.MobHitbox,
-    function(value)
-        Config.MobHitbox = value
-        if not value then
-            HitboxService.Clear()
-        end
-    end,
-    "Mob-only. Players and quest/dialogue NPCs are never expanded."
-)
-
-bindSlider(
-    MobControl,
-    "HitboxSizeV12",
-    "Hitbox Size",
-    10,
-    40,
-    Config.HitboxSize,
-    function(value)
-        Config.HitboxSize = value
-    end,
-    "Default is deliberately larger than previous builds."
-)
-
-local CombatFarm = Tabs.Farm:AddSection("Combat Rotation")
-
-bindToggle(
-    CombatFarm,
-    "AutoAttackV12",
-    "Auto M1",
-    Config.AutoAttack,
-    function(value)
-        Config.AutoAttack = value
-    end
-)
-
-bindSlider(
-    CombatFarm,
-    "AttackRateV12",
-    "M1 / Second",
-    2,
-    15,
-    Config.AttackRate,
-    function(value)
-        Config.AttackRate = value
-    end
-)
-
-bindToggle(
-    CombatFarm,
-    "AutoMasteryV12",
-    "Auto Skill / Mastery",
-    Config.AutoMastery,
-    function(value)
-        Config.AutoMastery = value
-    end,
-    "Cycles only live combat hotbar actions and respects visible cooldowns."
-)
-
-bindDropdown(
-    CombatFarm,
-    "MasteryModeV12",
-    "Skill Rotation",
-    {"All Combat", "Current Fruit", "Selected Skill"},
-    1,
-    function(value)
-        Config.MasteryMode = value
-    end
-)
-
-local combatActions = HotbarService.GetWeaponOptions()
-
-bindDropdown(
-    CombatFarm,
-    "SelectedSkillV12",
-    "Selected Skill",
-    combatActions,
-    1,
-    function(value)
-        Config.SelectedWeapon = value
-    end,
-    "Used only when Skill Rotation = Selected Skill. 'Auto' leaves the rotation automatic."
-)
-
-bindToggle(
-    CombatFarm,
-    "ReadyOnlyV12",
-    "Use Ready Skills Only",
-    Config.MasteryReadyOnly,
-    function(value)
-        Config.MasteryReadyOnly = value
-    end
-)
-
-bindSlider(
-    CombatFarm,
-    "MasteryIntervalV12",
-    "Skill Interval x10",
-    2,
-    20,
-    math.floor(Config.MasteryInterval * 10),
-    function(value)
-        Config.MasteryInterval = value / 10
-    end
-)
+QuestOnlySection:AddParagraph({
+    Title = "Combat Tasks",
+    Content = "Navigation, NPC interaction, locations, chests and life-skill tasks are automated. Combat tasks pause for manual completion."
+})
 
 -- ============================================================
 -- Combat
 -- ============================================================
 
-local CombatSection = Tabs.Combat:AddSection("Combat Assist")
-
-bindToggle(
-    CombatSection,
-    "AutoAim",
-    "Face Current Target",
-    Config.AutoAim,
-    function(value)
-        Config.AutoAim = value
-    end
-)
-
-bindToggle(
-    CombatSection,
-    "AutoBlock",
-    "Auto Block",
-    Config.AutoBlock,
-    function(value)
-        Config.AutoBlock = value
-    end,
-    "Uses the game's client-visible F block input only when health is low."
-)
-
-bindSlider(
-    CombatSection,
-    "BlockHealth",
-    "Block Below HP %",
-    10,
-    80,
-    Config.BlockHealthPercent,
-    function(value)
-        Config.BlockHealthPercent = value
-    end
-)
-
-local CombatVisuals = Tabs.Combat:AddSection("Target Visuals")
-
-bindToggle(
-    CombatVisuals,
-    "CurrentTargetESP",
-    "Current Target ESP",
-    Config.CurrentTargetESP,
-    function(value)
-        Config.CurrentTargetESP = value
-    end
-)
-
-bindToggle(
-    CombatVisuals,
-    "MobESP",
-    "Mob ESP",
-    Config.MobESP,
-    function(value)
-        Config.MobESP = value
-    end
-)
-
-bindToggle(
-    CombatVisuals,
-    "BossESP",
-    "Boss ESP",
-    Config.BossESP,
-    function(value)
-        Config.BossESP = value
-    end
-)
-
-bindSlider(
-    CombatVisuals,
-    "ESPDistance",
-    "ESP Distance",
-    100,
-    3000,
-    Config.ESPDistance,
-    function(value)
-        Config.ESPDistance = value
-    end
-)
+Tabs.Combat:AddParagraph({
+    Title = "Combat",
+    Content = "Combat input is left manual in this build."
+})
 
 -- ============================================================
 -- Movement
@@ -7528,7 +7283,7 @@ bindToggle(
 bindToggle(
     CharacterSection,
     "PlatformNoclip",
-    "Noclip While Platform Moves",
+    "Noclip During Auto Progress",
     Config.PlatformNoclip,
     function(value)
         Config.PlatformNoclip = value
@@ -8260,6 +8015,10 @@ local function unload()
 
     pcall(function()
         HitboxService.Clear()
+    end)
+
+    pcall(function()
+        FarmMovement.Stop(true, true)
     end)
 
     pcall(function()
