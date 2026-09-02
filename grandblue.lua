@@ -1,6 +1,6 @@
--- SON HUB v19 | Nexomia snapshot rebuild | hongson
+-- SON HUB v21 | Nexomia snapshot rebuild | hongson
 
-local VERSION = "20.0.0"
+local VERSION = "21.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -88,6 +88,8 @@ end
 local LocalPlayer = Players.LocalPlayer
 local Workspace = workspace
 
+local Runtime
+
 local ExecutorCaps = {
     Http = false,
     Request = type(requestFn) == "function",
@@ -98,6 +100,61 @@ local ExecutorCaps = {
 }
 
 local Compat = {}
+
+local function safeCall(fn, ...)
+    if type(fn) ~= "function" then
+        return false, "not callable"
+    end
+
+    local args = table.pack(...)
+    return xpcall(function()
+        return fn(table.unpack(args, 1, args.n))
+    end, function(err)
+        local message = tostring(err)
+        if type(debug) == "table" and type(debug.traceback) == "function" then
+            local okTrace, trace = pcall(debug.traceback, message, 2)
+            if okTrace and type(trace) == "string" then
+                return trace
+            end
+        end
+        return message
+    end)
+end
+
+local function callMethod(object, methodName, ...)
+    local method = object and object[methodName]
+    if type(method) ~= "function" then
+        return false, "missing method: " .. tostring(methodName)
+    end
+    return safeCall(method, object, ...)
+end
+
+local function dummyOption(defaultValue)
+    return {
+        Value = defaultValue,
+        OnChanged = function()
+            return nil
+        end,
+        SetValues = function()
+            return nil
+        end,
+        SetValue = function()
+            return nil
+        end,
+    }
+end
+
+local function markSoftError(bucket, err)
+    if not bucket then
+        bucket = "General"
+    end
+    Runtime = Runtime or {}
+    Runtime.WorkerErrors = Runtime.WorkerErrors or {}
+    Runtime.WorkerErrorCount = Runtime.WorkerErrorCount or {}
+    Runtime.LastWorkerErrorNotify = Runtime.LastWorkerErrorNotify or {}
+    Runtime.WorkerErrors[bucket] = tostring(err)
+    Runtime.WorkerErrorCount[bucket] = (Runtime.WorkerErrorCount[bucket] or 0) + 1
+end
 
 local function markCap(name, ok)
     if ok == false then
@@ -343,7 +400,7 @@ local Config = {
     LootColor = Color3.fromRGB(115, 255, 145),
 }
 
-local Runtime = {
+Runtime = {
     Prompts = setmetatable({}, {__mode = "k"}),
     Entities = setmetatable({}, {__mode = "k"}),
     DialogueNPCs = setmetatable({}, {__mode = "k"}),
@@ -481,7 +538,17 @@ local Runtime = {
 }
 
 local function connect(signal, callback)
-    local connection = signal:Connect(callback)
+    if not signal or type(callback) ~= "function" then
+        return nil
+    end
+
+    local connection = signal:Connect(function(...)
+        local ok, result = safeCall(callback, ...)
+        if not ok then
+            markSoftError("Events", result)
+        end
+    end)
+
     table.insert(Core.Connections, connection)
     return connection
 end
@@ -2453,7 +2520,9 @@ function MotionController.Request(owner, goal, options)
 
     if okTween and tween then
         motion.Tween = tween
-        tween:Play()
+        pcall(function()
+            tween:Play()
+        end)
     end
 
     return true, "started"
@@ -2533,7 +2602,9 @@ function MotionController.Step(deltaTime)
             end)
             if okTween and tween then
                 motion.Tween = tween
-                tween:Play()
+                pcall(function()
+                    tween:Play()
+                end)
             end
         end
 
@@ -7198,6 +7269,18 @@ connect(
 -- Schedulers
 -- ============================================================
 
+local function spawnLoop(name, body, defaultDelay)
+    task.spawn(function()
+        while Core.Running do
+            local ok, delayOrError = safeCall(body)
+            if not ok then
+                markSoftError(name, delayOrError)
+            end
+            task.wait(ok and (tonumber(delayOrError) or defaultDelay) or math.max(0.35, defaultDelay or 0.5))
+        end
+    end)
+end
+
 task.spawn(function()
     while Core.Running do
         safeWorker("Movement", MovementService.Step)
@@ -7689,6 +7772,7 @@ local function executorStatus()
         "WebSocket: not required",
         "getscriptclosure: not required",
         "filesystem: not required",
+        "soft UI/event guard: enabled",
     }, "\n")
 end
 
@@ -7746,45 +7830,82 @@ local Tabs = {
 }
 
 local function bindToggle(section, id, title, defaultValue, callback)
+    if not section or type(section.AddToggle) ~= "function" then
+        markSoftError("UI", "AddToggle unavailable for " .. tostring(id))
+        return dummyOption(defaultValue == true)
+    end
+
     local option = section:AddToggle(id, {
         Title = title,
         Default = defaultValue == true,
     })
-    option:OnChanged(function()
-        callback(option.Value)
-    end)
-    return option
+
+    if option and type(option.OnChanged) == "function" then
+        option:OnChanged(function()
+            local ok, result = safeCall(callback, option.Value)
+            if not ok then
+                markSoftError("UI", result)
+            end
+        end)
+    end
+
+    return option or dummyOption(defaultValue == true)
 end
 
 local function bindDropdown(section, id, title, values, defaultIndex, callback)
+    if not section or type(section.AddDropdown) ~= "function" then
+        markSoftError("UI", "AddDropdown unavailable for " .. tostring(id))
+        return dummyOption(values and values[defaultIndex or 1])
+    end
+
     local option = section:AddDropdown(id, {
         Title = title,
         Values = values,
         Multi = false,
         Default = defaultIndex or 1,
     })
-    option:OnChanged(function(value)
-        callback(value)
-    end)
-    return option
+
+    if option and type(option.OnChanged) == "function" then
+        option:OnChanged(function(value)
+            local ok, result = safeCall(callback, value)
+            if not ok then
+                markSoftError("UI", result)
+            end
+        end)
+    end
+
+    return option or dummyOption(values and values[defaultIndex or 1])
 end
 
 local function bindSlider(section, id, title, minimum, maximum, defaultValue, callback)
+    if not section or type(section.AddSlider) ~= "function" then
+        markSoftError("UI", "AddSlider unavailable for " .. tostring(id))
+        return dummyOption(defaultValue)
+    end
+
     return section:AddSlider(id, {
         Title = title,
         Default = defaultValue,
         Min = minimum,
         Max = maximum,
         Rounding = 0,
-        Callback = callback,
+        Callback = function(value)
+            local ok, result = safeCall(callback, value)
+            if not ok then
+                markSoftError("UI", result)
+            end
+        end,
     })
 end
 
 local function setDropdownValues(dropdown, values)
     if dropdown and type(dropdown.SetValues) == "function" then
-        pcall(function()
+        local ok, result = safeCall(function()
             dropdown:SetValues(values)
         end)
+        if not ok then
+            markSoftError("UI", result)
+        end
     end
 end
 
