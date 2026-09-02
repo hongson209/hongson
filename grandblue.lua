@@ -14,7 +14,7 @@
       - Large Workspace scan occurs once; caches update incrementally.
 ]]
 
-local VERSION = "11.0.0"
+local VERSION = "12.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -199,15 +199,17 @@ local Config = {
     -- Moving platform
     PlatformTransport = true,
     PlatformKinematicAssist = true,
-    PlatformMode = "Heartbeat Platform",
     PlatformSpeed = 175,
     PlatformSize = 10,
     PlatformTransparency = 0.72,
     PlatformFarmHeight = 18,
-    PlatformNpcHeight = 3.2,
+    PlatformNpcHeight = 0.25,
     PlatformBackDistance = 5,
     PlatformArrivalDistance = 4,
     PlatformRetargetDistance = 12,
+    TravelClearance = 11,
+    TravelMaxAboveTarget = 30,
+    TravelHorizontalThreshold = 22,
     FarmAnchorRecenterDistance = 55,
     FarmHoldCorrectionDistance = 3.5,
     PlatformNoclip = true,
@@ -220,9 +222,9 @@ local Config = {
     BringSpread = 1.5,
 
     MobHitbox = true,
-    HitboxSize = 18,
-    HitboxTransparency = 0.68,
-    HitboxRange = 165,
+    HitboxSize = 24,
+    HitboxTransparency = 0.72,
+    HitboxRange = 190,
 
     -- Combat
     AutoAim = true,
@@ -239,6 +241,8 @@ local Config = {
     AutoChest = false,
     AutoWorldBossChest = false,
     AutoFruitChest = false,
+    AutoChestRoute = true,
+    ChestCollectRadius = 65,
     AutoQuestItems = false,
 
     AutoMining = false,
@@ -322,6 +326,14 @@ local Runtime = {
     FarmMoveActive = false,
     FarmMoveHold = false,
     FarmMoveHoldCFrame = nil,
+    FarmMoveRoute = nil,
+    FarmMoveRouteIndex = 0,
+    FarmMoveFinalGoal = nil,
+    FarmMoveFacePosition = nil,
+    FarmMoveKind = nil,
+
+    LootRouteTarget = nil,
+    LootRouteKind = nil,
 
     CurrentTarget = nil,
     CurrentWantedMob = nil,
@@ -332,6 +344,8 @@ local Runtime = {
     LastAttack = 0,
     LastBring = 0,
     LastHitbox = 0,
+    LastBringCount = 0,
+    LastHitboxCount = 0,
     LastMastery = 0,
     LastStatsSpend = 0,
 
@@ -347,6 +361,7 @@ local Runtime = {
     TransportStartedAt = 0,
 
     ExpandedHitboxes = setmetatable({}, {__mode = "k"}),
+    CharacterCollisionBackup = setmetatable({}, {__mode = "k"}),
 
     FishingState = "IDLE",
     FishingStateSince = 0,
@@ -746,8 +761,22 @@ function RuntimeIndex.Register(instance)
     end
 
     local entities = entitiesFolder()
-    if entities and instance.Parent == entities then
-        Runtime.Entities[instance] = true
+    if entities and instance:IsDescendantOf(entities) then
+        local hasHumanoid =
+            instance:FindFirstChildOfClass("Humanoid") ~= nil
+
+        local combatTagged =
+            instance:GetAttribute("Combat") == true
+            or instance:GetAttribute("NPCCombat") == true
+            or instance:GetAttribute("BossCombat") == true
+            or instance:GetAttribute("NPCName") ~= nil
+            or instance:GetAttribute("NPCType") ~= nil
+
+        if instance.Parent == entities
+            or hasHumanoid
+            or combatTagged then
+            Runtime.Entities[instance] = true
+        end
     end
 
     local dialogues = dialogueRoot()
@@ -929,11 +958,16 @@ local function taskIsComplete(frame, rawText)
     return false
 end
 
-local function parseQuestTask(raw)
+local function parseQuestTask(raw, questName)
     local clean = normalize(raw)
     clean = clean:gsub("^[-•]%s*", "")
     clean = clean:gsub("%s*%(%d+%s*/%s*%d+%)%.?$", "")
     clean = normalize(clean)
+
+    local eventGated =
+        lower(clean):find("when it opens", 1, true) ~= nil
+        or lower(clean):find("when it appears", 1, true) ~= nil
+        or lower(clean):find("when available", 1, true) ~= nil
 
     local patterns = {
         {"Defeat", "^Defeat%s+(.+)$"},
@@ -948,6 +982,11 @@ local function parseQuestTask(raw)
         {"Find", "^Find%s+(.+)$"},
         {"Reach", "^Reach%s+(.+)$"},
         {"Reach", "^Go%s+[Tt]o%s+(.+)$"},
+        {"Reach", "^Visit%s+(.+)$"},
+        {"Reach", "^Travel%s+[Tt]o%s+(.+)$"},
+        {"Reach", "^Enter%s+(.+)$"},
+        {"Reach", "^Wait%s+[Aa]t%s+(.+)$"},
+        {"Reach", "^Be%s+[Aa]t%s+(.+)%s+[Ww]hen%s+.+$"},
         {"Interact", "^Interact%s+[Ww]ith%s+(.+)$"},
         {"Interact", "^Open%s+(.+)$"},
         {"Interact", "^Activate%s+(.+)$"},
@@ -977,11 +1016,17 @@ local function parseQuestTask(raw)
     for _, pattern in ipairs(patterns) do
         local target = clean:match(pattern[2])
         if target then
-            return pattern[1], normalize(target)
+            return pattern[1], normalize(target), eventGated
         end
     end
 
-    return "Unknown", clean
+    local value = lower(clean)
+    if value:find("be there", 1, true)
+        or value:find("wait there", 1, true) then
+        return "Reach", normalize(questName or clean), true
+    end
+
+    return "Unknown", clean, eventGated
 end
 
 function QuestService.GetActiveQuests()
@@ -1009,6 +1054,7 @@ function QuestService.GetActiveQuests()
                     ),
                     Tasks = {},
                     Complete = false,
+                    LayoutOrder = child.LayoutOrder,
                 }
             end
         end
@@ -1022,7 +1068,8 @@ function QuestService.GetActiveQuests()
             if quest then
                 local info = child:FindFirstChild("Info1", true)
                 local raw = info and tostring(info.Text) or ""
-                local kind, target = parseQuestTask(raw)
+                local kind, target, eventGated =
+                    parseQuestTask(raw, quest.Name)
 
                 table.insert(quest.Tasks, {
                     Frame = child,
@@ -1030,6 +1077,7 @@ function QuestService.GetActiveQuests()
                     RawText = raw,
                     Kind = kind,
                     Target = target,
+                    EventGated = eventGated == true,
                     Complete = taskIsComplete(child, raw),
                     LayoutOrder = child.LayoutOrder,
                 })
@@ -1057,22 +1105,82 @@ function QuestService.GetActiveQuests()
     end
 
     table.sort(result, function(a, b)
-        return tonumber(a.Id) < tonumber(b.Id)
+        local aOrder = tonumber(a.LayoutOrder) or math.huge
+        local bOrder = tonumber(b.LayoutOrder) or math.huge
+
+        if aOrder ~= bOrder then
+            return aOrder < bOrder
+        end
+
+        return tostring(a.Id) < tostring(b.Id)
     end)
 
     return result
 end
 
+local TASK_PRIORITY = {
+    Talk = 130,
+    Return = 125,
+    Deliver = 122,
+    Defeat = 118,
+    Collect = 112,
+    Interact = 110,
+    Equip = 108,
+    Use = 106,
+    Find = 102,
+    Reach = 96,
+    Mine = 90,
+    Fish = 90,
+    Farm = 90,
+    Treasure = 88,
+    Craft = 82,
+    Cook = 82,
+    Upgrade = 82,
+    Learn = 80,
+    Claim = 78,
+    Destroy = 76,
+    Buy = 40,
+    Sell = 40,
+    Unknown = 10,
+}
+
 function QuestService.GetNextTask()
+    local bestQuest
+    local bestTask
+    local bestScore = -math.huge
+    local bestOrder = math.huge
+
     for _, quest in ipairs(QuestService.GetActiveQuests()) do
         for _, taskData in ipairs(quest.Tasks) do
             if not taskData.Complete then
-                return quest, taskData
+                local score =
+                    TASK_PRIORITY[taskData.Kind]
+                    or TASK_PRIORITY.Unknown
+
+                if taskData.EventGated then
+                    score -= 85
+                end
+
+                local order =
+                    (tonumber(quest.LayoutOrder) or 9999) * 1000
+                    + (tonumber(taskData.LayoutOrder) or 999)
+
+                if score > bestScore
+                    or (
+                        score == bestScore
+                        and order < bestOrder
+                    ) then
+
+                    bestQuest = quest
+                    bestTask = taskData
+                    bestScore = score
+                    bestOrder = order
+                end
             end
         end
     end
 
-    return nil, nil
+    return bestQuest, bestTask
 end
 
 function QuestService.GetCompletedQuest()
@@ -1591,6 +1699,37 @@ function HotbarService.GetWeaponOptions()
     end
 
     return result
+end
+
+function HotbarService.FindByText(text)
+    local wanted = lower(text)
+    if wanted == "" then
+        return nil
+    end
+
+    HotbarService.Refresh()
+
+    local best
+    local bestScore = -math.huge
+
+    for _, data in pairs(HotbarService.Slots) do
+        local value = lower(data.Title)
+        local score = 0
+
+        if value == wanted then
+            score = 160
+        elseif value:find(wanted, 1, true)
+            or wanted:find(value, 1, true) then
+            score = 110
+        end
+
+        if score > bestScore then
+            best = data
+            bestScore = score
+        end
+    end
+
+    return best
 end
 
 function HotbarService.GetSnapshot()
@@ -2140,21 +2279,60 @@ end
 
 function PlatformTransport.MoveNear(object)
     local target = objectRoot(object)
-    if not target then
+    local root = rootPart()
+
+    if not target or not root then
         return false, "missing target"
     end
 
-    local position = (
-        target.CFrame
-        * CFrame.new(
-            0,
-            Config.PlatformNpcHeight,
-            Config.PlatformBackDistance
-        )
-    ).Position
+    local humanoidModel =
+        object:IsA("Model")
+        and object:FindFirstChildOfClass("Humanoid") ~= nil
 
-    local goal = CFrame.lookAt(position, target.Position)
-    return PlatformTransport.MoveToRootCFrame(goal)
+    local height =
+        humanoidModel
+        and Config.PlatformNpcHeight
+        or 3
+
+    local away = Vector3.new(
+        root.Position.X - target.Position.X,
+        0,
+        root.Position.Z - target.Position.Z
+    )
+
+    if away.Magnitude <= 0.05 then
+        away = Vector3.new(
+            -target.CFrame.LookVector.X,
+            0,
+            -target.CFrame.LookVector.Z
+        )
+    end
+
+    if away.Magnitude <= 0.05 then
+        away = Vector3.new(0, 0, 1)
+    end
+
+    away = away.Unit
+
+    local position =
+        target.Position
+        + away * Config.PlatformBackDistance
+        + Vector3.new(0, height, 0)
+
+    local face = Vector3.new(
+        target.Position.X,
+        position.Y,
+        target.Position.Z
+    )
+
+    local goal = CFrame.lookAt(
+        position,
+        face
+    )
+
+    return PlatformTransport.MoveToRootCFrame(
+        goal
+    )
 end
 
 function PlatformTransport.SetFarmAnchorFrom(object)
@@ -2225,7 +2403,7 @@ function BringService.Step(wanted, anchor)
     end
 
     local now = os.clock()
-    if now - Runtime.LastBring < 0.28 then
+    if now - Runtime.LastBring < 0.14 then
         return 0
     end
     Runtime.LastBring = now
@@ -2279,6 +2457,7 @@ function BringService.Step(wanted, anchor)
         end
     end
 
+    Runtime.LastBringCount = count
     return count
 end
 
@@ -2296,6 +2475,7 @@ function HitboxService.Restore(model)
             part.Size = data.Size
             part.Transparency = data.Transparency
             part.CanCollide = data.CanCollide
+            part.CanQuery = data.CanQuery
             part.Massless = data.Massless
         end)
     end
@@ -2338,6 +2518,7 @@ function HitboxService.Apply(model, wanted)
             Size = part.Size,
             Transparency = part.Transparency,
             CanCollide = part.CanCollide,
+            CanQuery = part.CanQuery,
             Massless = part.Massless,
         }
     end
@@ -2350,18 +2531,20 @@ function HitboxService.Apply(model, wanted)
         )
         part.Transparency = Config.HitboxTransparency
         part.CanCollide = false
+        part.CanQuery = true
         part.Massless = true
     end)
 end
 
 function HitboxService.Step(wanted, anchor)
     local now = os.clock()
-    if now - Runtime.LastHitbox < 0.35 then
-        return
+    if now - Runtime.LastHitbox < 0.15 then
+        return Runtime.LastHitboxCount
     end
     Runtime.LastHitbox = now
 
     local keep = {}
+    local count = 0
     local ground = farmAnchorGround(anchor)
     local bossAllowed = farmTargetAllowsBoss(wanted)
 
@@ -2385,6 +2568,7 @@ function HitboxService.Step(wanted, anchor)
 
                 if inRange then
                     keep[model] = true
+                    count += 1
                     HitboxService.Apply(model, wanted)
                 end
             end
@@ -2396,6 +2580,9 @@ function HitboxService.Step(wanted, anchor)
             HitboxService.Restore(model)
         end
     end
+
+    Runtime.LastHitboxCount = count
+    return count
 end
 
 -- ============================================================
@@ -4220,29 +4407,91 @@ function LifeSkillService.FindNearestEnabledPrompt()
 end
 
 function LifeSkillService.StepPrompts()
-    if Config.AutoProgress then
-        -- While full progression is active, only collect nearby loot.
-        local prompt, distance = LifeSkillService.FindNearestEnabledPrompt()
+    local prompt, distance =
+        LifeSkillService.FindNearestEnabledPrompt()
 
-        if prompt and distance <= 12 then
+    if not prompt then
+        Runtime.LootRouteTarget = nil
+        Runtime.LootRouteKind = nil
+        return
+    end
+
+    local kind = promptKind(prompt)
+    Runtime.LootRouteTarget = prompt
+    Runtime.LootRouteKind = kind
+
+    local standaloneLifeSkillActive =
+        Config.AutoFishing
+        or Config.AutoMining
+        or Config.AutoTreasure
+
+    local isChest =
+        kind == "Chest"
+        or kind == "WorldBossChest"
+        or kind == "FruitChest"
+
+    if Config.AutoProgress then
+        -- Loot never steals movement from the quest controller.
+        -- Nexomia exposes fireproximityprompt, so chest prompts around
+        -- the farm point can be opened without descending from the platform.
+        local allowedDistance
+
+        if isChest then
+            allowedDistance =
+                type(firePromptFn) == "function"
+                and Config.ChestCollectRadius
+                or math.max(
+                    8,
+                    tonumber(prompt.MaxActivationDistance) or 8
+                )
+        else
+            allowedDistance = 14
+        end
+
+        if distance <= allowedDistance then
             InteractionService.FirePrompt(prompt)
         end
 
         return
     end
 
-    local prompt = LifeSkillService.FindNearestEnabledPrompt()
-    if not prompt then
+    if standaloneLifeSkillActive then
+        if distance <= 10 then
+            InteractionService.FirePrompt(prompt)
+        end
         return
     end
 
-    local kind = promptKind(prompt)
+    if isChest
+        and Config.AutoChestRoute
+        and not standaloneLifeSkillActive then
 
+        if distance
+            > Config.PlatformArrivalDistance + 2 then
 
-    if distanceTo(prompt) > Config.PlatformArrivalDistance then
-        PlatformTransport.MoveNear(prompt)
+            FarmMovement.GoNear(
+                prompt,
+                3,
+                2.5
+            )
+            return
+        end
+
+        FarmMovement.Stop(false, true)
+        InteractionService.FirePrompt(prompt)
+        return
+    end
+
+    if distance
+        > Config.PlatformArrivalDistance + 2 then
+
+        FarmMovement.GoNear(
+            prompt,
+            3,
+            2.5
+        )
     else
-        PlatformTransport.Cancel(true)
+        FarmMovement.Stop(false, true)
         InteractionService.FirePrompt(prompt)
     end
 end
@@ -4399,7 +4648,164 @@ function WorldUtilityService.GoToPrompt(name)
 end
 
 -- ============================================================
--- Auto Farm v11
+-- World target resolver
+-- Used for Reach/Visit/Enter/event-position quests.
+-- ============================================================
+
+WorldTargetService = {
+    Cache = {},
+}
+
+local function worldTargetCandidateScore(object, wanted)
+    if not object or not object.Parent then
+        return 0
+    end
+
+    local name = lower(stripRuntimeSuffix(object.Name))
+    local target = lower(stripRuntimeSuffix(wanted))
+
+    if name == target then
+        return 160
+    end
+
+    if name:find(target, 1, true)
+        or target:find(name, 1, true) then
+        return 105
+    end
+
+    local blob = lower(table.concat({
+        tostring(object:GetAttribute("Name") or ""),
+        tostring(object:GetAttribute("DisplayName") or ""),
+        tostring(object:GetAttribute("Interaction") or ""),
+        tostring(object:GetAttribute("ObjectType") or ""),
+    }, " "))
+
+    if blob:find(target, 1, true) then
+        return 85
+    end
+
+    return 0
+end
+
+function WorldTargetService.Find(name)
+    local wanted = normalize(name)
+    if wanted == "" then
+        return nil
+    end
+
+    local key = lower(wanted)
+    local cached = WorldTargetService.Cache[key]
+
+    if cached
+        and cached.Object
+        and cached.Object.Parent
+        and os.clock() - cached.At < 3 then
+        return cached.Object
+    end
+
+    local prompt = InteractionService.FindPromptByText(
+        wanted
+    )
+    if prompt then
+        WorldTargetService.Cache[key] = {
+            Object = prompt,
+            At = os.clock(),
+        }
+        return prompt
+    end
+
+    local dialogue =
+        TargetService.FindNamedDialogueNPC(
+            wanted
+        )
+
+    if dialogue then
+        WorldTargetService.Cache[key] = {
+            Object = dialogue,
+            At = os.clock(),
+        }
+        return dialogue
+    end
+
+    local roots = {
+        Workspace:FindFirstChild("AA IMPORTANT"),
+        Workspace:FindFirstChild("Islands"),
+        Workspace:FindFirstChild("Locations"),
+        Workspace:FindFirstChild("Map"),
+    }
+
+    local best
+    local bestScore = -math.huge
+    local bestDistance = math.huge
+
+    for _, root in ipairs(roots) do
+        if root then
+            local exact =
+                root:FindFirstChild(
+                    wanted,
+                    true
+                )
+
+            if exact and objectRoot(exact) then
+                WorldTargetService.Cache[key] = {
+                    Object = exact,
+                    At = os.clock(),
+                }
+                return exact
+            end
+
+            local fuzzyAllowed =
+                root.Name == "AA IMPORTANT"
+                or root.Name == "Locations"
+
+            -- Avoid scanning the enormous Islands tree if an exact
+            -- named target was not found. The game snapshot is very large.
+            if fuzzyAllowed then
+                for _, object in ipairs(
+                    root:GetDescendants()
+                ) do
+                    if object:IsA("Model")
+                        or object:IsA("BasePart") then
+
+                        local score =
+                            worldTargetCandidateScore(
+                                object,
+                                wanted
+                            )
+
+                        if score > 0
+                            and objectRoot(object) then
+
+                            local distance =
+                                distanceTo(object)
+
+                            if score > bestScore
+                                or (
+                                    score == bestScore
+                                    and distance < bestDistance
+                                ) then
+
+                                best = object
+                                bestScore = score
+                                bestDistance = distance
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    WorldTargetService.Cache[key] = {
+        Object = best,
+        At = os.clock(),
+    }
+
+    return best
+end
+
+-- ============================================================
+-- Auto Farm v12
 -- Single progression owner + smooth farm movement
 -- ============================================================
 
@@ -4421,7 +4827,26 @@ local function farmSetState(state, detail)
 end
 
 local function farmMovementPlatformCFrame(rootCFrame)
-    return rootCFrame * CFrame.new(0, -3.25, 0)
+    return CFrame.new(rootCFrame.Position - Vector3.new(0, 3.25, 0))
+end
+
+local function yawCFrame(position, facePosition)
+    if facePosition then
+        local flat = Vector3.new(
+            facePosition.X - position.X,
+            0,
+            facePosition.Z - position.Z
+        )
+
+        if flat.Magnitude > 0.01 then
+            return CFrame.lookAt(
+                position,
+                position + flat.Unit
+            )
+        end
+    end
+
+    return CFrame.new(position)
 end
 
 function FarmMovement.Ensure()
@@ -4456,7 +4881,8 @@ function FarmMovement.Ensure()
         Config.PlatformSize
     )
     part.Transparency = Config.PlatformTransparency
-    part.CFrame = root.CFrame * CFrame.new(0, -3.25, 0)
+    part.CFrame =
+        farmMovementPlatformCFrame(root.CFrame)
     part.Parent = Workspace
 
     Runtime.FarmMovePart = part
@@ -4468,6 +4894,11 @@ end
 function FarmMovement.Stop(removePlatform, clearHold)
     Runtime.FarmMoveActive = false
     Runtime.FarmMoveGoal = nil
+    Runtime.FarmMoveRoute = nil
+    Runtime.FarmMoveRouteIndex = 0
+    Runtime.FarmMoveFinalGoal = nil
+    Runtime.FarmMoveFacePosition = nil
+    Runtime.FarmMoveKind = nil
 
     if clearHold ~= false then
         Runtime.FarmMoveHold = false
@@ -4478,23 +4909,106 @@ function FarmMovement.Stop(removePlatform, clearHold)
         pcall(function()
             Runtime.FarmMovePart:Destroy()
         end)
-
         Runtime.FarmMovePart = nil
-    elseif Runtime.FarmMovePart and Runtime.FarmMovePart.Parent then
+    elseif Runtime.FarmMovePart
+        and Runtime.FarmMovePart.Parent then
+
         local root = rootPart()
         if root then
             Runtime.FarmMovePart.CFrame =
-                root.CFrame * CFrame.new(0, -3.25, 0)
+                farmMovementPlatformCFrame(
+                    root.CFrame
+                )
         end
     end
 end
 
-function FarmMovement.Go(rootGoal, holdAtEnd)
+local function buildFarmRoute(
+    finalGoal,
+    facePosition,
+    kind
+)
+    local root = rootPart()
+    if not root or not finalGoal then
+        return nil
+    end
+
+    local current = root.Position
+    local final = finalGoal.Position
+    local horizontal = Vector3.new(
+        final.X - current.X,
+        0,
+        final.Z - current.Z
+    )
+
+    local route = {}
+    local cruiseY
+
+    if kind == "farm" then
+        cruiseY = final.Y
+    else
+        local minimumY =
+            final.Y + Config.TravelClearance
+
+        local maximumY =
+            final.Y + Config.TravelMaxAboveTarget
+
+        cruiseY = math.clamp(
+            math.max(current.Y, minimumY),
+            minimumY,
+            maximumY
+        )
+    end
+
+    local function add(position)
+        table.insert(
+            route,
+            yawCFrame(
+                position,
+                facePosition or final
+            )
+        )
+    end
+
+    -- Phase 1: move to one ABSOLUTE travel altitude.
+    -- It never adds height to the player's current Y each tick.
+    if math.abs(current.Y - cruiseY) > 2.5 then
+        add(Vector3.new(
+            current.X,
+            cruiseY,
+            current.Z
+        ))
+    end
+
+    -- Phase 2: horizontal cruise.
+    if horizontal.Magnitude
+        > Config.TravelHorizontalThreshold then
+
+        add(Vector3.new(
+            final.X,
+            cruiseY,
+            final.Z
+        ))
+    end
+
+    -- Phase 3: final approach / descent.
+    add(final)
+
+    return route
+end
+
+function FarmMovement.Go(
+    rootGoal,
+    holdAtEnd,
+    kind,
+    facePosition
+)
     if not rootGoal then
         return false
     end
 
-    -- Never allow the old transport worker to compete with farm movement.
+    -- Old PlatformTransport is used only by standalone life-skill
+    -- workers. It must never compete with Auto Farm navigation.
     PlatformTransport.Cancel(false)
 
     local root = rootPart()
@@ -4504,50 +5018,163 @@ function FarmMovement.Go(rootGoal, holdAtEnd)
 
     FarmMovement.Ensure()
 
-    Runtime.FarmMoveGoal = rootGoal
+    local oldFinal = Runtime.FarmMoveFinalGoal
+    if oldFinal
+        and Runtime.FarmMoveKind == kind
+        and (
+            oldFinal.Position
+            - rootGoal.Position
+        ).Magnitude <= 1.5 then
+
+        Runtime.FarmMoveHold =
+            holdAtEnd == true
+
+        if Runtime.FarmMoveActive
+            or (
+                root.Position
+                - rootGoal.Position
+            ).Magnitude
+                <= Config.PlatformArrivalDistance then
+            return true
+        end
+    end
+
+    local route = buildFarmRoute(
+        rootGoal,
+        facePosition,
+        kind
+    )
+
+    if not route or #route == 0 then
+        return false
+    end
+
+    Runtime.FarmMoveRoute = route
+    Runtime.FarmMoveRouteIndex = 1
+    Runtime.FarmMoveGoal = route[1]
+    Runtime.FarmMoveFinalGoal = rootGoal
+    Runtime.FarmMoveFacePosition =
+        facePosition or rootGoal.Position
+    Runtime.FarmMoveKind = kind or "travel"
     Runtime.FarmMoveActive = true
-    Runtime.FarmMoveHold = holdAtEnd == true
+    Runtime.FarmMoveHold =
+        holdAtEnd == true
 
     return true
 end
 
-function FarmMovement.IsAt(rootGoal, tolerance)
+function FarmMovement.IsAt(
+    rootGoal,
+    tolerance
+)
     local root = rootPart()
     if not root or not rootGoal then
         return false
     end
 
-    return (root.Position - rootGoal.Position).Magnitude
-        <= (tolerance or Config.PlatformArrivalDistance)
+    return (
+        root.Position
+        - rootGoal.Position
+    ).Magnitude <= (
+        tolerance
+        or Config.PlatformArrivalDistance
+    )
 end
 
-function FarmMovement.GoNear(object)
+function FarmMovement.GoNear(
+    object,
+    heightOffset,
+    backDistance
+)
     local target = objectRoot(object)
-    if not target then
+    local root = rootPart()
+
+    if not target or not root then
         return false
     end
 
-    local position = (
-        target.CFrame
-        * CFrame.new(
+    local humanoidModel =
+        object:IsA("Model")
+        and object:FindFirstChildOfClass(
+            "Humanoid"
+        ) ~= nil
+
+    if heightOffset == nil then
+        heightOffset =
+            humanoidModel
+            and Config.PlatformNpcHeight
+            or 3
+    end
+
+    backDistance =
+        backDistance
+        or Config.PlatformBackDistance
+
+    local targetPosition = target.Position
+    local away = Vector3.new(
+        root.Position.X - targetPosition.X,
+        0,
+        root.Position.Z - targetPosition.Z
+    )
+
+    if away.Magnitude <= 0.05 then
+        local look = target.CFrame.LookVector
+        away = Vector3.new(
+            -look.X,
             0,
-            Config.PlatformNpcHeight,
-            Config.PlatformBackDistance
+            -look.Z
         )
-    ).Position
+    end
+
+    if away.Magnitude <= 0.05 then
+        away = Vector3.new(0, 0, 1)
+    end
+
+    away = away.Unit
+
+    local finalPosition =
+        targetPosition
+        + away * backDistance
+        + Vector3.new(
+            0,
+            heightOffset,
+            0
+        )
+
+    local finalGoal = yawCFrame(
+        finalPosition,
+        targetPosition
+    )
 
     return FarmMovement.Go(
-        CFrame.lookAt(position, target.Position),
-        false
+        finalGoal,
+        false,
+        "travel",
+        targetPosition
     )
 end
 
 function FarmMovement.GoAnchor(anchor)
-    return FarmMovement.Go(anchor, true)
+    if not anchor then
+        return false
+    end
+
+    return FarmMovement.Go(
+        yawCFrame(
+            anchor.Position,
+            anchor.Position
+                + anchor.LookVector
+        ),
+        true,
+        "farm",
+        anchor.Position
+            + anchor.LookVector
+    )
 end
 
 function FarmMovement.Step(deltaTime)
-    if not Config.AutoProgress and not Runtime.FarmMoveActive then
+    if not Config.AutoProgress
+        and not Runtime.FarmMoveActive then
         return
     end
 
@@ -4561,90 +5188,187 @@ function FarmMovement.Step(deltaTime)
         return
     end
 
-    local goal = Runtime.FarmMoveGoal
+    if Runtime.FarmMoveActive then
+        local route =
+            Runtime.FarmMoveRoute
 
-    if Runtime.FarmMoveActive and goal then
-        local distance = (root.Position - goal.Position).Magnitude
-        local stepDistance =
-            math.max(35, Config.PlatformSpeed)
-            * math.max(deltaTime, 0.001)
+        local index =
+            Runtime.FarmMoveRouteIndex
 
-        if distance <= math.max(
-            Config.PlatformArrivalDistance,
-            stepDistance
-        ) then
+        local goal =
+            route
+            and route[index]
 
-            pcall(function()
-                root.CFrame = goal
-                root.AssemblyLinearVelocity = Vector3.zero
-                root.AssemblyAngularVelocity = Vector3.zero
-
-                part.CFrame =
-                    farmMovementPlatformCFrame(root.CFrame)
-            end)
-
+        if not goal then
             Runtime.FarmMoveActive = false
             Runtime.FarmMoveGoal = nil
+            return
+        end
 
-            if Runtime.FarmMoveHold then
-                Runtime.FarmMoveHoldCFrame = goal
+        Runtime.FarmMoveGoal = goal
+
+        local current = root.Position
+        local target = goal.Position
+        local delta = target - current
+        local distance = delta.Magnitude
+
+        local stepDistance =
+            math.max(
+                35,
+                Config.PlatformSpeed
+            )
+            * math.max(
+                deltaTime,
+                0.001
+            )
+
+        if distance <= math.max(
+            0.35,
+            stepDistance
+        ) then
+            pcall(function()
+                root.CFrame = goal
+                root.AssemblyLinearVelocity =
+                    Vector3.zero
+                root.AssemblyAngularVelocity =
+                    Vector3.zero
+
+                part.CFrame =
+                    farmMovementPlatformCFrame(
+                        root.CFrame
+                    )
+            end)
+
+            Runtime.FarmMoveRouteIndex =
+                index + 1
+
+            local nextGoal =
+                route[index + 1]
+
+            if nextGoal then
+                Runtime.FarmMoveGoal =
+                    nextGoal
+                return
+            end
+
+            Runtime.FarmMoveActive =
+                false
+            Runtime.FarmMoveGoal = nil
+
+            if Runtime.FarmMoveHold
+                and Runtime.FarmMoveFinalGoal then
+
+                Runtime.FarmMoveHoldCFrame =
+                    Runtime.FarmMoveFinalGoal
             end
 
             return
         end
 
-        local alpha = math.clamp(stepDistance / distance, 0, 1)
-        local nextRoot = root.CFrame:Lerp(goal, alpha)
+        local nextPosition =
+            current
+            + delta.Unit
+                * math.min(
+                    distance,
+                    stepDistance
+                )
+
+        local nextRoot = yawCFrame(
+            nextPosition,
+            Runtime.FarmMoveFacePosition
+                or target
+        )
 
         pcall(function()
             root.CFrame = nextRoot
-            root.AssemblyLinearVelocity = Vector3.zero
-            root.AssemblyAngularVelocity = Vector3.zero
-            part.CFrame = farmMovementPlatformCFrame(nextRoot)
+            root.AssemblyLinearVelocity =
+                Vector3.zero
+            root.AssemblyAngularVelocity =
+                Vector3.zero
+
+            part.CFrame =
+                farmMovementPlatformCFrame(
+                    nextRoot
+                )
         end)
 
         return
     end
 
-    -- At the farm point we do not hard-snap every frame.
-    -- Only correct the player if physics moves them far enough away.
-    local hold = Runtime.FarmMoveHoldCFrame
+    local hold =
+        Runtime.FarmMoveHoldCFrame
 
-    if Runtime.FarmMoveHold and hold then
-        local drift = (root.Position - hold.Position).Magnitude
+    if Runtime.FarmMoveHold
+        and hold then
 
-        if drift > Config.FarmHoldCorrectionDistance then
-            local correctionAlpha = math.clamp(
-                deltaTime * 7,
-                0,
-                1
-            )
+        local drift =
+            (
+                root.Position
+                - hold.Position
+            ).Magnitude
 
-            local corrected = root.CFrame:Lerp(
-                hold,
-                correctionAlpha
+        -- Do not freeze/snap every frame.
+        if drift
+            > Config.FarmHoldCorrectionDistance then
+
+            local direction =
+                hold.Position
+                - root.Position
+
+            local correction =
+                math.min(
+                    direction.Magnitude,
+                    math.max(
+                        30,
+                        Config.PlatformSpeed * 0.5
+                    )
+                    * math.max(
+                        deltaTime,
+                        0.001
+                    )
+                )
+
+            local correctedPosition =
+                root.Position
+                + (
+                    direction.Magnitude > 0
+                    and direction.Unit * correction
+                    or Vector3.zero
+                )
+
+            local corrected = yawCFrame(
+                correctedPosition,
+                hold.Position
+                    + hold.LookVector
             )
 
             pcall(function()
                 root.CFrame = corrected
-                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyLinearVelocity =
+                    Vector3.zero
             end)
         end
 
-        part.CFrame = farmMovementPlatformCFrame(
-            Runtime.FarmMoveHoldCFrame
-        )
+        part.CFrame =
+            farmMovementPlatformCFrame(
+                CFrame.new(hold.Position)
+            )
     else
         part.CFrame =
-            root.CFrame * CFrame.new(0, -3.25, 0)
+            farmMovementPlatformCFrame(
+                root.CFrame
+            )
     end
 end
 
-connect(RunService.Heartbeat, function(deltaTime)
-    if Core.Running then
-        FarmMovement.Step(deltaTime)
+connect(
+    RunService.Heartbeat,
+    function(deltaTime)
+        if Core.Running then
+            FarmMovement.Step(deltaTime)
+        end
     end
-end)
+)
 
 local function farmResetRoute(clearAnchor)
     Runtime.CurrentTarget = nil
@@ -4775,6 +5499,8 @@ local function stepQuestNpc(questName, preferredNpc, finalState)
     )
 
     if not npc then
+        FarmMovement.Stop(false, true)
+
         local now = os.clock()
 
         if now - Runtime.FarmFSM.LastResolverRefresh >= 1.5 then
@@ -4801,7 +5527,11 @@ local function stepQuestNpc(questName, preferredNpc, finalState)
         Config.PlatformArrivalDistance + 2
     ) then
 
-        FarmMovement.GoNear(npc)
+        FarmMovement.GoNear(
+            npc,
+            Config.PlatformNpcHeight,
+            Config.PlatformBackDistance
+        )
 
         farmSetState(
             "NPC_TRAVEL",
@@ -4892,6 +5622,13 @@ local function stepDefeatTask(wanted)
         return
     end
 
+    -- Hitbox is maintained as soon as the quest mob cluster is known.
+    -- It is no longer blocked by travel reaching the farm anchor first.
+    HitboxService.Step(
+        wanted,
+        anchor
+    )
+
     if not FarmMovement.IsAt(
         anchor,
         Config.PlatformArrivalDistance
@@ -4911,11 +5648,6 @@ local function stepDefeatTask(wanted)
     Runtime.FarmMoveHoldCFrame = anchor
 
     local brought = BringService.Step(
-        wanted,
-        anchor
-    )
-
-    HitboxService.Step(
         wanted,
         anchor
     )
@@ -4958,6 +5690,8 @@ local function stepPromptTask(taskData)
     )
 
     if not prompt then
+        FarmMovement.Stop(false, true)
+
         farmSetState(
             "OBJECT_SEARCH",
             taskData.Target
@@ -4970,7 +5704,11 @@ local function stepPromptTask(taskData)
     if distanceTo(prompt)
         > Config.PlatformArrivalDistance + 2 then
 
-        FarmMovement.GoNear(prompt)
+        FarmMovement.GoNear(
+            prompt,
+            3,
+            2.5
+        )
 
         farmSetState(
             "OBJECT_TRAVEL",
@@ -4986,6 +5724,101 @@ local function stepPromptTask(taskData)
     farmSetState(
         "OBJECT_INTERACT",
         taskData.Target
+    )
+end
+
+local function stepReachTask(quest, taskData)
+    farmResetRoute(false)
+
+    local target =
+        WorldTargetService.Find(
+            taskData.Target
+        )
+
+    if not target
+        and quest
+        and quest.Name ~= taskData.Target then
+
+        target =
+            WorldTargetService.Find(
+                quest.Name
+            )
+    end
+
+    if not target then
+        FarmMovement.Stop(false, true)
+
+        farmSetState(
+            "REACH_SEARCH",
+            taskData.Target
+        )
+
+        return
+    end
+
+    Runtime.CurrentTarget = target
+
+    local requiredDistance =
+        math.max(
+            7,
+            Config.PlatformArrivalDistance + 2
+        )
+
+    if distanceTo(target) > requiredDistance then
+        FarmMovement.GoNear(
+            target,
+            target:IsA("Model")
+                and target:FindFirstChildOfClass(
+                    "Humanoid"
+                )
+                and 0.25
+                or 3,
+            2.5
+        )
+
+        farmSetState(
+            "REACH_TRAVEL",
+            taskData.Target
+        )
+
+        return
+    end
+
+    FarmMovement.Stop(false, true)
+
+    farmSetState(
+        taskData.EventGated
+            and "REACH_WAIT_EVENT"
+            or "REACH_ARRIVED",
+        taskData.Target
+    )
+end
+
+local function stepEquipOrUseTask(taskData)
+    farmResetRoute(false)
+    FarmMovement.Stop(false, true)
+
+    local slot =
+        HotbarService.FindByText(
+            taskData.Target
+        )
+
+    if not slot then
+        farmSetState(
+            "ITEM_WAIT",
+            taskData.Target
+                .. " not found in hotbar"
+        )
+        return
+    end
+
+    HotbarService.Press(slot)
+
+    farmSetState(
+        taskData.Kind == "Equip"
+            and "ITEM_EQUIP"
+            or "ITEM_USE",
+        slot.Title
     )
 end
 
@@ -5020,6 +5853,8 @@ local function stepUtilityTask(quest, taskData)
         )
 
     if not prompt then
+        FarmMovement.Stop(false, true)
+
         farmSetState(
             "UTILITY_WAIT",
             taskData.Text
@@ -5032,7 +5867,11 @@ local function stepUtilityTask(quest, taskData)
     if distanceTo(prompt)
         > Config.PlatformArrivalDistance + 2 then
 
-        FarmMovement.GoNear(prompt)
+        FarmMovement.GoNear(
+            prompt,
+            3,
+            2.5
+        )
 
         farmSetState(
             "UTILITY_TRAVEL",
@@ -5052,7 +5891,7 @@ local function stepUtilityTask(quest, taskData)
 end
 
 local function routeLifeSkill(kind, detail)
-    FarmMovement.Stop(false, true)
+    FarmMovement.Stop(true, true)
     Runtime.CurrentTarget = nil
     Runtime.CurrentWantedMob = nil
     HitboxService.Clear()
@@ -5166,12 +6005,23 @@ function AutoFarmController.Step()
         elseif taskData.Kind == "Collect"
             or taskData.Kind == "Find"
             or taskData.Kind == "Interact"
-            or taskData.Kind == "Reach"
-            or taskData.Kind == "Use"
             or taskData.Kind == "Claim"
             or taskData.Kind == "Destroy" then
 
             stepPromptTask(taskData)
+            return
+        elseif taskData.Kind == "Reach" then
+            stepReachTask(
+                quest,
+                taskData
+            )
+            return
+        elseif taskData.Kind == "Equip"
+            or taskData.Kind == "Use" then
+
+            stepEquipOrUseTask(
+                taskData
+            )
             return
         elseif taskData.Kind == "Fish" then
             routeLifeSkill(
@@ -5347,8 +6197,121 @@ function ESPService.Step()
 end
 
 -- ============================================================
+-- Character movement service
+-- Makes Movement-tab controls functional.
+-- ============================================================
+
+MovementService = {}
+
+local function restoreCollision()
+    for part, canCollide in pairs(
+        Runtime.CharacterCollisionBackup
+    ) do
+        if part and part.Parent then
+            pcall(function()
+                part.CanCollide = canCollide
+            end)
+        end
+
+        Runtime.CharacterCollisionBackup[part] = nil
+    end
+end
+
+local function applyCharacterNoclip()
+    local char = character()
+    if not char then
+        return
+    end
+
+    for _, object in ipairs(
+        char:GetDescendants()
+    ) do
+        if object:IsA("BasePart") then
+            if Runtime.CharacterCollisionBackup[object]
+                == nil then
+
+                Runtime.CharacterCollisionBackup[object] =
+                    object.CanCollide
+            end
+
+            object.CanCollide = false
+        end
+    end
+end
+
+function MovementService.Step()
+    local hum = humanoid()
+    if not hum then
+        return
+    end
+
+    if Config.SpeedOverride then
+        pcall(function()
+            hum.WalkSpeed = Config.WalkSpeed
+        end)
+    end
+
+    if Config.JumpOverride then
+        pcall(function()
+            hum.UseJumpPower = true
+            hum.JumpPower = Config.JumpPower
+        end)
+    end
+
+    local transportNoclip =
+        Config.PlatformNoclip
+        and (
+            Runtime.FarmMoveActive
+            or Runtime.TransportMoving
+        )
+
+    if Config.Noclip
+        or transportNoclip then
+
+        applyCharacterNoclip()
+    elseif next(
+        Runtime.CharacterCollisionBackup
+    ) ~= nil then
+        restoreCollision()
+    end
+end
+
+connect(
+    UserInputService.JumpRequest,
+    function()
+        if Config.InfiniteJump then
+            local hum = humanoid()
+            if hum then
+                pcall(function()
+                    hum:ChangeState(
+                        Enum.HumanoidStateType.Jumping
+                    )
+                end)
+            end
+        end
+    end
+)
+
+-- ============================================================
 -- Schedulers
 -- ============================================================
+
+task.spawn(function()
+    while Core.Running do
+        safeWorker("Movement", MovementService.Step)
+        task.wait(
+            (
+                Config.SpeedOverride
+                or Config.JumpOverride
+                or Config.Noclip
+                or Config.PlatformNoclip
+            )
+            and 0.08
+            or 0.45
+        )
+    end
+end)
+
 
 task.spawn(function()
     while Core.Running do
@@ -5821,7 +6784,7 @@ local FarmMain = Tabs.Farm:AddSection("Auto Farm")
 
 local FarmMaster = bindToggle(
     FarmMain,
-    "AutoFarmV11",
+    "AutoFarmV12",
     "AUTO FARM",
     Config.AutoProgress,
     function(value)
@@ -5863,7 +6826,7 @@ local FarmMaster = bindToggle(
 
 bindDropdown(
     FarmMain,
-    "FarmModeV11",
+    "FarmModeV12",
     "Mode",
     {"Smart Quest", "Selected Mob", "Boss"},
     1,
@@ -5882,7 +6845,7 @@ local mobValuesV11 = TargetService.GetMobOptions()
 
 bindDropdown(
     FarmMain,
-    "SelectedMobV11",
+    "SelectedMobV12",
     "Manual Mob",
     mobValuesV11,
     1,
@@ -5898,12 +6861,22 @@ FarmMain:AddButton({
     Title = "Farm Status",
     Description = "Shows the exact state, quest task, target and movement status.",
     Callback = function()
+        local statusQuest, statusTask =
+            QuestService.GetNextTask()
+
         notify(
             "Auto Farm Status",
             table.concat({
                 "State: " .. tostring(Runtime.ProgressState),
                 "Detail: " .. tostring(Runtime.ProgressDetail),
                 "Quest: " .. currentQuestSummary(),
+                "Next Kind: "
+                    .. tostring(statusTask and statusTask.Kind or "None")
+                    .. (
+                        statusTask and statusTask.EventGated
+                        and " • event-gated"
+                        or ""
+                    ),
                 "Wanted Mob: " .. tostring(Runtime.CurrentWantedMob or "None"),
                 "Target: "
                     .. tostring(
@@ -5911,8 +6884,16 @@ FarmMain:AddButton({
                         and Runtime.CurrentTarget.Name
                         or "None"
                     ),
-                "Moving: " .. tostring(Runtime.FarmMoveActive),
+                "Moving: " .. tostring(Runtime.FarmMoveActive)
+                    .. " • phase="
+                    .. tostring(Runtime.FarmMoveKind or "-")
+                    .. " #"
+                    .. tostring(Runtime.FarmMoveRouteIndex),
                 "Anchor: " .. tostring(Runtime.FarmAnchorCFrame ~= nil),
+                "Bring count: " .. tostring(Runtime.LastBringCount or 0),
+                "Hitbox count: " .. tostring(Runtime.LastHitboxCount or 0)
+                    .. " • size="
+                    .. tostring(Config.HitboxSize),
                 "Mastery: " .. tostring(Config.AutoMastery),
             }, "\n"),
             11
@@ -5924,7 +6905,7 @@ local PositionSection = Tabs.Farm:AddSection("Farm Position")
 
 bindSlider(
     PositionSection,
-    "FarmHeightV11",
+    "FarmHeightV12",
     "Height Above Mobs",
     10,
     32,
@@ -5938,7 +6919,7 @@ bindSlider(
 
 bindSlider(
     PositionSection,
-    "FarmMoveSpeedV11",
+    "FarmMoveSpeedV12",
     "Travel Speed",
     70,
     320,
@@ -5951,7 +6932,7 @@ bindSlider(
 
 bindSlider(
     PositionSection,
-    "FarmPlatformSizeV11",
+    "FarmPlatformSizeV12",
     "Platform Size",
     6,
     18,
@@ -5965,7 +6946,7 @@ local MobControl = Tabs.Farm:AddSection("Mob Control")
 
 bindToggle(
     MobControl,
-    "BringMobsV11",
+    "BringMobsV12",
     "Bring Matching Mobs",
     Config.BringMobs,
     function(value)
@@ -5976,7 +6957,7 @@ bindToggle(
 
 bindSlider(
     MobControl,
-    "BringRadiusV11",
+    "BringRadiusV12",
     "Bring Radius",
     40,
     220,
@@ -5988,7 +6969,7 @@ bindSlider(
 
 bindSlider(
     MobControl,
-    "BringLimitV11",
+    "BringLimitV12",
     "Max Mobs",
     1,
     18,
@@ -6000,7 +6981,7 @@ bindSlider(
 
 bindSlider(
     MobControl,
-    "MobBelowFeetV11",
+    "MobBelowFeetV12",
     "Mobs Below Platform",
     5,
     18,
@@ -6012,7 +6993,7 @@ bindSlider(
 
 bindToggle(
     MobControl,
-    "MobHitboxV11",
+    "MobHitboxV12",
     "Large Mob Hitbox",
     Config.MobHitbox,
     function(value)
@@ -6026,10 +7007,10 @@ bindToggle(
 
 bindSlider(
     MobControl,
-    "HitboxSizeV11",
+    "HitboxSizeV12",
     "Hitbox Size",
-    8,
-    32,
+    10,
+    40,
     Config.HitboxSize,
     function(value)
         Config.HitboxSize = value
@@ -6041,7 +7022,7 @@ local CombatFarm = Tabs.Farm:AddSection("Combat Rotation")
 
 bindToggle(
     CombatFarm,
-    "AutoAttackV11",
+    "AutoAttackV12",
     "Auto M1",
     Config.AutoAttack,
     function(value)
@@ -6051,7 +7032,7 @@ bindToggle(
 
 bindSlider(
     CombatFarm,
-    "AttackRateV11",
+    "AttackRateV12",
     "M1 / Second",
     2,
     15,
@@ -6063,7 +7044,7 @@ bindSlider(
 
 bindToggle(
     CombatFarm,
-    "AutoMasteryV11",
+    "AutoMasteryV12",
     "Auto Skill / Mastery",
     Config.AutoMastery,
     function(value)
@@ -6074,7 +7055,7 @@ bindToggle(
 
 bindDropdown(
     CombatFarm,
-    "MasteryModeV11",
+    "MasteryModeV12",
     "Skill Rotation",
     {"All Combat", "Current Fruit", "Selected Skill"},
     1,
@@ -6087,7 +7068,7 @@ local combatActions = HotbarService.GetWeaponOptions()
 
 bindDropdown(
     CombatFarm,
-    "SelectedSkillV11",
+    "SelectedSkillV12",
     "Selected Skill",
     combatActions,
     1,
@@ -6099,7 +7080,7 @@ bindDropdown(
 
 bindToggle(
     CombatFarm,
-    "ReadyOnlyV11",
+    "ReadyOnlyV12",
     "Use Ready Skills Only",
     Config.MasteryReadyOnly,
     function(value)
@@ -6109,7 +7090,7 @@ bindToggle(
 
 bindSlider(
     CombatFarm,
-    "MasteryIntervalV11",
+    "MasteryIntervalV12",
     "Skill Interval x10",
     2,
     20,
@@ -6364,6 +7345,29 @@ bindToggle(
     Config.AutoFruitChest,
     function(value)
         Config.AutoFruitChest = value
+    end
+)
+
+bindToggle(
+    LootSection,
+    "AutoChestRoute",
+    "Route To Chests",
+    Config.AutoChestRoute,
+    function(value)
+        Config.AutoChestRoute = value
+    end,
+    "When Auto Farm is OFF, travel to enabled chests. During Auto Farm, nearby chest prompts are opened without stealing quest movement."
+)
+
+bindSlider(
+    LootSection,
+    "ChestCollectRadius",
+    "Chest Collect Radius",
+    15,
+    100,
+    Config.ChestCollectRadius,
+    function(value)
+        Config.ChestCollectRadius = value
     end
 )
 
