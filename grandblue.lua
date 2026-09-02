@@ -14,7 +14,7 @@
       - Large Workspace scan occurs once; caches update incrementally.
 ]]
 
-local VERSION = "14.0.0"
+local VERSION = "15.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -215,13 +215,13 @@ local Config = {
     PlatformNoclip = true,
 
     -- Bring + hitbox
-    BringMobs = true,
+    BringMobs = false,
     BringRadius = 165,
     BringLimit = 12,
     MobBelowFeet = 9,
     BringSpread = 1.5,
 
-    MobHitbox = true,
+    MobHitbox = false,
     HitboxSize = 28,
     HitboxTransparency = 0.72,
     HitboxRange = 220,
@@ -247,12 +247,12 @@ local Config = {
 
     AutoMining = false,
     AutoMiningQTE = true,
-    MiningMode = "Quest Required",
+    MiningMode = "Any Available",
     SelectedOre = "Copper Ore",
     MiningCriticalTolerance = 0.035,
     MiningHoldTimeout = 5.0,
     MiningRetryDelay = 0.55,
-    MiningAutoAim = true,
+    MiningAutoAim = false,
 
     AutoFarming = false,
 
@@ -404,7 +404,12 @@ local Runtime = {
     MiningMouseHeld = false,
     MiningLastAttempt = 0,
     MiningReleaseDone = false,
+    MiningEquippedSlot = nil,
+    MiningEquipAt = 0,
+    MiningTeleportedTarget = nil,
     ProgressLifeSkill = nil,
+
+    IslandLandingCache = {},
 
     TreasureState = "IDLE",
     TreasureTarget = nil,
@@ -4565,20 +4570,55 @@ function MiningQTEService.Reset(reason)
     miningMouse(false, Runtime.MiningTarget)
     Runtime.MiningTarget = nil
     Runtime.MiningReleaseDone = false
+    Runtime.MiningEquippedSlot = nil
+    Runtime.MiningTeleportedTarget = nil
     setMiningState("CHECK", reason or "reset")
 end
 
-function MiningQTEService.Step()
-    local progressionMining = Config.AutoProgress
-        and Runtime.ProgressLifeSkill == "Mining"
+function MiningQTEService.TeleportToOre(ore)
+    local root = rootPart()
+    local target = objectRoot(ore)
 
-    if not Config.AutoMining and not progressionMining then
-        MiningQTEService.Reset("Auto Mining disabled")
-        return 0.8
+    if not root or not target then
+        return false
     end
 
-    if Config.AutoProgress and Runtime.ProgressLifeSkill ~= "Mining" then
-        MiningQTEService.Reset("Progression owns another task")
+    local look = target.CFrame.LookVector
+    local flat = Vector3.new(look.X, 0, look.Z)
+
+    if flat.Magnitude <= 0.05 then
+        flat = Vector3.new(0, 0, -1)
+    else
+        flat = flat.Unit
+    end
+
+    local position =
+        target.Position
+        - flat * 3.6
+        + Vector3.new(0, 1.25, 0)
+
+    FarmMovement.Stop(true, true)
+
+    local ok = pcall(function()
+        root.CFrame = yawCFrame(position, target.Position)
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end)
+
+    return ok
+end
+
+function MiningQTEService.Step()
+    local progressionMining =
+        Config.AutoProgress
+        and Runtime.ProgressLifeSkill == "Mining"
+
+    local manualMining = Config.AutoMining
+
+    if not manualMining and not progressionMining then
+        MiningQTEService.Reset("Auto Mining disabled")
+        Runtime.MiningEquippedSlot = nil
+        Runtime.MiningTeleportedTarget = nil
         return 0.8
     end
 
@@ -4588,88 +4628,102 @@ function MiningQTEService.Step()
     end
 
     local ore = Runtime.MiningTarget
+
     if not oreIsAvailable(ore) then
         ore = MiningQTEService.FindOre()
         Runtime.MiningTarget = ore
         Runtime.MiningReleaseDone = false
+        Runtime.MiningTeleportedTarget = nil
+        Runtime.MiningEquippedSlot = nil
     end
 
     if not ore then
         miningMouse(false)
-        setMiningState("WAIT_ORE", "No matching ore spawned")
-        return 0.8
+        setMiningState(
+            "WAIT_ORE",
+            "No matching ore is client-visible"
+        )
+        return 0.55
     end
 
     local wanted = oreName(ore)
     local distance = distanceTo(ore)
 
-    if distance > Config.PlatformArrivalDistance + 1 then
+    if distance > 7 then
         miningMouse(false, ore)
-        setMiningState("MOVE", "Moving to " .. wanted)
+        setMiningState(
+            "TELEPORT",
+            "Teleporting to " .. wanted
+        )
 
-        if FarmMovement then
-            FarmMovement.GoNear(
-                ore,
-                2.4,
-                3.5
-            )
-        else
-            PlatformTransport.MoveNear(ore)
-        end
-
+        MiningQTEService.TeleportToOre(ore)
+        Runtime.MiningTeleportedTarget = ore
         return 0.18
     end
 
-    if FarmMovement then
-        FarmMovement.Stop(false, true)
-    else
-        PlatformTransport.Cancel(true)
-    end
+    FarmMovement.Stop(false, true)
 
     local pickaxe = findPickaxe()
+
     if not pickaxe then
         miningMouse(false, ore)
-        setMiningState("MISSING_PICKAXE", "No pickaxe in hotbar")
+        setMiningState(
+            "MISSING_PICKAXE",
+            "No Pickaxe detected in live hotbar"
+        )
         return 0.8
     end
 
-    HotbarService.Press(pickaxe)
+    if Runtime.MiningEquippedSlot ~= pickaxe.Slot then
+        HotbarService.Press(pickaxe)
+        Runtime.MiningEquippedSlot = pickaxe.Slot
+        Runtime.MiningEquipAt = os.clock()
 
-    if Config.MiningAutoAim then
-        local ownRoot = rootPart()
-        local targetPart = objectRoot(ore)
-        if ownRoot and targetPart then
-            pcall(function()
-                ownRoot.CFrame = CFrame.lookAt(
-                    ownRoot.Position,
-                    Vector3.new(targetPart.Position.X, ownRoot.Position.Y, targetPart.Position.Z)
-                )
-            end)
-        end
+        setMiningState(
+            "EQUIP",
+            "Equipping " .. pickaxe.Title
+        )
+
+        return 0.22
+    end
+
+    if os.clock() - Runtime.MiningEquipAt < 0.35 then
+        return 0.06
     end
 
     if MiningQTEService.HandleQTE(ore) then
-        if Runtime.MiningReleaseDone then
-            -- Wait for the game to consume the release and either reset the bar
-            -- or mark the ore Mined before another swing.
-            if os.clock() - Runtime.MiningLastQTE >= Config.MiningRetryDelay then
-                Runtime.MiningReleaseDone = false
-                Runtime.MiningLastAttempt = os.clock()
-            end
+        if Runtime.MiningReleaseDone
+            and os.clock() - Runtime.MiningLastQTE
+                >= Config.MiningRetryDelay then
+
+            Runtime.MiningReleaseDone = false
+            Runtime.MiningLastAttempt = os.clock()
         end
+
         return 0.035
     end
 
-    -- No QTE yet: start/continue one mining swing by holding M1 on the ore.
-    local elapsed = os.clock() - Runtime.MiningStateSince
+    local elapsed =
+        os.clock() - Runtime.MiningStateSince
+
     if Runtime.MiningState ~= "HOLD" then
-        setMiningState("HOLD", "Holding M1 on " .. wanted)
+        setMiningState(
+            "HOLD",
+            "Holding M1 on " .. wanted
+        )
         Runtime.MiningStateSince = os.clock()
         miningMouse(true, ore)
+
     elseif elapsed >= Config.MiningHoldTimeout then
         miningMouse(false, ore)
         Runtime.MiningLastAttempt = os.clock()
-        setMiningState("RETRY", "Mining QTE timeout")
+        Runtime.MiningEquippedSlot = nil
+
+        setMiningState(
+            "RETRY",
+            "Mining QTE timeout"
+        )
+
         return Config.MiningRetryDelay
     end
 
@@ -6039,101 +6093,113 @@ local function stepQuestNpc(questName, preferredNpc, finalState)
     )
 end
 
+local function combatTargetValid(model, wanted)
+    return model
+        and model.Parent
+        and TargetService.IsFarmMob(model, wanted)
+        and objectRoot(model) ~= nil
+end
+
+local function combatGoalFor(model)
+    local part = objectRoot(model)
+    if not part then
+        return nil
+    end
+
+    local ownRoot = rootPart()
+    local direction
+
+    if ownRoot then
+        direction = Vector3.new(
+            ownRoot.Position.X - part.Position.X,
+            0,
+            ownRoot.Position.Z - part.Position.Z
+        )
+    end
+
+    if not direction or direction.Magnitude <= 0.05 then
+        local look = part.CFrame.LookVector
+        direction = Vector3.new(look.X, 0, look.Z)
+    end
+
+    if direction.Magnitude <= 0.05 then
+        direction = Vector3.new(0, 0, 1)
+    else
+        direction = direction.Unit
+    end
+
+    local position =
+        part.Position
+        + direction * 4.0
+        + Vector3.new(0, 0.25, 0)
+
+    return yawCFrame(position, part.Position)
+end
+
 local function stepDefeatTask(wanted)
     Runtime.ProgressLifeSkill = nil
     Runtime.CurrentWantedMob = wanted
 
-    local mobs = matchingFarmMobs(
-        wanted,
-        math.max(Config.BringLimit, 8)
-    )
+    local target = Runtime.CurrentTarget
 
-    if #mobs == 0 then
-        HitboxService.Clear()
+    if not combatTargetValid(target, wanted) then
+        target = TargetService.Find(wanted)
+        Runtime.CurrentTarget = target
+    end
+
+    if not target then
+        FarmMovement.Stop(false, true)
+        farmSetState(
+            "MOB_WAIT",
+            wanted .. " • waiting for target"
+        )
+        return
+    end
+
+    local targetPart = objectRoot(target)
+    local ownRoot = rootPart()
+
+    if not targetPart or not ownRoot then
         Runtime.CurrentTarget = nil
+        return
+    end
 
-        if Runtime.FarmFSM.NoMobSince == 0 then
-            Runtime.FarmFSM.NoMobSince = os.clock()
+    local distance =
+        (ownRoot.Position - targetPart.Position).Magnitude
+
+    if distance > 5.2 then
+        local goal = combatGoalFor(target)
+
+        if goal then
+            FarmMovement.Go(
+                goal,
+                false,
+                "combat",
+                targetPart.Position
+            )
         end
 
         farmSetState(
-            "MOB_WAIT",
-            wanted .. " • waiting for spawn"
-        )
-
-        return
-    end
-
-    Runtime.FarmFSM.NoMobSince = 0
-
-    if shouldRecenterAnchor(
-        Runtime.FarmAnchorCFrame,
-        mobs
-    ) then
-
-        Runtime.FarmAnchorCFrame =
-            computeFarmAnchor(mobs)
-
-        Runtime.FarmFSM.LastAnchorRefresh =
-            os.clock()
-    end
-
-    local anchor = Runtime.FarmAnchorCFrame
-
-    if not anchor then
-        farmSetState(
-            "MOB_SEARCH",
-            wanted
+            "COMBAT_TRAVEL",
+            target.Name
+                .. " • "
+                .. string.format("%.1f", distance)
+                .. " studs"
         )
         return
     end
 
-    -- Hitbox is maintained as soon as the quest mob cluster is known.
-    -- It is no longer blocked by travel reaching the farm anchor first.
-    HitboxService.Step(
-        wanted,
-        anchor
-    )
+    FarmMovement.Stop(false, true)
 
-    if not FarmMovement.IsAt(
-        anchor,
-        Config.PlatformArrivalDistance
-    ) then
-
-        FarmMovement.GoAnchor(anchor)
-
-        farmSetState(
-            "FARM_TRAVEL",
-            wanted
-        )
-
-        return
-    end
-
-    Runtime.FarmMoveHold = true
-    Runtime.FarmMoveHoldCFrame = anchor
-
-    local brought = BringService.Step(
-        wanted,
-        anchor
-    )
-
-    local target = mobs[1].Model
-    Runtime.CurrentTarget = target
-
-    if target then
-        CombatService.AimAt(target)
-    end
-
+    -- M1 only. No numeric skill/hotbar rotation.
     CombatService.AttackStep()
 
     farmSetState(
         "FARM_COMBAT",
-        wanted
-            .. " • mobs="
-            .. tostring(#mobs)
-            .. " • brought="
-            .. tostring(brought)
+        target.Name
+            .. " • M1 • "
+            .. string.format("%.1f", distance)
+            .. " studs"
     )
 end
 
@@ -6426,6 +6492,19 @@ function AutoFarmController.Step()
         return
     end
 
+    if Config.AutoMining then
+        Runtime.ProgressLifeSkill = "Mining"
+        farmSetState(
+            "MANUAL_MINING",
+            tostring(
+                Runtime.MiningTarget
+                and oreName(Runtime.MiningTarget)
+                or "searching ore"
+            )
+        )
+        return
+    end
+
     -- Manual modes do not touch Quest state.
     if Config.FarmMode == "Selected Mob" then
         stepDefeatTask(Config.SelectedMob)
@@ -6520,7 +6599,11 @@ function AutoFarmController.Step()
             routeLifeSkill("Farming", taskData.Text)
             return
         elseif taskData.Kind == "Treasure" then
-            routeLifeSkill("Treasure", taskData.Text)
+            FarmMovement.Stop(false, true)
+            farmSetState(
+                "TASK_UNSUPPORTED",
+                "Treasure digging is not verified in the current dump"
+            )
             return
         end
 
@@ -7002,6 +7085,146 @@ function NPCNavigator.GoTo(displayOrName)
 end
 
 -- ============================================================
+-- Island Navigation
+-- ============================================================
+
+IslandService = {}
+
+local ISLAND_LANDING_HINTS = {
+    ["Maple Village"] = {
+        "MapleVillageMissionSite1",
+        "MapleVillageMissionSite2",
+        "MapleVillageMissionSite3",
+    },
+
+    ["Anchor Town"] = {
+        "AnchorTownTown1",
+        "AnchorMissionSite1",
+        "AnchorMissionSite3",
+    },
+
+    ["Clown Town"] = {
+        "ClownTownMissionSIte1",
+        "ClownTownMissionSIte2",
+    },
+}
+
+local function islandsRoot()
+    return Workspace:FindFirstChild("Islands")
+end
+
+function IslandService.GetNames()
+    local root = islandsRoot()
+    local result = {}
+
+    if root then
+        for _, child in ipairs(root:GetChildren()) do
+            if child:IsA("Folder") or child:IsA("Model") then
+                table.insert(result, child.Name)
+            end
+        end
+    end
+
+    table.sort(result)
+
+    if #result == 0 then
+        return {"Islands unavailable"}
+    end
+
+    return result
+end
+
+function IslandService.FindLanding(name)
+    local cached = Runtime.IslandLandingCache[name]
+
+    if cached and cached.Parent then
+        return cached
+    end
+
+    local root = islandsRoot()
+    local island = root and root:FindFirstChild(name)
+
+    if not island then
+        return nil
+    end
+
+    for _, hint in ipairs(ISLAND_LANDING_HINTS[name] or {}) do
+        local object = island:FindFirstChild(hint, true)
+        local part = objectRoot(object)
+
+        if part then
+            Runtime.IslandLandingCache[name] = part
+            return part
+        end
+    end
+
+    local spawnLocations =
+        island:FindFirstChild("SpawnLocations")
+
+    if spawnLocations then
+        local part =
+            spawnLocations:FindFirstChildWhichIsA(
+                "BasePart",
+                true
+            )
+
+        if part then
+            Runtime.IslandLandingCache[name] = part
+            return part
+        end
+    end
+
+    for _, object in ipairs(island:GetDescendants()) do
+        if object:IsA("BasePart")
+            and object:GetAttribute("Island") == name
+            and object:GetAttribute("Touch") == "QuestZone" then
+
+            Runtime.IslandLandingCache[name] = object
+            return object
+        end
+    end
+
+    return nil
+end
+
+function IslandService.Teleport(name)
+    local landing =
+        IslandService.FindLanding(name)
+
+    local root = rootPart()
+
+    if not landing or not root then
+        notify(
+            "Island",
+            "No landing point: " .. tostring(name),
+            4
+        )
+        return false
+    end
+
+    FarmMovement.Stop(true, true)
+
+    local ok = pcall(function()
+        root.CFrame =
+            landing.CFrame
+            * CFrame.new(0, 5, 0)
+
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end)
+
+    if ok then
+        notify(
+            "Island",
+            "Teleported to " .. name,
+            3
+        )
+    end
+
+    return ok
+end
+
+-- ============================================================
 -- UI helpers
 -- ============================================================
 
@@ -7237,7 +7460,6 @@ local HomeAutomation = Tabs.Home:AddSection("Main Automation")
 
 HomeAutomation:AddButton({
     Title = "Runtime Status",
-    Description = "Level, quest, progression state and detected game data.",
     Callback = function()
         notify("Runtime Status", runtimeStatus(), 11)
     end,
@@ -7245,7 +7467,6 @@ HomeAutomation:AddButton({
 
 HomeAutomation:AddButton({
     Title = "Self Test",
-    Description = "Checks Quest UI, DialogueNPCs, hotbar, Fishing/QTE, Ore and DigSpot caches.",
     Callback = function()
         notify("SON HUB Self Test", selfTest(), 12)
     end,
@@ -7253,7 +7474,6 @@ HomeAutomation:AddButton({
 
 HomeAutomation:AddButton({
     Title = "Worker Health",
-    Description = "Shows scheduler ticks and the last isolated worker error.",
     Callback = function()
         notify("Worker Health", workerHealth(), 14)
     end,
@@ -7261,7 +7481,6 @@ HomeAutomation:AddButton({
 
 HomeAutomation:AddButton({
     Title = "Quest Target Probe",
-    Description = "Resolve the current dialogue target and start a platform movement test.",
     Callback = function()
         local quest, taskData = QuestService.GetNextTask()
         if not quest or not taskData then
@@ -7309,7 +7528,6 @@ HomeState:AddButton({
 
 HomeState:AddButton({
     Title = "Refresh Game Index",
-    Description = "Rebuilds client-visible entity/prompt/ore/dig caches and the quest-to-NPC map.",
     Callback = function()
         task.spawn(function()
             RuntimeIndex.Rebuild()
@@ -7412,7 +7630,6 @@ bindDropdown(
 
 FarmMain:AddButton({
     Title = "Farm Status",
-    Description = "Shows the exact state, quest task, target and movement status.",
     Callback = function()
         local statusQuest, statusTask =
             QuestService.GetNextTask()
@@ -7495,57 +7712,6 @@ bindSlider(
     end
 )
 
-local MobSection = Tabs.Farm:AddSection("Mob Farm")
-
-bindToggle(
-    MobSection,
-    "BringMobsV14",
-    "Bring Matching Mobs",
-    Config.BringMobs,
-    function(value)
-        Config.BringMobs = value
-    end,
-    "Only mobs matching the current Defeat task are moved."
-)
-
-bindSlider(
-    MobSection,
-    "BringRadiusV14",
-    "Bring Radius",
-    40,
-    240,
-    Config.BringRadius,
-    function(value)
-        Config.BringRadius = value
-    end
-)
-
-bindToggle(
-    MobSection,
-    "HitboxV14",
-    "Large Mob Hitbox",
-    Config.MobHitbox,
-    function(value)
-        Config.MobHitbox = value
-        if not value then
-            HitboxService.Clear()
-        end
-    end,
-    "HumanoidRootPart only; quest NPCs and players are excluded."
-)
-
-bindSlider(
-    MobSection,
-    "HitboxSizeV14",
-    "Hitbox Size",
-    10,
-    40,
-    Config.HitboxSize,
-    function(value)
-        Config.HitboxSize = value
-    end
-)
-
 local AttackSection = Tabs.Farm:AddSection("Basic Attack")
 
 bindToggle(
@@ -7555,8 +7721,7 @@ bindToggle(
     Config.AutoAttack,
     function(value)
         Config.AutoAttack = value
-    end,
-    "Only normal M1. Auto Farm does not press numeric skill keys."
+    end
 )
 
 bindSlider(
@@ -8014,7 +8179,6 @@ bindToggle(
 
 MiningSection:AddButton({
     Title = "Go To Selected Ore",
-    Description = "Finds the selected/quest-required ore and moves to it using the SON HUB mover.",
     Callback = function()
         local ore =
             MiningQTEService.FindOre()
@@ -8073,6 +8237,51 @@ MiningSection:AddButton({
 })
 
 MiningSection:AddButton({
+    Title = "Teleport To Ore",
+    Callback = function()
+        local ore = MiningQTEService.FindOre()
+
+        if not ore then
+            notify(
+                "Mining",
+                "No matching ore is client-visible.",
+                4
+            )
+            return
+        end
+
+        Runtime.MiningTarget = ore
+        MiningQTEService.TeleportToOre(ore)
+    end,
+})
+
+MiningSection:AddButton({
+    Title = "Equip Pickaxe",
+    Callback = function()
+        local pickaxe = findPickaxe()
+
+        if not pickaxe then
+            notify(
+                "Mining",
+                "No Pickaxe in live hotbar.",
+                4
+            )
+            return
+        end
+
+        HotbarService.Press(pickaxe)
+        Runtime.MiningEquippedSlot = pickaxe.Slot
+        Runtime.MiningEquipAt = os.clock()
+
+        notify(
+            "Mining",
+            "Equipped: " .. tostring(pickaxe.Title),
+            3
+        )
+    end,
+})
+
+MiningSection:AddButton({
     Title = "Mining State",
     Callback = function()
         notify(
@@ -8091,7 +8300,7 @@ MiningSection:AddButton({
     end,
 })
 
-local LifeSection = Tabs.Player:AddSection("Farming / Treasure")
+local LifeSection = Tabs.Player:AddSection("Farming")
 
 bindToggle(
     LifeSection,
@@ -8104,17 +8313,6 @@ bindToggle(
     "Uses client-visible Crop, FarmGear and Pest prompts."
 )
 
-bindToggle(
-    LifeSection,
-    "AutoTreasure",
-    "Auto Treasure Dig",
-    Config.AutoTreasure,
-    function(value)
-        Config.AutoTreasure = value
-        TreasureService.Reset(value and "Enabled" or "Disabled")
-    end,
-    "Uses visible DigSpots and shovel interaction only; no hidden shovel remote is guessed."
-)
 
 bindSlider(
     LifeSection,
@@ -8200,47 +8398,58 @@ bindToggle(
 local NPCNavigationSection =
     Tabs.Player:AddSection("NPC Navigation")
 
+local npcValues =
+    NPCNavigator.GetNames()
+
+local selectedNPC =
+    npcValues[1]
+
+bindDropdown(
+    NPCNavigationSection,
+    "NPCSelectV15",
+    "NPC",
+    npcValues,
+    1,
+    function(value)
+        selectedNPC = value
+    end
+)
+
 NPCNavigationSection:AddButton({
-    Title = "Fishing NPC — Fisherman Jack",
-    Description = "Move to the client-visible fishing NPC.",
+    Title = "Go To NPC",
     Callback = function()
-        NPCNavigator.GoTo(
-            "Fishing NPC — Fisherman Jack"
-        )
+        if selectedNPC then
+            NPCNavigator.GoTo(selectedNPC)
+        end
     end,
 })
 
-NPCNavigationSection:AddButton({
-    Title = "Blacksmith — Shinozaki",
-    Callback = function()
-        NPCNavigator.GoTo(
-            "Blacksmith — Shinozaki"
-        )
-    end,
-})
+local IslandNavigationSection =
+    Tabs.Player:AddSection("Island Navigation")
 
-NPCNavigationSection:AddButton({
-    Title = "Merchant",
-    Callback = function()
-        NPCNavigator.GoTo("Merchant")
-    end,
-})
+local islandValues =
+    IslandService.GetNames()
 
-NPCNavigationSection:AddButton({
-    Title = "Miner — Song Jil Wu",
-    Callback = function()
-        NPCNavigator.GoTo(
-            "Miner — Song Jil Wu"
-        )
-    end,
-})
+local selectedIsland =
+    islandValues[1]
 
-NPCNavigationSection:AddButton({
-    Title = "Miner — Song Kim Wu",
+bindDropdown(
+    IslandNavigationSection,
+    "IslandSelectV15",
+    "Island",
+    islandValues,
+    1,
+    function(value)
+        selectedIsland = value
+    end
+)
+
+IslandNavigationSection:AddButton({
+    Title = "Teleport",
     Callback = function()
-        NPCNavigator.GoTo(
-            "Miner — Song Kim Wu"
-        )
+        if selectedIsland then
+            IslandService.Teleport(selectedIsland)
+        end
     end,
 })
 
@@ -8376,7 +8585,6 @@ local CompatibilitySection = Tabs.Settings:AddSection("Nexomia Compatibility")
 
 CompatibilitySection:AddButton({
     Title = "Executor Status",
-    Description = "SON HUB does not use WebSocket, getscriptclosure or filesystem config addons.",
     Callback = function()
         notify("Executor Status", executorStatus(), 11)
     end,
