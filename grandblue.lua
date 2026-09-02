@@ -14,7 +14,7 @@
       - Large Workspace scan occurs once; caches update incrementally.
 ]]
 
-local VERSION = "10.0.0"
+local VERSION = "10.1.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -191,6 +191,7 @@ local Config = {
 
     -- Moving platform
     PlatformTransport = true,
+    PlatformKinematicAssist = true,
     PlatformMode = "Heartbeat Platform",
     PlatformSpeed = 185,
     PlatformSize = 8,
@@ -462,7 +463,10 @@ local function lower(value)
 end
 
 local function stripRuntimeSuffix(name)
-    return (normalize(name):gsub("%s+%d+$", ""))
+    local value = normalize(name)
+    value = value:gsub("%s*%[%d+%]%s*$", "")
+    value = value:gsub("%s+%d+$", "")
+    return normalize(value)
 end
 
 local function character()
@@ -1230,54 +1234,95 @@ function QuestCatalogService.GetNames()
     return names
 end
 
-function QuestCatalogService.FindQuestGiver(questName, preferredNpc)
-    if preferredNpc and preferredNpc ~= "" and TargetService then
-        local entity = TargetService.Find(preferredNpc)
-        if entity then
-            return entity
+local function liveDialogueNpcs()
+    local result, seen = {}, {}
+    for npc in pairs(Runtime.DialogueNPCs) do
+        if npc and npc.Parent and not seen[npc] then
+            seen[npc] = true
+            table.insert(result, npc)
         end
     end
+    if #result == 0 then
+        local root = dialogueRoot()
+        if root then
+            for _, island in ipairs(root:GetChildren()) do
+                for _, object in ipairs(island:GetChildren()) do
+                    if object:IsA("Model") and not seen[object] then
+                        seen[object] = true
+                        table.insert(result, object)
+                    end
+                end
+            end
+        end
+    end
+    return result
+end
 
-    local list = Runtime.QuestToNPCs[lower(questName)] or {}
+local function dialogueNpcQuestScore(npc, questName)
+    if not npc or not npc.Parent then return 0 end
+    local wanted = lower(questName)
+    if wanted == "" then return 0 end
+    local score = 0
+    for _, object in ipairs(npc:GetDescendants()) do
+        if object:IsA("TextLabel") and object.Name == "QuestLabel" then
+            local value = lower(object.Text)
+            if value == wanted then score = math.max(score, 140)
+            elseif value:find(wanted, 1, true) or wanted:find(value, 1, true) then score = math.max(score, 100) end
+        elseif object:IsA("StringValue") and object.Name == "QuestName" then
+            local value = lower(object.Value)
+            if value == wanted then score = math.max(score, 95)
+            elseif value:find(wanted, 1, true) or wanted:find(value, 1, true) then score = math.max(score, 70) end
+        end
+    end
+    return score
+end
+
+function QuestCatalogService.FindQuestGiver(questName, preferredNpc)
     local ownRoot = rootPart()
-    local best
-    local bestDistance
 
-    for _, npc in ipairs(list) do
+    if preferredNpc and preferredNpc ~= "" and TargetService then
+        local direct = TargetService.FindNamedDialogueNPC(preferredNpc)
+            or TargetService.FindNamedNPC(preferredNpc)
+        if direct then return direct end
+    end
+
+    local best, bestScore, bestDistance = nil, -math.huge, math.huge
+    for _, npc in ipairs(Runtime.QuestToNPCs[lower(questName)] or {}) do
         if npc and npc.Parent then
             local part = objectRoot(npc)
             if part then
+                local score = dialogueNpcQuestScore(npc, questName)
                 local distance = ownRoot and (ownRoot.Position - part.Position).Magnitude or 0
-                if not bestDistance or distance < bestDistance then
-                    best = npc
-                    bestDistance = distance
+                if score > bestScore or (score == bestScore and distance < bestDistance) then
+                    best, bestScore, bestDistance = npc, score, distance
                 end
             end
         end
     end
+    if best then return best end
 
-    if best then
-        return best
-    end
-
-    -- Partial quest-name fallback.
-    local wanted = lower(questName)
-    for questKey, npcs in pairs(Runtime.QuestToNPCs) do
-        if questKey:find(wanted, 1, true)
-            or wanted:find(questKey, 1, true) then
-
-            for _, npc in ipairs(npcs) do
-                if npc and npc.Parent then
-                    return npc
-                end
+    for _, npc in ipairs(liveDialogueNpcs()) do
+        local part = objectRoot(npc)
+        local score = dialogueNpcQuestScore(npc, questName)
+        if part and score > 0 then
+            local distance = ownRoot and (ownRoot.Position - part.Position).Magnitude or 0
+            if score > bestScore or (score == bestScore and distance < bestDistance) then
+                best, bestScore, bestDistance = npc, score, distance
             end
         end
     end
-
-    return nil
+    return best
 end
 
 QuestCatalogService.Build()
+
+task.delay(1.5, function()
+    if Core.Running then QuestCatalogService.Build() end
+end)
+
+task.delay(4.0, function()
+    if Core.Running then QuestCatalogService.Build() end
+end)
 
 -- ============================================================
 -- Hotbar service
@@ -1703,6 +1748,32 @@ function TargetService.FindNamedNPC(name)
     return best
 end
 
+function TargetService.FindNamedDialogueNPC(name)
+    if not name or normalize(name) == "" then return nil end
+    local wanted = lower(stripRuntimeSuffix(name))
+    local ownRoot = rootPart()
+    local best, bestScore, bestDistance = nil, -math.huge, math.huge
+
+    for _, model in ipairs(liveDialogueNpcs()) do
+        if model and model.Parent then
+            local cleanName = lower(stripRuntimeSuffix(model.Name))
+            local rawName = lower(model.Name)
+            local npcName = lower(model:GetAttribute("NPCName") or "")
+            local score = 0
+            if cleanName == wanted or npcName == wanted then score = 160
+            elseif rawName:find(wanted,1,true) or cleanName:find(wanted,1,true) or npcName:find(wanted,1,true) then score = 120 end
+            if score > 0 then
+                local part = objectRoot(model)
+                local distance = part and ownRoot and (ownRoot.Position - part.Position).Magnitude or math.huge
+                if score > bestScore or (score == bestScore and distance < bestDistance) then
+                    best, bestScore, bestDistance = model, score, distance
+                end
+            end
+        end
+    end
+    return best
+end
+
 function TargetService.GetMobOptions()
     local set = {
         ["Nearest Hostile"] = true,
@@ -1967,7 +2038,16 @@ function PlatformTransport.Step(deltaTime)
 
     -- Lerp moves by a distance-derived alpha, therefore speed is approximately
     -- studs/second while orientation changes smoothly with the platform.
-    part.CFrame = part.CFrame:Lerp(goal, alpha)
+    local nextPlatformCFrame = part.CFrame:Lerp(goal, alpha)
+    part.CFrame = nextPlatformCFrame
+
+    if Config.PlatformKinematicAssist then
+        pcall(function()
+            root.CFrame = nextPlatformCFrame * CFrame.new(0, 3.25, 0)
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+        end)
+    end
 
     local now = os.clock()
     local previous = Runtime.TransportLastDistance
@@ -4211,7 +4291,13 @@ local function clearFarmState()
 end
 
 local function handleQuestNpc(questName, preferredNpc, stateName)
-    local npc = QuestCatalogService.FindQuestGiver(questName, preferredNpc)
+    local npc
+
+    if preferredNpc and preferredNpc ~= "" then
+        npc = TargetService.FindNamedDialogueNPC(preferredNpc)
+    end
+
+    npc = npc or QuestCatalogService.FindQuestGiver(questName, preferredNpc)
 
     if not npc and preferredNpc then
         npc = TargetService.FindNamedNPC(preferredNpc)
@@ -5158,6 +5244,7 @@ local MasterToggle = bindToggle(
         if value then
             Config.FarmMode = "Smart Quest"
             Config.AutoQuest = true
+            QuestCatalogService.Build()
             Config.AutoAcceptRecommended = true
             Config.AutoTurnIn = true
             Config.AutoDialogue = true
@@ -5209,6 +5296,37 @@ HomeAutomation:AddButton({
     Description = "Shows scheduler ticks and the last isolated worker error.",
     Callback = function()
         notify("Worker Health", workerHealth(), 14)
+    end,
+})
+
+HomeAutomation:AddButton({
+    Title = "Quest Target Probe",
+    Description = "Resolve the current dialogue target and start a platform movement test.",
+    Callback = function()
+        local quest, taskData = QuestService.GetNextTask()
+        if not quest or not taskData then
+            notify("Quest Probe", "No incomplete live quest task.", 5)
+            return
+        end
+
+        if taskData.Kind == "Talk" or taskData.Kind == "Return" or taskData.Kind == "Deliver" then
+            local npc = TargetService.FindNamedDialogueNPC(taskData.Target)
+                or QuestCatalogService.FindQuestGiver(quest.Name, taskData.Target)
+            if not npc then
+                notify("Quest Probe", "FAILED\nQuest: " .. quest.Name .. "\nTask: " .. taskData.Text .. "\nDialogue NPC not found.", 9)
+                return
+            end
+
+            local prompt = InteractionService.FindPromptNear(npc, "Dialogue")
+            local distance = distanceTo(npc)
+            notify("Quest Probe", "OK\nQuest: " .. quest.Name .. "\nTask: " .. taskData.Text .. "\nNPC: " .. npc.Name .. "\nDistance: " .. string.format("%.1f", distance) .. "\nPrompt: " .. tostring(prompt and prompt.Name or "None"), 10)
+
+            if distance > Config.PlatformArrivalDistance + 2 then
+                PlatformTransport.MoveNear(npc)
+            end
+        else
+            notify("Quest Probe", "Quest: " .. quest.Name .. "\nKind: " .. taskData.Kind .. "\nTarget: " .. taskData.Target, 7)
+        end
     end,
 })
 
@@ -5529,6 +5647,17 @@ bindToggle(
         end
     end,
     "Moves the local platform continuously on Heartbeat instead of cancelling/recreating TweenService tweens."
+)
+
+bindToggle(
+    PlatformSection,
+    "PlatformKinematicAssist",
+    "Nexomia Kinematic Assist",
+    Config.PlatformKinematicAssist,
+    function(value)
+        Config.PlatformKinematicAssist = value
+    end,
+    "Recommended on Nexomia: HRP follows the same continuous Heartbeat path as the visible platform."
 )
 
 bindSlider(
