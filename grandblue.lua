@@ -14,7 +14,7 @@
       - Large Workspace scan occurs once; caches update incrementally.
 ]]
 
-local VERSION = "10.1.0"
+local VERSION = "11.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -176,7 +176,6 @@ local Core = {
 local Config = {
     -- Full progression
     AutoProgress = false,
-    AutomationProfile = "Progress Only",
     AutoQuest = true,
     AutoAcceptRecommended = true,
     AutoTurnIn = true,
@@ -186,40 +185,46 @@ local Config = {
     -- Farm
     FarmMode = "Smart Quest",
     SelectedMob = "Nearest Hostile",
+
+    -- Auto Farm combat
     AutoAttack = true,
     AttackRate = 8,
+    SelectedWeapon = "Auto",
+    AutoMastery = true,
+    MasteryMode = "All Combat",
+    MasteryReadyOnly = true,
+    MasteryInterval = 0.75,
+    MasteryHoldTime = 0.20,
 
     -- Moving platform
     PlatformTransport = true,
     PlatformKinematicAssist = true,
     PlatformMode = "Heartbeat Platform",
-    PlatformSpeed = 185,
-    PlatformSize = 8,
-    PlatformTransparency = 0.82,
-    PlatformFarmHeight = 12,
-    PlatformNpcHeight = 3.5,
-    PlatformBackDistance = 4,
-    PlatformArrivalDistance = 5,
-    PlatformRetargetDistance = 10,
+    PlatformSpeed = 175,
+    PlatformSize = 10,
+    PlatformTransparency = 0.72,
+    PlatformFarmHeight = 18,
+    PlatformNpcHeight = 3.2,
+    PlatformBackDistance = 5,
+    PlatformArrivalDistance = 4,
+    PlatformRetargetDistance = 12,
+    FarmAnchorRecenterDistance = 55,
+    FarmHoldCorrectionDistance = 3.5,
     PlatformNoclip = true,
 
     -- Bring + hitbox
     BringMobs = true,
-    BringRadius = 110,
-    BringLimit = 10,
-    MobBelowFeet = 7,
-    BringSpread = 1.4,
-    BringBosses = false,
+    BringRadius = 135,
+    BringLimit = 12,
+    MobBelowFeet = 9,
+    BringSpread = 1.5,
 
     MobHitbox = true,
-    HitboxSize = 10,
-    HitboxTransparency = 0.62,
-    HitboxBosses = false,
+    HitboxSize = 18,
+    HitboxTransparency = 0.68,
+    HitboxRange = 165,
 
     -- Combat
-    -- SON HUB does not auto-select combat equipment. It only uses the
-    -- currently active in-game action when Auto Attack is enabled.
-    AutoMastery = false,
     AutoAim = true,
     AutoBlock = false,
     BlockHealthPercent = 40,
@@ -299,6 +304,25 @@ local Runtime = {
     ProgressState = "IDLE",
     ProgressDetail = "Waiting",
     ProgressQuestKey = nil,
+
+    FarmFSM = {
+        State = "IDLE",
+        Since = 0,
+        QuestKey = nil,
+        TaskKey = nil,
+        InteractionAttempts = 0,
+        LastInteraction = 0,
+        LastResolverRefresh = 0,
+        NoMobSince = 0,
+        LastAnchorRefresh = 0,
+    },
+
+    FarmMovePart = nil,
+    FarmMoveGoal = nil,
+    FarmMoveActive = false,
+    FarmMoveHold = false,
+    FarmMoveHoldCFrame = nil,
+
     CurrentTarget = nil,
     CurrentWantedMob = nil,
     FarmAnchorCFrame = nil,
@@ -1487,6 +1511,24 @@ function HotbarService.Press(data)
     return data and pressKey(data.Key, 0.03) or false
 end
 
+function HotbarService.RequiresHold(data)
+    if not data or not data.ToolFrame then
+        return false
+    end
+
+    for _, object in ipairs(data.ToolFrame:GetDescendants()) do
+        if object:IsA("TextLabel") then
+            local value = lower(object.Text)
+            if value == "hold" or value:find("hold", 1, true) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+
 function HotbarService.AutoCombatSlot()
     local best
     local bestScore = -math.huge
@@ -2155,23 +2197,46 @@ end
 
 BringService = {}
 
-function BringService.Step(wanted)
-    if not Config.BringMobs then
-        return
+local function farmTargetAllowsBoss(wanted)
+    return wanted == "Boss Only"
+        or (
+            wanted
+            and wanted ~= ""
+            and wanted ~= "Nearest Hostile"
+            and wanted ~= "Any Hostile"
+        )
+end
+
+local function farmAnchorGround(anchor)
+    if not anchor then
+        return nil
+    end
+
+    return anchor.Position - Vector3.new(
+        0,
+        Config.PlatformFarmHeight,
+        0
+    )
+end
+
+function BringService.Step(wanted, anchor)
+    if not Config.BringMobs or not anchor then
+        return 0
     end
 
     local now = os.clock()
     if now - Runtime.LastBring < 0.28 then
-        return
+        return 0
     end
     Runtime.LastBring = now
 
-    local root = rootPart()
-    if not root then
-        return
+    local ground = farmAnchorGround(anchor)
+    if not ground then
+        return 0
     end
 
     local count = 0
+    local bossAllowed = farmTargetAllowsBoss(wanted)
 
     for model in pairs(Runtime.Entities) do
         if count >= Config.BringLimit then
@@ -2181,21 +2246,25 @@ function BringService.Step(wanted)
         if model
             and model.Parent
             and TargetService.IsFarmMob(model, wanted)
-            and (Config.BringBosses or not TargetService.IsBoss(model)) then
+            and (
+                not TargetService.IsBoss(model)
+                or bossAllowed
+            ) then
 
             local part = model:FindFirstChild("HumanoidRootPart")
                 or objectRoot(model)
 
             if part
                 and not part.Anchored
-                and (part.Position - root.Position).Magnitude <= Config.BringRadius then
+                and (part.Position - ground).Magnitude
+                    <= Config.BringRadius then
 
-                count = count + 1
+                count += 1
 
                 local column = ((count - 1) % 3) - 1
                 local row = math.floor((count - 1) / 3)
 
-                local destination = root.CFrame * CFrame.new(
+                local destination = anchor * CFrame.new(
                     column * Config.BringSpread,
                     -Config.MobBelowFeet,
                     row * Config.BringSpread
@@ -2209,6 +2278,8 @@ function BringService.Step(wanted)
             end
         end
     end
+
+    return count
 end
 
 HitboxService = {}
@@ -2239,10 +2310,15 @@ function HitboxService.Clear()
 end
 
 function HitboxService.Apply(model, wanted)
-    -- Strict mob-only condition.
     if not Config.MobHitbox
-        or not TargetService.IsFarmMob(model, wanted)
-        or (TargetService.IsBoss(model) and not Config.HitboxBosses) then
+        or not TargetService.IsFarmMob(model, wanted) then
+
+        HitboxService.Restore(model)
+        return
+    end
+
+    if TargetService.IsBoss(model)
+        and not farmTargetAllowsBoss(wanted) then
 
         HitboxService.Restore(model)
         return
@@ -2278,7 +2354,7 @@ function HitboxService.Apply(model, wanted)
     end)
 end
 
-function HitboxService.Step(wanted)
+function HitboxService.Step(wanted, anchor)
     local now = os.clock()
     if now - Runtime.LastHitbox < 0.35 then
         return
@@ -2286,15 +2362,31 @@ function HitboxService.Step(wanted)
     Runtime.LastHitbox = now
 
     local keep = {}
+    local ground = farmAnchorGround(anchor)
+    local bossAllowed = farmTargetAllowsBoss(wanted)
 
     if Config.MobHitbox then
         for model in pairs(Runtime.Entities) do
             if model
                 and model.Parent
-                and TargetService.IsFarmMob(model, wanted) then
+                and TargetService.IsFarmMob(model, wanted)
+                and (
+                    not TargetService.IsBoss(model)
+                    or bossAllowed
+                ) then
 
-                keep[model] = true
-                HitboxService.Apply(model, wanted)
+                local part = objectRoot(model)
+                local inRange = not ground
+                    or (
+                        part
+                        and (part.Position - ground).Magnitude
+                            <= Config.HitboxRange
+                    )
+
+                if inRange then
+                    keep[model] = true
+                    HitboxService.Apply(model, wanted)
+                end
             end
         end
     end
@@ -2689,7 +2781,42 @@ function MasteryService.GetCandidates()
 end
 
 function MasteryService.Step()
-    return false
+    if not Config.AutoMastery then
+        return false
+    end
+
+    local now = os.clock()
+    if now - Runtime.LastMastery < Config.MasteryInterval then
+        return false
+    end
+
+    local candidates = MasteryService.GetCandidates()
+    if #candidates == 0 then
+        return false
+    end
+
+    Runtime.MasteryCursor =
+        (Runtime.MasteryCursor % #candidates) + 1
+
+    local data = candidates[Runtime.MasteryCursor]
+    if not data then
+        return false
+    end
+
+    if Config.MasteryReadyOnly and not HotbarService.IsReady(data) then
+        return false
+    end
+
+    Runtime.LastMastery = now
+
+    if HotbarService.RequiresHold(data) then
+        return pressKey(
+            data.Key,
+            math.clamp(Config.MasteryHoldTime, 0.08, 1.5)
+        )
+    end
+
+    return HotbarService.Press(data)
 end
 
 function MasteryService.GetSnapshot()
@@ -4272,123 +4399,549 @@ function WorldUtilityService.GoToPrompt(name)
 end
 
 -- ============================================================
--- Progression controller
+-- Auto Farm v11
+-- Single progression owner + smooth farm movement
 -- ============================================================
 
-ProgressionController = {}
+AutoFarmController = {}
+FarmMovement = {}
 
-local function setProgressState(state, detail)
+local FARM_PLATFORM_NAME = "SON_FarmPlatform"
+
+local function farmSetState(state, detail)
+    local fsm = Runtime.FarmFSM
+
+    if fsm.State ~= state then
+        fsm.State = state
+        fsm.Since = os.clock()
+    end
+
     Runtime.ProgressState = state
     Runtime.ProgressDetail = detail or ""
 end
 
-local function clearFarmState()
+local function farmMovementPlatformCFrame(rootCFrame)
+    return rootCFrame * CFrame.new(0, -3.25, 0)
+end
+
+function FarmMovement.Ensure()
+    local part = Runtime.FarmMovePart
+
+    if part and part.Parent then
+        part.Size = Vector3.new(
+            Config.PlatformSize,
+            1,
+            Config.PlatformSize
+        )
+        part.Transparency = Config.PlatformTransparency
+        return part
+    end
+
+    local root = rootPart()
+    if not root then
+        return nil
+    end
+
+    part = Instance.new("Part")
+    part.Name = FARM_PLATFORM_NAME
+    part.Anchored = true
+    part.CanCollide = true
+    part.CanTouch = false
+    part.CanQuery = false
+    part.CastShadow = false
+    part.Material = Enum.Material.SmoothPlastic
+    part.Size = Vector3.new(
+        Config.PlatformSize,
+        1,
+        Config.PlatformSize
+    )
+    part.Transparency = Config.PlatformTransparency
+    part.CFrame = root.CFrame * CFrame.new(0, -3.25, 0)
+    part.Parent = Workspace
+
+    Runtime.FarmMovePart = part
+    track(part)
+
+    return part
+end
+
+function FarmMovement.Stop(removePlatform, clearHold)
+    Runtime.FarmMoveActive = false
+    Runtime.FarmMoveGoal = nil
+
+    if clearHold ~= false then
+        Runtime.FarmMoveHold = false
+        Runtime.FarmMoveHoldCFrame = nil
+    end
+
+    if removePlatform and Runtime.FarmMovePart then
+        pcall(function()
+            Runtime.FarmMovePart:Destroy()
+        end)
+
+        Runtime.FarmMovePart = nil
+    elseif Runtime.FarmMovePart and Runtime.FarmMovePart.Parent then
+        local root = rootPart()
+        if root then
+            Runtime.FarmMovePart.CFrame =
+                root.CFrame * CFrame.new(0, -3.25, 0)
+        end
+    end
+end
+
+function FarmMovement.Go(rootGoal, holdAtEnd)
+    if not rootGoal then
+        return false
+    end
+
+    -- Never allow the old transport worker to compete with farm movement.
+    PlatformTransport.Cancel(false)
+
+    local root = rootPart()
+    if not root then
+        return false
+    end
+
+    FarmMovement.Ensure()
+
+    Runtime.FarmMoveGoal = rootGoal
+    Runtime.FarmMoveActive = true
+    Runtime.FarmMoveHold = holdAtEnd == true
+
+    return true
+end
+
+function FarmMovement.IsAt(rootGoal, tolerance)
+    local root = rootPart()
+    if not root or not rootGoal then
+        return false
+    end
+
+    return (root.Position - rootGoal.Position).Magnitude
+        <= (tolerance or Config.PlatformArrivalDistance)
+end
+
+function FarmMovement.GoNear(object)
+    local target = objectRoot(object)
+    if not target then
+        return false
+    end
+
+    local position = (
+        target.CFrame
+        * CFrame.new(
+            0,
+            Config.PlatformNpcHeight,
+            Config.PlatformBackDistance
+        )
+    ).Position
+
+    return FarmMovement.Go(
+        CFrame.lookAt(position, target.Position),
+        false
+    )
+end
+
+function FarmMovement.GoAnchor(anchor)
+    return FarmMovement.Go(anchor, true)
+end
+
+function FarmMovement.Step(deltaTime)
+    if not Config.AutoProgress and not Runtime.FarmMoveActive then
+        return
+    end
+
+    local root = rootPart()
+    if not root then
+        return
+    end
+
+    local part = FarmMovement.Ensure()
+    if not part then
+        return
+    end
+
+    local goal = Runtime.FarmMoveGoal
+
+    if Runtime.FarmMoveActive and goal then
+        local distance = (root.Position - goal.Position).Magnitude
+        local stepDistance =
+            math.max(35, Config.PlatformSpeed)
+            * math.max(deltaTime, 0.001)
+
+        if distance <= math.max(
+            Config.PlatformArrivalDistance,
+            stepDistance
+        ) then
+
+            pcall(function()
+                root.CFrame = goal
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+
+                part.CFrame =
+                    farmMovementPlatformCFrame(root.CFrame)
+            end)
+
+            Runtime.FarmMoveActive = false
+            Runtime.FarmMoveGoal = nil
+
+            if Runtime.FarmMoveHold then
+                Runtime.FarmMoveHoldCFrame = goal
+            end
+
+            return
+        end
+
+        local alpha = math.clamp(stepDistance / distance, 0, 1)
+        local nextRoot = root.CFrame:Lerp(goal, alpha)
+
+        pcall(function()
+            root.CFrame = nextRoot
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+            part.CFrame = farmMovementPlatformCFrame(nextRoot)
+        end)
+
+        return
+    end
+
+    -- At the farm point we do not hard-snap every frame.
+    -- Only correct the player if physics moves them far enough away.
+    local hold = Runtime.FarmMoveHoldCFrame
+
+    if Runtime.FarmMoveHold and hold then
+        local drift = (root.Position - hold.Position).Magnitude
+
+        if drift > Config.FarmHoldCorrectionDistance then
+            local correctionAlpha = math.clamp(
+                deltaTime * 7,
+                0,
+                1
+            )
+
+            local corrected = root.CFrame:Lerp(
+                hold,
+                correctionAlpha
+            )
+
+            pcall(function()
+                root.CFrame = corrected
+                root.AssemblyLinearVelocity = Vector3.zero
+            end)
+        end
+
+        part.CFrame = farmMovementPlatformCFrame(
+            Runtime.FarmMoveHoldCFrame
+        )
+    else
+        part.CFrame =
+            root.CFrame * CFrame.new(0, -3.25, 0)
+    end
+end
+
+connect(RunService.Heartbeat, function(deltaTime)
+    if Core.Running then
+        FarmMovement.Step(deltaTime)
+    end
+end)
+
+local function farmResetRoute(clearAnchor)
     Runtime.CurrentTarget = nil
     Runtime.CurrentWantedMob = nil
-    Runtime.FarmAnchorCFrame = nil
+    Runtime.ProgressLifeSkill = nil
+
+    if clearAnchor ~= false then
+        Runtime.FarmAnchorCFrame = nil
+        Runtime.FarmMoveHold = false
+        Runtime.FarmMoveHoldCFrame = nil
+    end
 
     HitboxService.Clear()
 end
 
-local function handleQuestNpc(questName, preferredNpc, stateName)
+local function matchingFarmMobs(wanted, limit)
+    local root = rootPart()
+    local rows = {}
+
+    for model in pairs(Runtime.Entities) do
+        if model
+            and model.Parent
+            and TargetService.IsFarmMob(model, wanted) then
+
+            local part = objectRoot(model)
+            if part then
+                table.insert(rows, {
+                    Model = model,
+                    Part = part,
+                    Distance = root
+                        and (root.Position - part.Position).Magnitude
+                        or 0,
+                })
+            end
+        end
+    end
+
+    table.sort(rows, function(a, b)
+        return a.Distance < b.Distance
+    end)
+
+    if limit and #rows > limit then
+        for index = #rows, limit + 1, -1 do
+            rows[index] = nil
+        end
+    end
+
+    return rows
+end
+
+local function computeFarmAnchor(mobs)
+    if #mobs == 0 then
+        return nil
+    end
+
+    local sample = math.min(#mobs, 6)
+    local x = 0
+    local z = 0
+    local baseY = mobs[1].Part.Position.Y
+
+    for index = 1, sample do
+        x += mobs[index].Part.Position.X
+        z += mobs[index].Part.Position.Z
+    end
+
+    x /= sample
+    z /= sample
+
+    local ground = Vector3.new(x, baseY, z)
+    local position = ground + Vector3.new(
+        0,
+        Config.PlatformFarmHeight,
+        0
+    )
+
+    return CFrame.lookAt(
+        position,
+        Vector3.new(
+            ground.X,
+            position.Y,
+            ground.Z
+        )
+    )
+end
+
+local function shouldRecenterAnchor(anchor, mobs)
+    if not anchor or #mobs == 0 then
+        return true
+    end
+
+    local ground = farmAnchorGround(anchor)
+    if not ground then
+        return true
+    end
+
+    return (
+        mobs[1].Part.Position
+        - ground
+    ).Magnitude > Config.FarmAnchorRecenterDistance
+end
+
+local function resolveQuestNpc(questName, preferredNpc)
     local npc
 
     if preferredNpc and preferredNpc ~= "" then
         npc = TargetService.FindNamedDialogueNPC(preferredNpc)
     end
 
-    npc = npc or QuestCatalogService.FindQuestGiver(questName, preferredNpc)
+    npc = npc
+        or QuestCatalogService.FindQuestGiver(
+            questName,
+            preferredNpc
+        )
 
-    if not npc and preferredNpc then
+    if not npc and preferredNpc and preferredNpc ~= "" then
         npc = TargetService.FindNamedNPC(preferredNpc)
     end
 
+    return npc
+end
+
+local function stepQuestNpc(questName, preferredNpc, finalState)
+    farmResetRoute(false)
+
+    local npc = resolveQuestNpc(
+        questName,
+        preferredNpc
+    )
+
     if not npc then
-        setProgressState("SEARCH_NPC", questName .. " / " .. tostring(preferredNpc or ""))
+        local now = os.clock()
+
+        if now - Runtime.FarmFSM.LastResolverRefresh >= 1.5 then
+            Runtime.FarmFSM.LastResolverRefresh = now
+            QuestCatalogService.Build()
+        end
+
+        farmSetState(
+            "NPC_SEARCH",
+            preferredNpc and preferredNpc ~= ""
+                and preferredNpc
+                or questName
+        )
+
         return
     end
 
     Runtime.CurrentTarget = npc
-    Runtime.CurrentWantedMob = nil
-    HitboxService.Clear()
 
-    local arrived = distanceTo(npc) <= math.max(
-        Config.PlatformArrivalDistance + 2,
-        9
-    )
+    local distance = distanceTo(npc)
 
-    if not arrived then
-        setProgressState("MOVE_NPC", questName)
-        PlatformTransport.MoveNear(npc)
+    if distance > math.max(
+        8,
+        Config.PlatformArrivalDistance + 2
+    ) then
+
+        FarmMovement.GoNear(npc)
+
+        farmSetState(
+            "NPC_TRAVEL",
+            npc.Name
+        )
+
         return
     end
 
-    PlatformTransport.Cancel(true)
-    setProgressState(stateName, questName)
+    FarmMovement.Stop(false, true)
 
-    InteractionService.InteractWithQuestNPC(npc, questName)
+    local fsm = Runtime.FarmFSM
+    local now = os.clock()
+
+    if dialogueIsOpen() then
+        InteractionService.ProcessDialogue(questName)
+
+        farmSetState(
+            "NPC_DIALOGUE",
+            npc.Name
+        )
+
+        return
+    end
+
+    if now - fsm.LastInteraction >= 0.75 then
+        fsm.LastInteraction = now
+        fsm.InteractionAttempts += 1
+
+        InteractionService.InteractWithQuestNPC(
+            npc,
+            questName
+        )
+    end
+
+    farmSetState(
+        finalState,
+        npc.Name
+    )
 end
 
-local function handleDefeatTask(quest, taskData)
-    local wanted = taskData.Target
-    local current = Runtime.CurrentTarget
-
-    if not current
-        or not current.Parent
-        or not TargetService.IsFarmMob(current, wanted) then
-
-        current = TargetService.Find(wanted)
-        Runtime.CurrentTarget = current
-        Runtime.FarmAnchorCFrame = nil
-    end
-
+local function stepDefeatTask(wanted)
+    Runtime.ProgressLifeSkill = nil
     Runtime.CurrentWantedMob = wanted
 
-    if not current then
-        setProgressState("SEARCH_MOBS", wanted)
+    local mobs = matchingFarmMobs(
+        wanted,
+        math.max(Config.BringLimit, 8)
+    )
+
+    if #mobs == 0 then
+        HitboxService.Clear()
+        Runtime.CurrentTarget = nil
+
+        if Runtime.FarmFSM.NoMobSince == 0 then
+            Runtime.FarmFSM.NoMobSince = os.clock()
+        end
+
+        farmSetState(
+            "MOB_WAIT",
+            wanted .. " • waiting for spawn"
+        )
+
         return
     end
 
-    if not Runtime.FarmAnchorCFrame then
-        PlatformTransport.SetFarmAnchorFrom(current)
+    Runtime.FarmFSM.NoMobSince = 0
+
+    if shouldRecenterAnchor(
+        Runtime.FarmAnchorCFrame,
+        mobs
+    ) then
+
+        Runtime.FarmAnchorCFrame =
+            computeFarmAnchor(mobs)
+
+        Runtime.FarmFSM.LastAnchorRefresh =
+            os.clock()
     end
 
-    local root = rootPart()
     local anchor = Runtime.FarmAnchorCFrame
-    local atAnchor = root
-        and anchor
-        and (root.Position - anchor.Position).Magnitude
-            <= Config.PlatformArrivalDistance
 
-    if not atAnchor then
-        setProgressState("MOVE_ABOVE_MOBS", wanted)
-        PlatformTransport.MoveToFarmAnchor()
+    if not anchor then
+        farmSetState(
+            "MOB_SEARCH",
+            wanted
+        )
         return
     end
 
-    PlatformTransport.Cancel(true)
+    if not FarmMovement.IsAt(
+        anchor,
+        Config.PlatformArrivalDistance
+    ) then
 
-    setProgressState("FARM_QUEST_MOBS", wanted)
+        FarmMovement.GoAnchor(anchor)
 
-    BringService.Step(wanted)
-    HitboxService.Step(wanted)
+        farmSetState(
+            "FARM_TRAVEL",
+            wanted
+        )
 
-    -- Keep a current target for aim/ESP, but farm is centered below the player.
-    if not Runtime.CurrentTarget
-        or not Runtime.CurrentTarget.Parent
-        or not TargetService.IsFarmMob(Runtime.CurrentTarget, wanted) then
-        Runtime.CurrentTarget = TargetService.Find(wanted)
+        return
     end
 
-    if Runtime.CurrentTarget then
-        CombatService.AimAt(Runtime.CurrentTarget)
+    Runtime.FarmMoveHold = true
+    Runtime.FarmMoveHoldCFrame = anchor
+
+    local brought = BringService.Step(
+        wanted,
+        anchor
+    )
+
+    HitboxService.Step(
+        wanted,
+        anchor
+    )
+
+    local target = mobs[1].Model
+    Runtime.CurrentTarget = target
+
+    if target then
+        CombatService.AimAt(target)
     end
 
     CombatService.AttackStep()
+    MasteryService.Step()
+
+    farmSetState(
+        "FARM_COMBAT",
+        wanted
+            .. " • mobs="
+            .. tostring(#mobs)
+            .. " • brought="
+            .. tostring(brought)
+    )
 end
 
-local function handleCollectTask(quest, taskData)
-    clearFarmState()
+local function stepPromptTask(taskData)
+    farmResetRoute(false)
 
     local allowed = {
         Pickup = true,
@@ -4396,6 +4949,7 @@ local function handleCollectTask(quest, taskData)
         Chest = true,
         FruitChest = true,
         Other = true,
+        Farm = true,
     }
 
     local prompt = InteractionService.FindPromptByText(
@@ -4404,25 +4958,48 @@ local function handleCollectTask(quest, taskData)
     )
 
     if not prompt then
-        setProgressState("SEARCH_OBJECT", taskData.Target)
+        farmSetState(
+            "OBJECT_SEARCH",
+            taskData.Target
+        )
         return
     end
 
     Runtime.CurrentTarget = prompt
 
-    if distanceTo(prompt) > Config.PlatformArrivalDistance + 2 then
-        setProgressState("MOVE_OBJECT", taskData.Target)
-        PlatformTransport.MoveNear(prompt)
+    if distanceTo(prompt)
+        > Config.PlatformArrivalDistance + 2 then
+
+        FarmMovement.GoNear(prompt)
+
+        farmSetState(
+            "OBJECT_TRAVEL",
+            taskData.Target
+        )
+
         return
     end
 
-    PlatformTransport.Cancel(true)
-    setProgressState("INTERACT_OBJECT", taskData.Target)
+    FarmMovement.Stop(false, true)
     InteractionService.FirePrompt(prompt)
+
+    farmSetState(
+        "OBJECT_INTERACT",
+        taskData.Target
+    )
 end
 
-local function handleUtilityTask(quest, taskData)
-    clearFarmState()
+local function stepUtilityTask(quest, taskData)
+    farmResetRoute(false)
+
+    if taskData.Kind == "Learn" then
+        stepQuestNpc(
+            quest.Name,
+            taskData.Target,
+            "QUEST_LEARN"
+        )
+        return
+    end
 
     local promptName
 
@@ -4432,307 +5009,226 @@ local function handleUtilityTask(quest, taskData)
         promptName = "Furnace"
     elseif taskData.Kind == "Upgrade" then
         promptName = "Anvil"
-    elseif taskData.Kind == "Interact"
-        or taskData.Kind == "Reach"
-        or taskData.Kind == "Use"
-        or taskData.Kind == "Claim"
-        or taskData.Kind == "Destroy" then
+    end
 
-        local prompt = InteractionService.FindPromptByText(taskData.Target)
+    local prompt = promptName
+        and WorldUtilityService.FindPromptByName(
+            promptName
+        )
+        or InteractionService.FindPromptByText(
+            taskData.Target
+        )
 
-        if prompt then
-            Runtime.CurrentTarget = prompt
-
-            if distanceTo(prompt) > Config.PlatformArrivalDistance + 2 then
-                setProgressState("MOVE_ACTION", taskData.Target)
-                PlatformTransport.MoveNear(prompt)
-            else
-                PlatformTransport.Cancel(true)
-                setProgressState("ACTION", taskData.Text)
-                InteractionService.FirePrompt(prompt)
-            end
-
-            return
-        end
-    elseif taskData.Kind == "Learn" then
-        handleQuestNpc(
-            quest.Name,
-            taskData.Target,
-            "QUEST_LEARN"
+    if not prompt then
+        farmSetState(
+            "UTILITY_WAIT",
+            taskData.Text
         )
         return
     end
 
-    if promptName then
-        local prompt = WorldUtilityService.FindPromptByName(promptName)
+    Runtime.CurrentTarget = prompt
 
-        if not prompt then
-            setProgressState("SEARCH_UTILITY", promptName)
-            return
-        end
+    if distanceTo(prompt)
+        > Config.PlatformArrivalDistance + 2 then
 
-        Runtime.CurrentTarget = prompt
+        FarmMovement.GoNear(prompt)
 
-        if distanceTo(prompt) > Config.PlatformArrivalDistance + 2 then
-            setProgressState("MOVE_UTILITY", promptName)
-            PlatformTransport.MoveNear(prompt)
-        else
-            PlatformTransport.Cancel(true)
-            setProgressState("OPEN_UTILITY", promptName)
-            InteractionService.FirePrompt(prompt)
-        end
+        farmSetState(
+            "UTILITY_TRAVEL",
+            promptName or taskData.Target
+        )
 
         return
     end
 
-    -- Inventory/shop actions are intentionally not guessed from hidden
-    -- contracts. If the live client exposes a matching prompt, use it.
-    local prompt = InteractionService.FindPromptByText(taskData.Target)
+    FarmMovement.Stop(false, true)
+    InteractionService.FirePrompt(prompt)
 
-    if prompt then
-        Runtime.CurrentTarget = prompt
-        if distanceTo(prompt) > Config.PlatformArrivalDistance + 2 then
-            PlatformTransport.MoveNear(prompt)
-        else
-            InteractionService.FirePrompt(prompt)
-        end
-        setProgressState("GENERIC_ACTION", taskData.Text)
-    else
-        setProgressState("WAIT_VISIBLE_ACTION", taskData.Text)
-    end
+    farmSetState(
+        "UTILITY_INTERACT",
+        promptName or taskData.Target
+    )
 end
 
-function ProgressionController.Step()
+local function routeLifeSkill(kind, detail)
+    FarmMovement.Stop(false, true)
+    Runtime.CurrentTarget = nil
+    Runtime.CurrentWantedMob = nil
+    HitboxService.Clear()
+
+    Runtime.ProgressLifeSkill = kind
+
+    farmSetState(
+        "LIFESKILL_" .. string.upper(kind),
+        detail
+    )
+end
+
+function AutoFarmController.Step()
     if not Config.AutoProgress then
         Runtime.ProgressLifeSkill = nil
-        setProgressState("IDLE", "Auto Progress disabled")
-        clearFarmState()
+
+        farmResetRoute(true)
+        FarmMovement.Stop(false, true)
+
+        farmSetState(
+            "IDLE",
+            "Auto Farm disabled"
+        )
+
         return
     end
-
-    Runtime.ProgressLifeSkill = nil
 
     if not PlayerState.IsReady() then
-        setProgressState("WAIT_PLAYER", "Player data/character not ready")
+        farmSetState(
+            "PLAYER_WAIT",
+            "character / player data"
+        )
         return
     end
 
+    -- Manual modes do not touch Quest state.
     if Config.FarmMode == "Selected Mob" then
-        local pseudoQuest = {Name = "Selected Mob"}
-        local pseudoTask = {
-            Kind = "Defeat",
-            Target = Config.SelectedMob,
-            Text = "Farm " .. Config.SelectedMob,
-        }
-
-        handleDefeatTask(pseudoQuest, pseudoTask)
+        stepDefeatTask(Config.SelectedMob)
         return
     elseif Config.FarmMode == "Boss" then
-        local pseudoQuest = {Name = "Boss Farm"}
-        local pseudoTask = {
-            Kind = "Defeat",
-            Target = "Boss Only",
-            Text = "Farm Boss",
-        }
-
-        handleDefeatTask(pseudoQuest, pseudoTask)
+        stepDefeatTask("Boss Only")
         return
     end
 
     if not Config.AutoQuest then
-        setProgressState("WAIT_QUEST", "Auto Quest disabled")
-        clearFarmState()
+        farmSetState(
+            "QUEST_DISABLED",
+            "Auto Quest is off"
+        )
         return
     end
 
     local stateKey = QuestService.StateKey()
-    if stateKey ~= Runtime.ProgressQuestKey then
-        Runtime.ProgressQuestKey = stateKey
-        Runtime.LastQuestChange = os.clock()
 
-        PlatformTransport.Cancel(true)
-        Runtime.FarmAnchorCFrame = nil
-        HitboxService.Clear()
+    if stateKey ~= Runtime.FarmFSM.QuestKey then
+        Runtime.FarmFSM.QuestKey = stateKey
+        Runtime.FarmFSM.TaskKey = nil
+        Runtime.FarmFSM.InteractionAttempts = 0
+        Runtime.FarmFSM.LastInteraction = 0
+
+        farmResetRoute(true)
+        FarmMovement.Stop(false, true)
     end
 
-    local completed = QuestService.GetCompletedQuest()
+    local completed =
+        QuestService.GetCompletedQuest()
 
     if completed and Config.AutoTurnIn then
-        clearFarmState()
-        handleQuestNpc(completed.Name, nil, "TURN_IN")
+        stepQuestNpc(
+            completed.Name,
+            nil,
+            "QUEST_TURN_IN"
+        )
         return
     end
 
-    local quest, taskData = QuestService.GetNextTask()
+    local quest, taskData =
+        QuestService.GetNextTask()
 
     if quest and taskData then
+        local taskKey =
+            tostring(quest.Id)
+            .. "|"
+            .. taskData.Kind
+            .. "|"
+            .. taskData.Target
+            .. "|"
+            .. taskData.Text
+
+        if taskKey ~= Runtime.FarmFSM.TaskKey then
+            Runtime.FarmFSM.TaskKey = taskKey
+            Runtime.FarmFSM.InteractionAttempts = 0
+            Runtime.FarmFSM.LastInteraction = 0
+            Runtime.FarmAnchorCFrame = nil
+            HitboxService.Clear()
+        end
+
         if taskData.Kind == "Defeat" then
-            handleDefeatTask(quest, taskData)
+            stepDefeatTask(taskData.Target)
+            return
         elseif taskData.Kind == "Talk"
             or taskData.Kind == "Return"
             or taskData.Kind == "Deliver" then
 
-            clearFarmState()
-            handleQuestNpc(
+            stepQuestNpc(
                 quest.Name,
                 taskData.Target,
-                "QUEST_DIALOGUE"
+                "QUEST_NPC"
             )
+            return
         elseif taskData.Kind == "Collect"
-            or taskData.Kind == "Find" then
-
-            handleCollectTask(quest, taskData)
-        elseif taskData.Kind == "Fish" then
-            clearFarmState()
-            Runtime.ProgressLifeSkill = "Fishing"
-            setProgressState(
-                "QUEST_FISHING",
-                taskData.Text
-            )
-        elseif taskData.Kind == "Mine" then
-            clearFarmState()
-            Runtime.ProgressLifeSkill = "Mining"
-            setProgressState(
-                "QUEST_MINING",
-                taskData.Text
-            )
-        elseif taskData.Kind == "Farm" then
-            clearFarmState()
-            Runtime.ProgressLifeSkill = "Farming"
-            setProgressState(
-                "QUEST_FARMING",
-                taskData.Text
-            )
-        elseif taskData.Kind == "Treasure" then
-            clearFarmState()
-            Runtime.ProgressLifeSkill = "Treasure"
-            setProgressState(
-                "QUEST_TREASURE",
-                taskData.Text
-            )
-        elseif taskData.Kind == "Craft"
-            or taskData.Kind == "Cook"
-            or taskData.Kind == "Upgrade"
-            or taskData.Kind == "Learn"
-            or taskData.Kind == "Reach"
+            or taskData.Kind == "Find"
             or taskData.Kind == "Interact"
+            or taskData.Kind == "Reach"
             or taskData.Kind == "Use"
-            or taskData.Kind == "Equip"
             or taskData.Kind == "Claim"
-            or taskData.Kind == "Destroy"
-            or taskData.Kind == "Buy"
-            or taskData.Kind == "Sell" then
+            or taskData.Kind == "Destroy" then
 
-            handleUtilityTask(quest, taskData)
-        else
-            -- Generic resolver: use only structures visible to the client.
-            local prompt = InteractionService.FindPromptByText(taskData.Target)
-
-            if prompt then
-                handleCollectTask(quest, taskData)
-            else
-                clearFarmState()
-                handleQuestNpc(
-                    quest.Name,
-                    taskData.Target,
-                    "QUEST_GENERIC"
-                )
-            end
+            stepPromptTask(taskData)
+            return
+        elseif taskData.Kind == "Fish" then
+            routeLifeSkill(
+                "Fishing",
+                taskData.Text
+            )
+            return
+        elseif taskData.Kind == "Mine" then
+            routeLifeSkill(
+                "Mining",
+                taskData.Text
+            )
+            return
+        elseif taskData.Kind == "Farm" then
+            routeLifeSkill(
+                "Farming",
+                taskData.Text
+            )
+            return
+        elseif taskData.Kind == "Treasure" then
+            routeLifeSkill(
+                "Treasure",
+                taskData.Text
+            )
+            return
         end
 
+        stepUtilityTask(
+            quest,
+            taskData
+        )
         return
     end
 
-    local recommended = QuestService.GetRecommended()
+    local recommended =
+        QuestService.GetRecommended()
 
-    if recommended and Config.AutoAcceptRecommended then
-        clearFarmState()
-        handleQuestNpc(
+    if recommended
+        and Config.AutoAcceptRecommended then
+
+        stepQuestNpc(
             recommended.Name,
             nil,
-            "ACCEPT_RECOMMENDED"
+            "QUEST_ACCEPT"
         )
+
         return
     end
 
-    clearFarmState()
-    PlatformTransport.Cancel(true)
-    setProgressState(
-        "IDLE",
-        "No active/recommended quest at Lv." .. PlayerState.GetLevel()
+    farmResetRoute(true)
+    FarmMovement.Stop(false, true)
+
+    farmSetState(
+        "QUEST_WAIT",
+        "No active / recommended quest"
     )
 end
-
--- ============================================================
--- Character modifiers
--- ============================================================
-
-local function restoreCollision()
-    for part, value in pairs(Core.CollisionBackup) do
-        if part and part.Parent then
-            pcall(function()
-                part.CanCollide = value
-            end)
-        end
-    end
-
-    table.clear(Core.CollisionBackup)
-end
-
-local function updateCharacter()
-    local hum = humanoid()
-    local char = character()
-
-    if hum then
-        if Config.SpeedOverride then
-            hum.WalkSpeed = Config.WalkSpeed
-        end
-
-        if Config.JumpOverride then
-            if hum.UseJumpPower then
-                hum.JumpPower = Config.JumpPower
-            else
-                hum.JumpHeight = math.max(7.2, Config.JumpPower / 7)
-            end
-        end
-    end
-
-    local shouldNoclip = Config.Noclip
-        or (
-            Config.PlatformNoclip
-            and Runtime.TransportMoving
-        )
-
-    if shouldNoclip and char then
-        for _, object in ipairs(char:GetDescendants()) do
-            if object:IsA("BasePart") then
-                if Core.CollisionBackup[object] == nil then
-                    Core.CollisionBackup[object] = object.CanCollide
-                end
-
-                object.CanCollide = false
-            end
-        end
-    elseif next(Core.CollisionBackup) ~= nil then
-        restoreCollision()
-    end
-end
-
-connect(RunService.Stepped, function()
-    if Core.Running then
-        updateCharacter()
-    end
-end)
-
-connect(UserInputService.JumpRequest, function()
-    if Core.Running and Config.InfiniteJump then
-        local hum = humanoid()
-
-        if hum then
-            hum:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
-    end
-end)
 
 -- ============================================================
 -- ESP
@@ -4856,7 +5352,7 @@ end
 
 task.spawn(function()
     while Core.Running do
-        safeWorker("Progress", ProgressionController.Step)
+        safeWorker("Progress", AutoFarmController.Step)
         task.wait(Config.AutoProgress and 0.12 or 0.65)
     end
 end)
@@ -4986,7 +5482,7 @@ task.spawn(function()
             )
 
             Runtime.FarmAnchorCFrame = nil
-            PlatformTransport.Cancel(true)
+            FarmMovement.Stop(false, true)
         end
 
         task.wait(0.55)
@@ -5029,6 +5525,13 @@ local function runtimeStatus()
         "Quest: " .. currentQuestSummary(),
         "Progress: " .. Runtime.ProgressState
             .. " • " .. Runtime.ProgressDetail,
+        "Farm FSM: " .. tostring(Runtime.FarmFSM.State),
+        "Farm mover: "
+            .. tostring(Runtime.FarmMoveActive)
+            .. " • hold="
+            .. tostring(Runtime.FarmMoveHold),
+        "Wanted mob: "
+            .. tostring(Runtime.CurrentWantedMob or "None"),
         "Hotbar: " .. HotbarService.GetSnapshot(),
         "Quest catalog: " .. tostring(#Runtime.QuestCatalog),
     }, "\n")
@@ -5218,63 +5721,6 @@ end
 
 local HomeAutomation = Tabs.Home:AddSection("Main Automation")
 
-local AutomationProfile = bindDropdown(
-    HomeAutomation,
-    "AutomationProfile",
-    "Automation Profile",
-    {"Progress Only", "Progress + Stats"},
-    1,
-    function(value)
-        Config.AutomationProfile = value
-        if Config.AutoProgress then
-            Config.AutoStats = value == "Progress + Stats"
-        end
-    end,
-    "One progression owner controls quest, platform, bring, hitbox and task workers."
-)
-
-local MasterToggle = bindToggle(
-    HomeAutomation,
-    "MasterAutoProgress",
-    "AUTO QUEST / FARM",
-    false,
-    function(value)
-        Config.AutoProgress = value
-
-        if value then
-            Config.FarmMode = "Smart Quest"
-            Config.AutoQuest = true
-            QuestCatalogService.Build()
-            Config.AutoAcceptRecommended = true
-            Config.AutoTurnIn = true
-            Config.AutoDialogue = true
-            Config.AutoClaim = true
-            Config.BringMobs = true
-            Config.MobHitbox = true
-            Config.AutoAttack = true
-            Config.AutoStats =
-                Config.AutomationProfile == "Progress + Stats"
-
-            notify(
-                "SON HUB",
-                "AUTO ON | Quest -> Platform -> Task -> Turn-in",
-                4
-            )
-        else
-            Config.AutoStats = false
-            Runtime.ProgressLifeSkill = nil
-            Runtime.FarmAnchorCFrame = nil
-            Runtime.CurrentTarget = nil
-            Runtime.CurrentWantedMob = nil
-            HitboxService.Clear()
-            PlatformTransport.Cancel(false)
-
-            notify("SON HUB", "Automation stopped.", 2)
-        end
-    end,
-    "RecommendedQuest and live Quest UI decide what the hub should do next."
-)
-
 HomeAutomation:AddButton({
     Title = "Runtime Status",
     Description = "Level, quest, progression state and detected game data.",
@@ -5371,53 +5817,242 @@ HomeState:AddButton({
 -- Farm
 -- ============================================================
 
-local FarmModeSection = Tabs.Farm:AddSection("Farm Controller")
+local FarmMain = Tabs.Farm:AddSection("Auto Farm")
+
+local FarmMaster = bindToggle(
+    FarmMain,
+    "AutoFarmV11",
+    "AUTO FARM",
+    Config.AutoProgress,
+    function(value)
+        Config.AutoProgress = value
+
+        if value then
+            Config.AutoQuest = true
+            Config.AutoAcceptRecommended = true
+            Config.AutoTurnIn = true
+            Config.AutoDialogue = true
+            QuestCatalogService.Build()
+
+            Runtime.FarmFSM.QuestKey = nil
+            Runtime.FarmFSM.TaskKey = nil
+
+            notify(
+                "Auto Farm",
+                "Started • one state machine owns Quest, movement, mob control and combat.",
+                4
+            )
+        else
+            Runtime.ProgressLifeSkill = nil
+            Runtime.FarmAnchorCFrame = nil
+            Runtime.CurrentTarget = nil
+            Runtime.CurrentWantedMob = nil
+
+            HitboxService.Clear()
+            FarmMovement.Stop(false, true)
+
+            notify(
+                "Auto Farm",
+                "Stopped and farm state cleared.",
+                3
+            )
+        end
+    end,
+    "Single owner: Quest -> travel -> farm point -> bring -> hitbox -> combat -> turn-in."
+)
 
 bindDropdown(
-    FarmModeSection,
-    "FarmMode",
-    "Farm Mode",
+    FarmMain,
+    "FarmModeV11",
+    "Mode",
     {"Smart Quest", "Selected Mob", "Boss"},
     1,
     function(value)
         Config.FarmMode = value
-        Runtime.CurrentTarget = nil
+        Runtime.FarmFSM.TaskKey = nil
         Runtime.FarmAnchorCFrame = nil
+        Runtime.CurrentTarget = nil
         HitboxService.Clear()
-        PlatformTransport.Cancel(true)
+        FarmMovement.Stop(false, true)
     end,
-    "Smart Quest follows live tasks. Selected Mob and Boss are manual farm modes."
+    "Smart Quest is the normal full-auto mode. Manual modes ignore Quest routing."
 )
 
-local mobValues = TargetService.GetMobOptions()
+local mobValuesV11 = TargetService.GetMobOptions()
+
 bindDropdown(
-    FarmModeSection,
-    "SelectedMob",
-    "Selected Mob",
-    mobValues,
+    FarmMain,
+    "SelectedMobV11",
+    "Manual Mob",
+    mobValuesV11,
     1,
     function(value)
         Config.SelectedMob = value
         Runtime.CurrentTarget = nil
         Runtime.FarmAnchorCFrame = nil
+    end,
+    "Only used when Mode = Selected Mob."
+)
+
+FarmMain:AddButton({
+    Title = "Farm Status",
+    Description = "Shows the exact state, quest task, target and movement status.",
+    Callback = function()
+        notify(
+            "Auto Farm Status",
+            table.concat({
+                "State: " .. tostring(Runtime.ProgressState),
+                "Detail: " .. tostring(Runtime.ProgressDetail),
+                "Quest: " .. currentQuestSummary(),
+                "Wanted Mob: " .. tostring(Runtime.CurrentWantedMob or "None"),
+                "Target: "
+                    .. tostring(
+                        Runtime.CurrentTarget
+                        and Runtime.CurrentTarget.Name
+                        or "None"
+                    ),
+                "Moving: " .. tostring(Runtime.FarmMoveActive),
+                "Anchor: " .. tostring(Runtime.FarmAnchorCFrame ~= nil),
+                "Mastery: " .. tostring(Config.AutoMastery),
+            }, "\n"),
+            11
+        )
+    end,
+})
+
+local PositionSection = Tabs.Farm:AddSection("Farm Position")
+
+bindSlider(
+    PositionSection,
+    "FarmHeightV11",
+    "Height Above Mobs",
+    10,
+    32,
+    Config.PlatformFarmHeight,
+    function(value)
+        Config.PlatformFarmHeight = value
+        Runtime.FarmAnchorCFrame = nil
+    end,
+    "Player stays above the mob cluster; matching mobs are stacked below the platform."
+)
+
+bindSlider(
+    PositionSection,
+    "FarmMoveSpeedV11",
+    "Travel Speed",
+    70,
+    320,
+    Config.PlatformSpeed,
+    function(value)
+        Config.PlatformSpeed = value
+    end,
+    "Continuous Heartbeat interpolation; changing a target does not recreate TweenService tweens."
+)
+
+bindSlider(
+    PositionSection,
+    "FarmPlatformSizeV11",
+    "Platform Size",
+    6,
+    18,
+    Config.PlatformSize,
+    function(value)
+        Config.PlatformSize = value
+    end
+)
+
+local MobControl = Tabs.Farm:AddSection("Mob Control")
+
+bindToggle(
+    MobControl,
+    "BringMobsV11",
+    "Bring Matching Mobs",
+    Config.BringMobs,
+    function(value)
+        Config.BringMobs = value
+    end,
+    "Only the exact current farm target is stacked. Dialogue NPCs and players are excluded."
+)
+
+bindSlider(
+    MobControl,
+    "BringRadiusV11",
+    "Bring Radius",
+    40,
+    220,
+    Config.BringRadius,
+    function(value)
+        Config.BringRadius = value
+    end
+)
+
+bindSlider(
+    MobControl,
+    "BringLimitV11",
+    "Max Mobs",
+    1,
+    18,
+    Config.BringLimit,
+    function(value)
+        Config.BringLimit = value
+    end
+)
+
+bindSlider(
+    MobControl,
+    "MobBelowFeetV11",
+    "Mobs Below Platform",
+    5,
+    18,
+    Config.MobBelowFeet,
+    function(value)
+        Config.MobBelowFeet = value
     end
 )
 
 bindToggle(
-    FarmModeSection,
-    "AutoAttack",
-    "Repeat Current In-game Action",
-    Config.AutoAttack,
+    MobControl,
+    "MobHitboxV11",
+    "Large Mob Hitbox",
+    Config.MobHitbox,
     function(value)
-        Config.AutoAttack = value
+        Config.MobHitbox = value
+        if not value then
+            HitboxService.Clear()
+        end
     end,
-    "Uses the currently active in-game action only; the hub does not auto-select equipment."
+    "Mob-only. Players and quest/dialogue NPCs are never expanded."
 )
 
 bindSlider(
-    FarmModeSection,
-    "AttackRate",
-    "Action Rate",
+    MobControl,
+    "HitboxSizeV11",
+    "Hitbox Size",
+    8,
+    32,
+    Config.HitboxSize,
+    function(value)
+        Config.HitboxSize = value
+    end,
+    "Default is deliberately larger than previous builds."
+)
+
+local CombatFarm = Tabs.Farm:AddSection("Combat Rotation")
+
+bindToggle(
+    CombatFarm,
+    "AutoAttackV11",
+    "Auto M1",
+    Config.AutoAttack,
+    function(value)
+        Config.AutoAttack = value
+    end
+)
+
+bindSlider(
+    CombatFarm,
+    "AttackRateV11",
+    "M1 / Second",
     2,
     15,
     Config.AttackRate,
@@ -5426,123 +6061,61 @@ bindSlider(
     end
 )
 
-local BringSection = Tabs.Farm:AddSection("Bring Matching Mobs")
-
 bindToggle(
-    BringSection,
-    "BringMobs",
-    "Bring Mobs",
-    Config.BringMobs,
+    CombatFarm,
+    "AutoMasteryV11",
+    "Auto Skill / Mastery",
+    Config.AutoMastery,
     function(value)
-        Config.BringMobs = value
+        Config.AutoMastery = value
     end,
-    "Only matching non-player farm mobs are moved below the farm point."
+    "Cycles only live combat hotbar actions and respects visible cooldowns."
 )
 
-bindSlider(
-    BringSection,
-    "BringRadius",
-    "Bring Radius",
-    25,
-    200,
-    Config.BringRadius,
-    function(value)
-        Config.BringRadius = value
-    end
-)
-
-bindSlider(
-    BringSection,
-    "BringLimit",
-    "Mob Limit",
+bindDropdown(
+    CombatFarm,
+    "MasteryModeV11",
+    "Skill Rotation",
+    {"All Combat", "Current Fruit", "Selected Skill"},
     1,
+    function(value)
+        Config.MasteryMode = value
+    end
+)
+
+local combatActions = HotbarService.GetWeaponOptions()
+
+bindDropdown(
+    CombatFarm,
+    "SelectedSkillV11",
+    "Selected Skill",
+    combatActions,
+    1,
+    function(value)
+        Config.SelectedWeapon = value
+    end,
+    "Used only when Skill Rotation = Selected Skill. 'Auto' leaves the rotation automatic."
+)
+
+bindToggle(
+    CombatFarm,
+    "ReadyOnlyV11",
+    "Use Ready Skills Only",
+    Config.MasteryReadyOnly,
+    function(value)
+        Config.MasteryReadyOnly = value
+    end
+)
+
+bindSlider(
+    CombatFarm,
+    "MasteryIntervalV11",
+    "Skill Interval x10",
+    2,
     20,
-    Config.BringLimit,
+    math.floor(Config.MasteryInterval * 10),
     function(value)
-        Config.BringLimit = value
-    end
-)
-
-bindSlider(
-    BringSection,
-    "MobBelowFeet",
-    "Mob Below Feet",
-    4,
-    18,
-    Config.MobBelowFeet,
-    function(value)
-        Config.MobBelowFeet = value
-    end
-)
-
-bindSlider(
-    BringSection,
-    "BringSpread",
-    "Bring Spread x10",
-    0,
-    30,
-    math.floor(Config.BringSpread * 10),
-    function(value)
-        Config.BringSpread = value / 10
-    end
-)
-
-bindToggle(
-    BringSection,
-    "BringBosses",
-    "Allow Boss Bring",
-    Config.BringBosses,
-    function(value)
-        Config.BringBosses = value
-    end
-)
-
-local HitboxSection = Tabs.Farm:AddSection("Mob-only Hitbox")
-
-bindToggle(
-    HitboxSection,
-    "MobHitbox",
-    "Expand Matching Mob Hitbox",
-    Config.MobHitbox,
-    function(value)
-        Config.MobHitbox = value
-        if not value then
-            HitboxService.Clear()
-        end
-    end
-)
-
-bindSlider(
-    HitboxSection,
-    "HitboxSize",
-    "Hitbox Size",
-    4,
-    18,
-    Config.HitboxSize,
-    function(value)
-        Config.HitboxSize = value
-    end
-)
-
-bindSlider(
-    HitboxSection,
-    "HitboxTransparency",
-    "Hitbox Transparency x10",
-    0,
-    10,
-    math.floor(Config.HitboxTransparency * 10),
-    function(value)
-        Config.HitboxTransparency = value / 10
-    end
-)
-
-bindToggle(
-    HitboxSection,
-    "HitboxBosses",
-    "Allow Boss Hitbox",
-    Config.HitboxBosses,
-    function(value)
-        Config.HitboxBosses = value
+        Config.MasteryInterval = value / 10
     end
 )
 
@@ -5633,118 +6206,9 @@ bindSlider(
 -- Movement
 -- ============================================================
 
-local PlatformSection = Tabs.Movement:AddSection("Heartbeat Moving Platform")
-
-bindToggle(
-    PlatformSection,
-    "PlatformTransport",
-    "Platform Transport",
-    Config.PlatformTransport,
-    function(value)
-        Config.PlatformTransport = value
-        if not value then
-            PlatformTransport.Cancel(false)
-        end
-    end,
-    "Moves the local platform continuously on Heartbeat instead of cancelling/recreating TweenService tweens."
-)
-
-bindToggle(
-    PlatformSection,
-    "PlatformKinematicAssist",
-    "Nexomia Kinematic Assist",
-    Config.PlatformKinematicAssist,
-    function(value)
-        Config.PlatformKinematicAssist = value
-    end,
-    "Recommended on Nexomia: HRP follows the same continuous Heartbeat path as the visible platform."
-)
-
-bindSlider(
-    PlatformSection,
-    "PlatformSpeed",
-    "Platform Speed",
-    60,
-    400,
-    Config.PlatformSpeed,
-    function(value)
-        Config.PlatformSpeed = value
-    end
-)
-
-bindSlider(
-    PlatformSection,
-    "FarmHeight",
-    "Farm Height",
-    8,
-    35,
-    Config.PlatformFarmHeight,
-    function(value)
-        Config.PlatformFarmHeight = value
-        Runtime.FarmAnchorCFrame = nil
-    end
-)
-
-bindSlider(
-    PlatformSection,
-    "NpcHeight",
-    "NPC Arrival Height x10",
-    20,
-    80,
-    math.floor(Config.PlatformNpcHeight * 10),
-    function(value)
-        Config.PlatformNpcHeight = value / 10
-    end
-)
-
-bindSlider(
-    PlatformSection,
-    "PlatformSize",
-    "Platform Size",
-    4,
-    16,
-    Config.PlatformSize,
-    function(value)
-        Config.PlatformSize = value
-        if Runtime.TransportPart then
-            Runtime.TransportPart.Size = Vector3.new(value, 1, value)
-        end
-    end
-)
-
-bindSlider(
-    PlatformSection,
-    "PlatformTransparency",
-    "Platform Transparency x10",
-    0,
-    10,
-    math.floor(Config.PlatformTransparency * 10),
-    function(value)
-        Config.PlatformTransparency = value / 10
-        if Runtime.TransportPart then
-            Runtime.TransportPart.Transparency =
-                Config.PlatformTransparency
-        end
-    end
-)
-
-bindSlider(
-    PlatformSection,
-    "ArrivalDistance",
-    "Arrival Distance",
-    2,
-    12,
-    Config.PlatformArrivalDistance,
-    function(value)
-        Config.PlatformArrivalDistance = value
-    end
-)
-
-PlatformSection:AddButton({
-    Title = "Stop Platform",
-    Callback = function()
-        PlatformTransport.Cancel(false)
-    end,
+Tabs.Movement:AddParagraph({
+    Title = "Auto Farm Movement",
+    Content = "Farm travel/platform settings live in the Farm tab. This tab only contains manual character movement."
 })
 
 local CharacterSection = Tabs.Movement:AddSection("Character")
