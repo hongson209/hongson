@@ -1,20 +1,6 @@
---[[
-    SON HUB v10 - Nexomia Full
-    Target snapshot: PlaceId 118635363908336
-    UI: Fluent direct API
-    make by hongson
+-- SON HUB v19 | Nexomia snapshot rebuild | hongson
 
-    Design:
-      - Nexomia-safe bootstrap: no WebSocket/getscriptclosure/filesystem addons.
-      - Every worker runs behind xpcall and exposes its last error.
-      - One progression owner; no competing movement loops.
-      - Movement uses a heartbeat-driven local platform under the player.
-      - Quest/NPC/task logic comes from client-visible game structures.
-      - No guessed RemoteEvent/RemoteFunction contracts.
-      - Large Workspace scan occurs once; caches update incrementally.
-]]
-
-local VERSION = "17.0.0"
+local VERSION = "19.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -73,6 +59,10 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local RobloxStats = game:GetService("Stats")
 
 local okVim, VirtualInputManager = pcall(function()
     return game:GetService("VirtualInputManager")
@@ -189,20 +179,22 @@ local Config = {
     -- Auto Farm combat
     AutoAttack = true,
     AttackRate = 7,
-    CombatDistance = 5.0,
+    CombatDistance = 5,
+    FarmAnchorHeight = 0.4,
 
     -- Mob gather uses real aggro/follow behaviour.
     AutoGather = true,
     GatherRadius = 85,
     GatherMax = 4,
     GatherAggroDistance = 5.0,
-    GatherStackRadius = 14,
+    GatherStackRadius = 5,
     GatherFollowWait = 0.75,
     GatherFailureLimit = 3,
 
     -- Single movement owner
     PlatformTransport = true,
     PlatformSpeed = 175,
+    TweenSpeed = 175,
     PlatformNpcHeight = 0.25,
     PlatformBackDistance = 5,
     PlatformArrivalDistance = 3.5,
@@ -216,7 +208,7 @@ local Config = {
 
     -- Stats
     AutoStats = false,
-    StatBuild = "Balanced",
+    StatBuild = "Auto",
     StatSpendInterval = 0.25,
 
     -- Collection / lifeskills
@@ -235,15 +227,18 @@ local Config = {
     MiningCriticalTolerance = 0.035,
     MiningHoldTimeout = 5.0,
     MiningRetryDelay = 0.55,
+    MiningStartTimeout = 1.8,
+    MiningNoOreRetry = 1.4,
     MiningAutoAim = false,
 
     AutoFarming = false,
 
     AutoFishing = false,
-    FishingSpotMode = "Saved Position",
+    FishingSpotMode = "Anchor Town Pond",
     FishingAutoReturn = true,
     FishingRequireBait = false,
     FishingBiteTimeout = 40,
+    FishingEquipSettle = 0.35,
     FishingCooldown = 2.0,
     FishingReelTolerance = 14,
     FishingAutoCalibrate = true,
@@ -264,11 +259,13 @@ local Config = {
 
     -- ESP
     CurrentTargetESP = true,
+    PlayerESP = false,
     MobESP = false,
     BossESP = false,
     LootESP = false,
     ESPDistance = 1200,
     TargetColor = Color3.fromRGB(95, 200, 255),
+    PlayerColor = Color3.fromRGB(170, 125, 255),
     MobColor = Color3.fromRGB(255, 205, 80),
     BossColor = Color3.fromRGB(255, 75, 95),
     LootColor = Color3.fromRGB(115, 255, 145),
@@ -313,21 +310,12 @@ local Runtime = {
         LockedTaskUntil = 0,
     },
 
-    FarmMovePart = nil,
-    FarmMoveGoal = nil,
-    FarmMoveActive = false,
-    FarmMoveHold = false,
-    FarmMoveHoldCFrame = nil,
-    FarmMoveRoute = nil,
-    FarmMoveRouteIndex = 0,
-    FarmMoveFinalGoal = nil,
-    FarmMoveFacePosition = nil,
-    FarmMoveKind = nil,
-
     Gather = {
         State = "IDLE",
         Wanted = nil,
         Anchor = nil,
+        AnchorSource = nil,
+        AnchorMob = nil,
         Target = nil,
         InitialTargetDistance = 0,
         PhaseSince = 0,
@@ -350,17 +338,8 @@ local Runtime = {
     LastQuestChange = 0,
     LastAttack = 0,
     LastStatsSpend = 0,
-
-    TransportPart = nil,
-    TransportTween = nil,
-    TransportWeld = nil,
-    TransportGoal = nil,
-    TransportRootGoal = nil,
-    TransportMoving = false,
-    TransportAutoRotate = nil,
-    TransportLastDistance = nil,
-    TransportLastProgressAt = 0,
-    TransportStartedAt = 0,
+    StatsSpendFailures = 0,
+    StatsSpendStatus = "Idle",
 
     CharacterCollisionBackup = setmetatable({}, {__mode = "k"}),
 
@@ -372,6 +351,8 @@ local Runtime = {
     FishingMouseHeld = false,
     FishingKeyHeld = nil,
     FishingLastCast = 0,
+    FishingEquippedRod = nil,
+    FishingEquippedAt = 0,
     FishingRodCache = nil,
     FishingRodCacheAt = 0,
     FishingBaitCache = nil,
@@ -391,10 +372,12 @@ local Runtime = {
     MiningTarget = nil,
     MiningMouseHeld = false,
     MiningLastAttempt = 0,
+    MiningNoOreSince = 0,
     MiningReleaseDone = false,
     MiningEquippedSlot = nil,
     MiningEquipAt = 0,
     MiningTeleportedTarget = nil,
+    MiningLastIndexRefresh = 0,
     ProgressLifeSkill = nil,
 
     IslandLandingCache = {},
@@ -716,6 +699,36 @@ local function clickButton(button, allowHiddenSignal)
     local pos = button.AbsolutePosition
     local size = button.AbsoluteSize
     return mouseClickAt(pos.X + size.X / 2, pos.Y + size.Y / 2)
+end
+
+local function clickButtonReliable(button)
+    if not button or not button:IsA("GuiButton") then
+        return false
+    end
+
+    if type(fireSignalFn) == "function" then
+        return clickButton(button, true)
+    end
+
+    local screen = button:FindFirstAncestorWhichIsA("ScreenGui")
+    local wasEnabled = screen and screen.Enabled
+
+    if screen and not wasEnabled then
+        screen.Enabled = true
+        RunService.RenderStepped:Wait()
+    end
+
+    local ok = clickButton(button, false)
+
+    if screen and not wasEnabled then
+        task.defer(function()
+            if screen and screen.Parent then
+                screen.Enabled = false
+            end
+        end)
+    end
+
+    return ok
 end
 
 -- ============================================================
@@ -1924,16 +1937,36 @@ local function isPlayerEntity(model)
     )
 end
 
-function TargetService.IsAliveNPC(model)
-    if not model
-        or not model.Parent
-        or not model:IsA("Model")
-        or isPlayerEntity(model) then
-        return false
+function TargetService.GetLifeState(model)
+    if not model or not model.Parent or not model:IsA("Model") or isPlayerEntity(model) then
+        return "INVALID"
+    end
+
+    for _, name in ipairs({"Dead", "Died", "IsDead", "Death", "Respawning"}) do
+        if model:GetAttribute(name) == true then
+            return "DEAD"
+        end
     end
 
     local hum = model:FindFirstChildOfClass("Humanoid")
-    return objectRoot(model) ~= nil and (not hum or hum.Health > 0)
+    if not hum then
+        return "INVALID"
+    end
+
+    if hum.Health <= 0 or hum:GetState() == Enum.HumanoidStateType.Dead then
+        return "DEAD"
+    end
+
+    if model:GetAttribute("Ragdolled") == true
+        and model:GetAttribute("Dead") == true then
+        return "CORPSE"
+    end
+
+    return objectRoot(model) and "ALIVE" or "INVALID"
+end
+
+function TargetService.IsAliveNPC(model)
+    return TargetService.GetLifeState(model) == "ALIVE"
 end
 
 function TargetService.IsBoss(model)
@@ -2188,6 +2221,7 @@ Runtime.Motion = {
     UpdatedAt = 0,
     AutoRotate = nil,
     Kind = nil,
+    Tween = nil,
 }
 
 local function motionYawCFrame(position, facePosition)
@@ -2209,27 +2243,6 @@ local function motionYawCFrame(position, facePosition)
     return CFrame.new(position)
 end
 
-local function syncMotionCompat()
-    local motion = Runtime.Motion
-
-    Runtime.FarmMoveActive = motion.Active
-    Runtime.FarmMoveHold = motion.Hold
-    Runtime.FarmMoveGoal = motion.Goal
-    Runtime.FarmMoveHoldCFrame = motion.HoldGoal
-    Runtime.FarmMoveFinalGoal = motion.Goal
-    Runtime.FarmMoveFacePosition = motion.FacePosition
-    Runtime.FarmMoveKind = motion.Kind
-    Runtime.FarmMoveRouteIndex = motion.Active and 1 or 0
-    Runtime.TransportMoving = motion.Active
-    Runtime.TransportGoal = motion.Goal
-    Runtime.TransportRootGoal = motion.Goal
-
-    -- v17 has no physical movement platform/weld.
-    Runtime.FarmMovePart = nil
-    Runtime.TransportPart = nil
-    Runtime.TransportWeld = nil
-end
-
 local function restoreMotionHumanoid()
     local hum = humanoid()
 
@@ -2246,7 +2259,6 @@ function MotionController.Release(owner, force)
     local motion = Runtime.Motion
 
     if not motion.Owner then
-        syncMotionCompat()
         return true
     end
 
@@ -2254,6 +2266,13 @@ function MotionController.Release(owner, force)
         and owner
         and motion.Owner ~= owner then
         return false
+    end
+
+    if motion.Tween then
+        pcall(function()
+            motion.Tween:Cancel()
+        end)
+        motion.Tween = nil
     end
 
     local root = rootPart()
@@ -2276,7 +2295,6 @@ function MotionController.Release(owner, force)
     motion.UpdatedAt = 0
     motion.Kind = nil
 
-    syncMotionCompat()
     return true
 end
 
@@ -2331,7 +2349,6 @@ function MotionController.Request(owner, goal, options)
         motion.FacePosition = options.FacePosition or motion.FacePosition
         motion.Hold = options.Hold == true
         motion.Kind = options.Kind or motion.Kind
-        syncMotionCompat()
         return true, "tracking"
     end
 
@@ -2342,13 +2359,39 @@ function MotionController.Request(owner, goal, options)
     motion.Active = true
     motion.Hold = options.Hold == true
     motion.HoldGoal = nil
-    motion.Speed = tonumber(options.Speed) or Config.PlatformSpeed
+    motion.Speed = tonumber(options.Speed) or Config.TweenSpeed or Config.PlatformSpeed
     motion.ArrivalDistance = tonumber(options.ArrivalDistance)
         or Config.PlatformArrivalDistance
     motion.UpdatedAt = os.clock()
     motion.Kind = options.Kind or owner
 
-    syncMotionCompat()
+    if motion.Tween then
+        pcall(function()
+            motion.Tween:Cancel()
+        end)
+        motion.Tween = nil
+    end
+
+    local targetCFrame = motionYawCFrame(
+        goal.Position,
+        motion.FacePosition or goal.Position
+    )
+    local distance = (root.Position - goal.Position).Magnitude
+    local duration = math.max(0.05, distance / math.max(30, motion.Speed))
+
+    local okTween, tween = pcall(function()
+        return TweenService:Create(
+            root,
+            TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+            {CFrame = targetCFrame}
+        )
+    end)
+
+    if okTween and tween then
+        motion.Tween = tween
+        tween:Play()
+    end
+
     return true, "started"
 end
 
@@ -2380,17 +2423,21 @@ function MotionController.Step(deltaTime)
 
     if motion.Active and motion.Goal then
         local goal = motion.Goal
-        local delta = goal.Position - root.Position
-        local distance = delta.Magnitude
-        local stepDistance = math.max(30, motion.Speed)
-            * math.max(0.001, deltaTime)
+        local distance = (goal.Position - root.Position).Magnitude
 
-        if distance <= math.max(
-            motion.ArrivalDistance,
-            stepDistance
-        ) then
+        if distance <= motion.ArrivalDistance then
+            if motion.Tween then
+                pcall(function()
+                    motion.Tween:Cancel()
+                end)
+                motion.Tween = nil
+            end
+
             pcall(function()
-                root.CFrame = goal
+                root.CFrame = motionYawCFrame(
+                    goal.Position,
+                    motion.FacePosition or goal.Position
+                )
                 root.AssemblyLinearVelocity = Vector3.zero
                 root.AssemblyAngularVelocity = Vector3.zero
             end)
@@ -2399,8 +2446,7 @@ function MotionController.Step(deltaTime)
 
             if motion.Hold then
                 motion.HoldGoal = goal
-                syncMotionCompat()
-                return
+                        return
             end
 
             local owner = motion.Owner
@@ -2408,21 +2454,25 @@ function MotionController.Step(deltaTime)
             return
         end
 
-        local nextPosition = root.Position
-            + delta.Unit * math.min(distance, stepDistance)
+        if not motion.Tween then
+            local duration = math.max(0.05, distance / math.max(30, motion.Speed))
+            local targetCFrame = motionYawCFrame(
+                goal.Position,
+                motion.FacePosition or goal.Position
+            )
+            local okTween, tween = pcall(function()
+                return TweenService:Create(
+                    root,
+                    TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+                    {CFrame = targetCFrame}
+                )
+            end)
+            if okTween and tween then
+                motion.Tween = tween
+                tween:Play()
+            end
+        end
 
-        local nextRoot = motionYawCFrame(
-            nextPosition,
-            motion.FacePosition or goal.Position
-        )
-
-        pcall(function()
-            root.CFrame = nextRoot
-            root.AssemblyLinearVelocity = Vector3.zero
-            root.AssemblyAngularVelocity = Vector3.zero
-        end)
-
-        syncMotionCompat()
         return
     end
 
@@ -2456,7 +2506,6 @@ function MotionController.Step(deltaTime)
         end
     end
 
-    syncMotionCompat()
 end
 
 connect(RunService.Heartbeat, function(deltaTime)
@@ -2488,7 +2537,7 @@ function PlatformTransport.Ensure()
 end
 
 function PlatformTransport.DestroyWeld()
-    Runtime.TransportWeld = nil
+    return
 end
 
 function PlatformTransport.Attach()
@@ -2599,7 +2648,114 @@ function PlatformTransport.MoveToFarmAnchor()
 end
 
 -- ============================================================
--- Mob gather by aggro/lure; no NPC CFrame manipulation.
+-- Fixed mob-zone registry
+-- ============================================================
+
+MobZoneService = {
+    ByMob = {},
+    LastBuild = 0,
+}
+
+local function mobZoneRoot()
+    local important = Workspace:FindFirstChild("AA IMPORTANT")
+    return important and important:FindFirstChild("MobZones")
+end
+
+local function mobIdentity(model)
+    if not model then
+        return ""
+    end
+
+    return normalize(
+        model:GetAttribute("NPCName")
+        or model:GetAttribute("NPCType")
+        or stripRuntimeSuffix(model.Name)
+    )
+end
+
+function MobZoneService.Rebuild(force)
+    local now = os.clock()
+    if not force and now - MobZoneService.LastBuild < 4 then
+        return
+    end
+
+    MobZoneService.LastBuild = now
+    table.clear(MobZoneService.ByMob)
+
+    local root = mobZoneRoot()
+    if not root then
+        return
+    end
+
+    for _, object in ipairs(root:GetDescendants()) do
+        if object:IsA("BasePart") then
+            local mob = object:GetAttribute("Mob")
+            if type(mob) == "string" and normalize(mob) ~= "" then
+                local key = lower(stripRuntimeSuffix(mob))
+                MobZoneService.ByMob[key] = MobZoneService.ByMob[key] or {}
+                table.insert(MobZoneService.ByMob[key], object)
+            end
+        end
+    end
+end
+
+function MobZoneService.Find(mobName, hintPosition)
+    if not mobName or normalize(mobName) == "" then
+        return nil
+    end
+
+    MobZoneService.Rebuild(false)
+
+    local rows = MobZoneService.ByMob[lower(stripRuntimeSuffix(mobName))]
+    if not rows then
+        MobZoneService.Rebuild(true)
+        rows = MobZoneService.ByMob[lower(stripRuntimeSuffix(mobName))]
+    end
+
+    local best, bestDistance
+    for _, part in ipairs(rows or {}) do
+        if part and part.Parent
+            and part:GetAttribute("Active") ~= false
+            and part:GetAttribute("Spawned") ~= false then
+
+            local distance = hintPosition and (part.Position - hintPosition).Magnitude or 0
+            if not bestDistance or distance < bestDistance then
+                best = part
+                bestDistance = distance
+            end
+        end
+    end
+
+    return best
+end
+
+function MobZoneService.ResolveAnchor(wanted, rows)
+    if not rows or #rows == 0 then
+        return nil, nil, nil
+    end
+
+    local first = rows[1]
+    local generic = wanted == "Nearest Hostile"
+        or wanted == "Any Hostile"
+        or wanted == "Boss Only"
+
+    local mobName = generic and mobIdentity(first.Model) or normalize(wanted)
+    local marker = MobZoneService.Find(mobName, first.Part.Position)
+
+    if marker then
+        local position = marker.Position + Vector3.new(0, Config.FarmAnchorHeight, 0)
+        local face = marker.Position + marker.CFrame.LookVector
+        local zone = marker:GetAttribute("Zone")
+        local source = "MobZone" .. (zone and (":" .. tostring(zone)) or "")
+        return motionYawCFrame(position, face), source, mobName
+    end
+
+    local position = first.Part.Position + Vector3.new(0, math.max(0.2, Config.FarmAnchorHeight), 0)
+    return motionYawCFrame(position, first.Part.Position + first.Part.CFrame.LookVector), "CapturedSpawn", mobName
+end
+
+-- ============================================================
+-- Mob gather
 -- ============================================================
 
 MobGatherService = {}
@@ -2633,23 +2789,8 @@ local function gatherRows(wanted)
     return rows
 end
 
-local function gatherAnchorFromRows(rows)
-    if #rows == 0 then
-        return nil
-    end
-
-    local count = math.min(#rows, Config.GatherMax)
-    local sum = Vector3.zero
-
-    for index = 1, count do
-        sum += rows[index].Part.Position
-    end
-
-    local center = sum / count
-    return motionYawCFrame(
-        center + Vector3.new(0, 0.35, 0),
-        rows[1].Part.Position
-    )
+local function gatherAnchorFromRows(wanted, rows)
+    return MobZoneService.ResolveAnchor(wanted, rows)
 end
 
 local function countGathered(wanted, anchor)
@@ -2696,6 +2837,8 @@ function MobGatherService.Reset(reason)
     gather.State = "IDLE"
     gather.Wanted = nil
     gather.Anchor = nil
+    gather.AnchorSource = nil
+    gather.AnchorMob = nil
     gather.Target = nil
     gather.InitialTargetDistance = 0
     gather.PhaseSince = 0
@@ -2808,9 +2951,17 @@ function MobGatherService.Step(wanted)
     end
 
     if not gather.Anchor then
-        gather.Anchor = gatherAnchorFromRows(rows)
+        local anchor, source, anchorMob = gatherAnchorFromRows(wanted, rows)
+        gather.Anchor = anchor
+        gather.AnchorSource = source
+        gather.AnchorMob = anchorMob
         gather.State = "PICK"
         gather.PhaseSince = os.clock()
+    end
+
+    if not gather.Anchor then
+        gather.State = "WAIT_ZONE"
+        return false, "anchor unavailable"
     end
 
     local gathered, total = countGathered(wanted, gather.Anchor)
@@ -2854,6 +3005,17 @@ function MobGatherService.Step(wanted)
     end
 
     local target = gather.Target
+
+    if not TargetService.IsAliveNPC(target) then
+        if target then
+            gather.Cooldown[target] = now + 1.0
+        end
+        gather.Target = nil
+        gather.State = "PICK"
+        gather.PhaseSince = now
+        return false, "target dead"
+    end
+
     local targetPart = objectRoot(target)
 
     if not targetPart then
@@ -2880,7 +3042,8 @@ function MobGatherService.Step(wanted)
             }
         )
 
-        if distanceTo(target) <= Config.GatherAggroDistance + 1.4 then
+        if distanceTo(target) <= Config.GatherAggroDistance + 1.4
+            and TargetService.IsAliveNPC(target) then
             MotionController.Release("Combat", true)
             mouseClickCenter()
             gather.State = "TAGGED"
@@ -2907,6 +3070,7 @@ function MobGatherService.Step(wanted)
                 Kind = "gather-return",
                 FacePosition = targetPart.Position,
                 ArrivalDistance = 1.5,
+                Hold = true,
             }
         )
 
@@ -2917,7 +3081,6 @@ function MobGatherService.Step(wanted)
                 - gather.Anchor.Position
             ).Magnitude <= 2.2 then
 
-            MotionController.Release("Combat", true)
             gather.State = "WAIT_FOLLOW"
             gather.PhaseSince = now
         end
@@ -2960,10 +3123,11 @@ end
 function MobGatherService.GetStatus()
     local gather = Runtime.Gather
     return string.format(
-        "%s • %d/%d • fail=%d%s",
+        "%s • %d/%d • %s • fail=%d%s",
         tostring(gather.State),
         tonumber(gather.Gathered) or 0,
         tonumber(gather.Total) or 0,
+        tostring(gather.AnchorSource or "no-anchor"),
         tonumber(gather.Failures) or 0,
         gather.Fallback and " • fallback" or ""
     )
@@ -3557,10 +3721,11 @@ end
 function StatsService.GetBuild()
     local build = Config.StatBuild
 
-    if build == "Balanced"
-        or build == "Tank"
-        or build == "Mobility"
-        or build == "Haki" then
+    if build == "Auto" then
+        return autoWeaponBuild()
+    end
+
+    if STAT_WEIGHTS[build] then
         return build
     end
 
@@ -3602,15 +3767,19 @@ end
 
 function StatsService.SpendOne()
     if not Config.AutoStats then
+        Runtime.StatsSpendStatus = "Disabled"
         return false
     end
 
     local now = os.clock()
-    if now - Runtime.LastStatsSpend < Config.StatSpendInterval then
+    local backoff = math.min(1.5, (Runtime.StatsSpendFailures or 0) * 0.2)
+    if now - Runtime.LastStatsSpend < Config.StatSpendInterval + backoff then
         return false
     end
 
-    if StatsService.GetStatPoints() <= 0 then
+    local before = StatsService.GetStatPoints()
+    if before <= 0 then
+        Runtime.StatsSpendStatus = "No points"
         return false
     end
 
@@ -3620,11 +3789,37 @@ function StatsService.SpendOne()
     local button = frame and frame:FindFirstChild("ImageButton")
 
     if not button or not button:IsA("ImageButton") then
+        Runtime.StatsSpendFailures += 1
+        Runtime.StatsSpendStatus = "Radar button unavailable"
+        Runtime.LastStatsSpend = now
         return false
     end
 
     Runtime.LastStatsSpend = now
-    return clickButton(button, true)
+    local clicked = clickButtonReliable(button)
+    if not clicked then
+        Runtime.StatsSpendFailures += 1
+        Runtime.StatsSpendStatus = "Input failed: " .. tostring(stat)
+        return false
+    end
+
+    Runtime.StatsSpendStatus = "Pending: " .. tostring(stat)
+    task.delay(0.22, function()
+        if not Core.Running then
+            return
+        end
+
+        local after = StatsService.GetStatPoints()
+        if after < before then
+            Runtime.StatsSpendFailures = 0
+            Runtime.StatsSpendStatus = "Spent: " .. tostring(stat)
+        else
+            Runtime.StatsSpendFailures += 1
+            Runtime.StatsSpendStatus = "No server confirmation: " .. tostring(stat)
+        end
+    end)
+
+    return true
 end
 
 function StatsService.GetSnapshot()
@@ -3632,6 +3827,7 @@ function StatsService.GetSnapshot()
     local rows = {
         "Points: " .. StatsService.GetStatPoints(),
         "Build: " .. StatsService.GetBuild(),
+        "Status: " .. tostring(Runtime.StatsSpendStatus),
     }
 
     for _, name in ipairs(STAT_NAMES) do
@@ -3923,30 +4119,26 @@ local function qteButtonByText(text)
         return nil
     end
 
-    local wanted = lower(text)
-
-    for _, object in ipairs(screen:GetDescendants()) do
-        if object:IsA("ImageButton")
-            and not isScriptTemplateDescendant(object)
-            and isOnScreen(object) then
-
-            local label = object:FindFirstChildWhichIsA("TextLabel", true)
-            if label and lower(label.Text) == wanted then
-                return object
-            end
-        end
+    local client = screen:FindFirstChild("QTEClient")
+    local events = client and client:FindFirstChild("Events")
+    if not events then
+        return nil
     end
 
-    -- Some QTE implementations may reuse the template in place.
-    -- In the inactive dump, those template buttons sit at Y=-58;
-    -- only accept a template if it has moved into the viewport.
-    for _, object in ipairs(screen:GetDescendants()) do
-        if object:IsA("ImageButton") and isOnScreen(object) then
-            local label = object:FindFirstChildWhichIsA("TextLabel", true)
-            if label and lower(label.Text) == wanted then
-                return object
-            end
-        end
+    local wanted = lower(text)
+    local button
+
+    if wanted == "shake" then
+        local gridshot = events:FindFirstChild("Gridshot")
+        button = gridshot and gridshot:FindFirstChild("Button")
+    elseif wanted == "click" then
+        local spam = events:FindFirstChild("Spam Click")
+        local frame = spam and spam:FindFirstChild("Frame")
+        button = frame and frame:FindFirstChild("ImageButton")
+    end
+
+    if button and button:IsA("ImageButton") and isOnScreen(button) then
+        return button
     end
 
     return nil
@@ -3954,16 +4146,13 @@ end
 
 local function findEnabledBillboard(name)
     local screen = qteScreen()
-    if not screen then
-        return nil
-    end
+    local client = screen and screen:FindFirstChild("QTEClient")
+    local events = client and client:FindFirstChild("Events")
+    local timed = events and events:FindFirstChild("Timed Release")
+    local billboard = timed and timed:FindFirstChild(name)
 
-    for _, object in ipairs(screen:GetDescendants()) do
-        if object:IsA("BillboardGui")
-            and object.Name == name
-            and object.Enabled then
-            return object
-        end
+    if billboard and billboard:IsA("BillboardGui") and billboard.Enabled then
+        return billboard
     end
 
     return nil
@@ -4168,22 +4357,26 @@ function FishingService.EquipRod(rod)
         return false
     end
 
+    if Runtime.FishingEquippedRod == rod.Name
+        and os.clock() - (Runtime.FishingEquippedAt or 0) < 120 then
+        return true
+    end
+
+    local ok = false
     if rod.Source == "Hotbar" then
-        return HotbarService.Press(rod.Hotbar)
+        ok = HotbarService.Press(rod.Hotbar)
+    elseif rod.EquipButton and rod.EquipButton:IsA("GuiButton") then
+        ok = clickButtonReliable(rod.EquipButton)
     end
 
-    if rod.EquipButton and rod.EquipButton:IsA("GuiButton") then
-        local ok = clickButton(rod.EquipButton, true)
-
-        if ok then
-            Runtime.FishingRodCache = nil
-            Runtime.FishingRodCacheAt = 0
-        end
-
-        return ok
+    if ok then
+        Runtime.FishingEquippedRod = rod.Name
+        Runtime.FishingEquippedAt = os.clock()
+        Runtime.FishingRodCache = nil
+        Runtime.FishingRodCacheAt = 0
     end
 
-    return false
+    return ok
 end
 
 function FishingService.GetConditions()
@@ -4274,9 +4467,10 @@ function FishingService.Step()
 
     local rod = FishingService.FindRod()
     if not rod then
-        FishingService.Reset("No fishing rod detected")
-        setFishingState("MISSING_ROD", "No rod in Hotbar/FishInventory")
-        return 1.0
+        setFishingState("WAIT_ROD", "Rod is not visible in Hotbar/FishInventory yet")
+        Runtime.FishingRodCache = nil
+        Runtime.FishingRodCacheAt = 0
+        return 1.2
     end
 
     local bait = FishingService.GetBait()
@@ -4339,6 +4533,8 @@ function FishingService.Step()
     if Runtime.FishingState == "WAIT_QTE" then
         if os.clock() - Runtime.FishingStateSince >= Config.FishingBiteTimeout then
             Runtime.FishingLastCast = os.clock()
+            Runtime.FishingEquippedRod = nil
+            Runtime.FishingEquippedAt = 0
             setFishingState("COOLDOWN", "No bite/QTE; retrying")
         end
 
@@ -4349,8 +4545,13 @@ function FishingService.Step()
         return 0.25
     end
 
-    FishingService.EquipRod(rod)
-    task.wait(0.08)
+    local equipped = FishingService.EquipRod(rod)
+    if not equipped then
+        setFishingState("EQUIP_FAILED", "Rod equip input failed")
+        return 0.8
+    end
+
+    task.wait(Config.FishingEquipSettle)
     mouseClickCenter()
 
     Runtime.FishingLastCast = os.clock()
@@ -4476,38 +4677,73 @@ function MiningQTEService.GetOreOptions()
     return result
 end
 
+function MiningQTEService.RefreshOreIndex(force)
+    local now = os.clock()
+    if not force and now - (Runtime.MiningLastIndexRefresh or 0) < 1.5 then
+        return
+    end
+    Runtime.MiningLastIndexRefresh = now
+
+    local islands = Workspace:FindFirstChild("Islands")
+    if not islands then
+        return
+    end
+
+    for _, object in ipairs(islands:GetDescendants()) do
+        if object:IsA("Model")
+            and (
+                object:GetAttribute("ObjectType") == "Ore"
+                or object:GetAttribute("Ore") ~= nil
+            ) then
+            Runtime.Ores[object] = true
+        end
+    end
+end
+
 function MiningQTEService.FindOre()
     local wanted = MiningQTEService.GetWantedOre()
-    local best
-    local bestDistance
-    local bestDrop = -math.huge
 
-    for model in pairs(Runtime.Ores) do
-        if oreIsAvailable(model) then
-            local name = oreName(model)
-            local accepted = Config.MiningMode == "Any Available"
-                or wanted == nil
-                or lower(name) == lower(wanted)
+    local function pickBest()
+        local best
+        local bestDistance
+        local bestDrop = -math.huge
 
-            if accepted then
-                local distance = distanceTo(model)
-                local drop = tonumber(model:GetAttribute("DropAmount")) or 0
+        for model in pairs(Runtime.Ores) do
+            if oreIsAvailable(model) then
+                local name = oreName(model)
+                local accepted = Config.MiningMode == "Any Available"
+                    or wanted == nil
+                    or lower(name) == lower(wanted)
 
-                if Config.MiningMode == "Highest Drop" then
-                    if drop > bestDrop or (drop == bestDrop and (not bestDistance or distance < bestDistance)) then
+                if accepted then
+                    local distance = distanceTo(model)
+                    local drop = tonumber(model:GetAttribute("DropAmount")) or 0
+
+                    if Config.MiningMode == "Highest Drop" then
+                        if drop > bestDrop
+                            or (drop == bestDrop and (not bestDistance or distance < bestDistance)) then
+                            best = model
+                            bestDrop = drop
+                            bestDistance = distance
+                        end
+                    elseif not bestDistance or distance < bestDistance then
                         best = model
-                        bestDrop = drop
                         bestDistance = distance
                     end
-                elseif not bestDistance or distance < bestDistance then
-                    best = model
-                    bestDistance = distance
                 end
             end
         end
+
+        return best
     end
 
-    return best
+    local best = pickBest()
+    if best then
+        return best
+    end
+
+    MiningQTEService.RefreshOreIndex(false)
+    return pickBest()
 end
 
 local function findPickaxe()
@@ -4524,29 +4760,25 @@ end
 
 local function findMiningQTE()
     local screen = qteScreen()
-    if not screen then
+    local client = screen and screen:FindFirstChild("QTEClient")
+    local events = client and client:FindFirstChild("Events")
+    local module = events and events:FindFirstChild("Mining")
+    local billboard = module and module:FindFirstChild("Mining")
+
+    if not billboard
+        or not billboard:IsA("BillboardGui")
+        or not billboard.Enabled then
         return nil
     end
 
-    -- The real Mining QTE in the dump is:
-    -- Events/Mining/Mining/Frame/{Critical Zone, Amount}
-    for _, object in ipairs(screen:GetDescendants()) do
-        if object:IsA("BillboardGui")
-            and object.Name == "Mining"
-            and object.Enabled
-            and object.Parent
-            and object.Parent.Name == "Mining" then
+    local frame = billboard:FindFirstChild("Frame")
+    local critical = frame and frame:FindFirstChild("Critical Zone")
+    local amount = frame and frame:FindFirstChild("Amount")
 
-            local frame = object:FindFirstChild("Frame")
-            local critical = frame and frame:FindFirstChild("Critical Zone")
-            local amount = frame and frame:FindFirstChild("Amount")
-
-            if critical and amount
-                and critical:IsA("GuiObject")
-                and amount:IsA("GuiObject") then
-                return object, frame, critical, amount
-            end
-        end
+    if critical and amount
+        and critical:IsA("GuiObject")
+        and amount:IsA("GuiObject") then
+        return billboard, frame, critical, amount
     end
 
     return nil
@@ -4605,36 +4837,33 @@ function MiningQTEService.Reset(reason)
 end
 
 function MiningQTEService.TeleportToOre(ore)
-    local root = rootPart()
     local target = objectRoot(ore)
-
-    if not root or not target then
+    if not target then
         return false
     end
 
     local look = target.CFrame.LookVector
     local flat = Vector3.new(look.X, 0, look.Z)
-
     if flat.Magnitude <= 0.05 then
         flat = Vector3.new(0, 0, -1)
     else
         flat = flat.Unit
     end
 
-    local position =
-        target.Position
-        - flat * 3.6
-        + Vector3.new(0, 1.25, 0)
+    local position = target.Position
+        - flat * 4.2
+        + Vector3.new(0, 1.0, 0)
 
-    MotionController.Release(Runtime.Motion.Owner, true)
-
-    local ok = pcall(function()
-        root.CFrame = yawCFrame(position, target.Position)
-        root.AssemblyLinearVelocity = Vector3.zero
-        root.AssemblyAngularVelocity = Vector3.zero
-    end)
-
-    return ok
+    return MotionController.Request(
+        "Mining",
+        motionYawCFrame(position, target.Position),
+        {
+            Kind = "mining",
+            FacePosition = target.Position,
+            ArrivalDistance = 1.0,
+            Speed = Config.TweenSpeed,
+        }
+    )
 end
 
 function MiningQTEService.Step()
@@ -4668,12 +4897,18 @@ function MiningQTEService.Step()
 
     if not ore then
         miningMouse(false)
+        if Runtime.MiningNoOreSince == 0 then
+            Runtime.MiningNoOreSince = os.clock()
+        end
+        MiningQTEService.RefreshOreIndex(true)
         setMiningState(
-            "WAIT_ORE",
-            "No matching ore is client-visible"
+            "WAIT_STREAM",
+            "No live matching ore in the currently streamed islands"
         )
-        return 0.55
+        return Config.MiningNoOreRetry
     end
+
+    Runtime.MiningNoOreSince = 0
 
     local wanted = oreName(ore)
     local distance = distanceTo(ore)
@@ -5363,25 +5598,17 @@ function FarmMovement.GetInteractionGoal(object, prompt)
         6.8
     )
 
-    local away = Vector3.new(
-        root.Position.X - target.Position.X,
-        0,
-        root.Position.Z - target.Position.Z
-    )
+    local look = target.CFrame.LookVector
+    local forward = Vector3.new(look.X, 0, look.Z)
 
-    if away.Magnitude <= 0.05 then
-        local look = target.CFrame.LookVector
-        away = Vector3.new(-look.X, 0, -look.Z)
-    end
-
-    if away.Magnitude <= 0.05 then
-        away = Vector3.new(0, 0, 1)
+    if forward.Magnitude <= 0.05 then
+        forward = Vector3.new(0, 0, -1)
     else
-        away = away.Unit
+        forward = forward.Unit
     end
 
     local position = target.Position
-        + away * desiredDistance
+        + forward * desiredDistance
         + Vector3.new(0, 0.15, 0)
 
     return motionYawCFrame(position, target.Position)
@@ -5433,8 +5660,6 @@ local function farmResetRoute(clearAnchor)
 
     if clearAnchor ~= false then
         Runtime.FarmAnchorCFrame = nil
-        Runtime.FarmMoveHold = false
-        Runtime.FarmMoveHoldCFrame = nil
         MobGatherService.Reset()
     end
 end
@@ -5532,16 +5757,6 @@ local function stepQuestNpc(questName, preferredNpc, finalState)
     if dialogueIsOpen(npc) then
         FarmMovement.Stop(true, true)
 
-        local root = rootPart()
-        if root then
-            pcall(function()
-                root.AssemblyLinearVelocity =
-                    Vector3.zero
-                root.AssemblyAngularVelocity =
-                    Vector3.zero
-            end)
-        end
-
         InteractionService.ProcessDialogue(
             questName,
             npc
@@ -5621,17 +5836,13 @@ local function stepQuestNpc(questName, preferredNpc, finalState)
         return
     end
 
-    -- Interaction phase owns zero movement.
     FarmMovement.Stop(true, true)
 
-    pcall(function()
-        root.AssemblyLinearVelocity =
-            Vector3.zero
-        root.AssemblyAngularVelocity =
-            Vector3.zero
-    end)
-
     if fsm.InteractionArrivedAt == 0 then
+        pcall(function()
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+        end)
         fsm.InteractionArrivedAt = now
         fsm.InteractionLockUntil =
             now + 2.4
@@ -5735,27 +5946,25 @@ local function nearestCombatTarget(wanted)
 end
 
 local function combatGoalFor(model)
-    local part = objectRoot(model)
-    local root = rootPart()
+    if Config.AutoGather and Runtime.Gather.Anchor then
+        return Runtime.Gather.Anchor
+    end
 
-    if not part or not root then
+    local part = objectRoot(model)
+    if not part then
         return nil
     end
 
-    local away = Vector3.new(
-        root.Position.X - part.Position.X,
-        0,
-        root.Position.Z - part.Position.Z
-    )
-
-    if away.Magnitude <= 0.05 then
-        away = Vector3.new(0, 0, 1)
+    local look = part.CFrame.LookVector
+    local flat = Vector3.new(look.X, 0, look.Z)
+    if flat.Magnitude <= 0.05 then
+        flat = Vector3.new(0, 0, -1)
     else
-        away = away.Unit
+        flat = flat.Unit
     end
 
     local position = part.Position
-        + away * math.max(3.2, Config.CombatDistance - 0.7)
+        - flat * math.max(5, Config.CombatDistance)
         + Vector3.new(0, 0.25, 0)
 
     return motionYawCFrame(position, part.Position)
@@ -5801,9 +6010,31 @@ local function stepDefeatTask(wanted)
     local targetPart = objectRoot(target)
     local root = rootPart()
 
-    if not targetPart or not root then
+    if not targetPart or not root or not TargetService.IsAliveNPC(target) then
         Runtime.CurrentTarget = nil
         return
+    end
+
+    local fixedAnchor = Config.AutoGather and Runtime.Gather.Anchor or nil
+    if fixedAnchor then
+        local anchorDistance = (root.Position - fixedAnchor.Position).Magnitude
+        if anchorDistance > 1.6 or not MotionController.IsHolding() then
+            MotionController.Request(
+                "Combat",
+                fixedAnchor,
+                {
+                    Kind = "combat-hold",
+                    FacePosition = targetPart.Position,
+                    ArrivalDistance = 1.2,
+                    Hold = true,
+                }
+            )
+
+            if anchorDistance > 1.6 then
+                farmSetState("COMBAT_HOLD", target.Name)
+                return
+            end
+        end
     end
 
     local distance = (
@@ -5812,8 +6043,16 @@ local function stepDefeatTask(wanted)
     ).Magnitude
 
     if distance > Config.CombatDistance then
-        local goal = combatGoalFor(target)
+        if fixedAnchor then
+            Runtime.CurrentTarget = nil
+            farmSetState(
+                "COMBAT_WAIT_RANGE",
+                target.Name .. " • " .. string.format("%.1f", distance)
+            )
+            return
+        end
 
+        local goal = combatGoalFor(target)
         if goal then
             MotionController.Request(
                 "Combat",
@@ -5826,16 +6065,13 @@ local function stepDefeatTask(wanted)
             )
         end
 
-        farmSetState(
-            "COMBAT_TRAVEL",
-            target.Name
-                .. " • "
-                .. string.format("%.1f", distance)
-        )
+        farmSetState("COMBAT_TRAVEL", target.Name .. " • " .. string.format("%.1f", distance))
         return
     end
 
-    MotionController.Release("Combat", true)
+    if not fixedAnchor then
+        MotionController.Release("Combat", true)
+    end
     CombatService.AttackStep()
 
     farmSetState(
@@ -5986,8 +6222,12 @@ local function stepReachTask(quest, taskData)
     if taskData.EventGated then
         local goal = stableReachGoal(target, 3)
         if goal then
-            Runtime.FarmMoveHold = true
-            Runtime.FarmMoveHoldCFrame = goal
+            FarmMovement.Go(
+                goal,
+                true,
+                "reach",
+                objectRoot(target) and objectRoot(target).Position or goal.Position
+            )
         end
     else
         FarmMovement.Stop(false, true)
@@ -6351,6 +6591,23 @@ function ESPService.Step()
         ESPService.Set(Runtime.CurrentTarget, Config.TargetColor)
     end
 
+    if Config.PlayerESP then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local model = player.Character
+                if not model or not model.Parent then
+                    local entities = entitiesFolder()
+                    model = entities and entities:FindFirstChild(player.Name)
+                end
+                local hum = model and model:FindFirstChildOfClass("Humanoid")
+                if model and model.Parent and (not hum or hum.Health > 0) then
+                    active[model] = true
+                    ESPService.Set(model, Config.PlayerColor)
+                end
+            end
+        end
+    end
+
     if Config.MobESP or Config.BossESP then
         for model in pairs(Runtime.Entities) do
             if TargetService.IsAliveNPC(model)
@@ -6393,8 +6650,304 @@ function ESPService.Step()
 end
 
 -- ============================================================
+-- Player tools
+-- ============================================================
+
+PlayerToolsService = {}
+
+local function livePlayerModel(player)
+    if not player then
+        return nil
+    end
+
+    local model = player.Character
+    if model and model.Parent then
+        return model
+    end
+
+    local entities = entitiesFolder()
+    model = entities and entities:FindFirstChild(player.Name)
+    return model and model:IsA("Model") and model or nil
+end
+
+local function livePlayerHumanoid(player)
+    local model = livePlayerModel(player)
+    return model and model:FindFirstChildOfClass("Humanoid") or nil
+end
+
+function PlayerToolsService.GetNames()
+    local names = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(names, player.Name)
+        end
+    end
+    table.sort(names, function(a, b)
+        return string.lower(a) < string.lower(b)
+    end)
+    if #names == 0 then
+        return {"No other players"}
+    end
+    return names
+end
+
+function PlayerToolsService.Resolve(name)
+    if not name or name == "" or name == "No other players" then
+        return nil
+    end
+    return Players:FindFirstChild(name)
+end
+
+function PlayerToolsService.Spectate(name)
+    local player = PlayerToolsService.Resolve(name)
+    local hum = livePlayerHumanoid(player)
+    local camera = Workspace.CurrentCamera
+
+    if not player or not hum or hum.Health <= 0 or not camera then
+        return false, "player unavailable"
+    end
+
+    camera.CameraSubject = hum
+    return true, player.Name
+end
+
+function PlayerToolsService.StopSpectate()
+    local camera = Workspace.CurrentCamera
+    local hum = humanoid()
+    if not camera or not hum then
+        return false
+    end
+    camera.CameraSubject = hum
+    return true
+end
+
+function PlayerToolsService.TeleportTo(name)
+    local player = PlayerToolsService.Resolve(name)
+    local model = livePlayerModel(player)
+    local target = objectRoot(model)
+    if not player or not target or not rootPart() then
+        return false, "player unavailable"
+    end
+
+    local look = target.CFrame.LookVector
+    local flat = Vector3.new(look.X, 0, look.Z)
+    flat = flat.Magnitude > 0.05 and flat.Unit or Vector3.new(0, 0, -1)
+
+    local position = target.Position - flat * 4 + Vector3.new(0, 0.5, 0)
+    local goal = motionYawCFrame(position, target.Position)
+    return MotionController.Request(
+        "Manual",
+        goal,
+        {
+            Kind = "manual",
+            FacePosition = target.Position,
+            Speed = Config.TweenSpeed,
+            ArrivalDistance = 1.5,
+        }
+    )
+end
+
+-- ============================================================
+-- Server tools
+-- ============================================================
+
+ServerToolsService = {}
+
+local function requestJson(url)
+    local body
+    local ok = pcall(function()
+        body = game:HttpGet(url)
+    end)
+
+    if (not ok or type(body) ~= "string") and type(requestFn) == "function" then
+        local okRequest, response = pcall(requestFn, {
+            Url = url,
+            Method = "GET",
+            Headers = { ["User-Agent"] = "SON-HUB-Nexomia" },
+        })
+        if okRequest and type(response) == "table" then
+            body = response.Body or response.body
+        end
+    end
+
+    if type(body) ~= "string" or body == "" then
+        return nil, "http unavailable"
+    end
+
+    local okDecode, data = pcall(HttpService.JSONDecode, HttpService, body)
+    if not okDecode or type(data) ~= "table" then
+        return nil, "invalid server response"
+    end
+
+    return data
+end
+
+function ServerToolsService.GetInfo()
+    local ping = "?"
+    pcall(function()
+        ping = string.format("%.0f ms", LocalPlayer:GetNetworkPing() * 1000)
+    end)
+
+    return table.concat({
+        "PlaceId: " .. tostring(game.PlaceId),
+        "JobId: " .. tostring(game.JobId ~= "" and game.JobId or "Studio/unknown"),
+        "Players: " .. tostring(#Players:GetPlayers()) .. "/" .. tostring(Players.MaxPlayers),
+        "Ping: " .. tostring(ping),
+        "World: " .. PlayerState.GetWorld(),
+    }, "\n")
+end
+
+function ServerToolsService.JoinJob(jobId)
+    jobId = normalize(jobId)
+    if jobId == "" then
+        return false, "empty JobId"
+    end
+
+    local ok, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
+    end)
+    return ok, ok and jobId or tostring(err)
+end
+
+function ServerToolsService.Rejoin()
+    if game.JobId and game.JobId ~= "" then
+        return ServerToolsService.JoinJob(game.JobId)
+    end
+
+    local ok, err = pcall(function()
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+    end)
+    return ok, ok and "rejoining" or tostring(err)
+end
+
+function ServerToolsService.Hop()
+    local cursor = nil
+    local candidates = {}
+
+    for _ = 1, 3 do
+        local url = string.format(
+            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
+            game.PlaceId,
+            cursor and ("&cursor=" .. HttpService:UrlEncode(cursor)) or ""
+        )
+
+        local data, err = requestJson(url)
+        if not data then
+            return false, err
+        end
+
+        for _, server in ipairs(data.data or {}) do
+            if server.id
+                and server.id ~= game.JobId
+                and tonumber(server.playing or 0) < tonumber(server.maxPlayers or 0) then
+                table.insert(candidates, server)
+            end
+        end
+
+        if #candidates > 0 or not data.nextPageCursor then
+            break
+        end
+        cursor = data.nextPageCursor
+    end
+
+    table.sort(candidates, function(a, b)
+        local ap = tonumber(a.playing) or math.huge
+        local bp = tonumber(b.playing) or math.huge
+        if ap ~= bp then
+            return ap < bp
+        end
+        return tostring(a.id) < tostring(b.id)
+    end)
+
+    local server = candidates[1]
+    if not server then
+        return false, "no public server found"
+    end
+
+    return ServerToolsService.JoinJob(server.id)
+end
+
+-- ============================================================
+-- Safe game-structure tests
+-- ============================================================
+
+TestService = {}
+
+function TestService.StructureReport()
+    local qte = qteScreen()
+    local events = qte
+        and qte:FindFirstChild("QTEClient")
+        and qte.QTEClient:FindFirstChild("Events")
+
+    local rows = {
+        "Runtime index: " .. tostring(Runtime.IndexReady),
+        "Entities: " .. tostring(entitiesFolder() ~= nil),
+        "Quest UI: " .. tostring(questScrollingFrame() ~= nil),
+        "Radar stats: " .. tostring(radarFrame() ~= nil),
+        "Fishing UI: " .. tostring(fishingGui() ~= nil),
+        "Gridshot: " .. tostring(events and events:FindFirstChild("Gridshot") ~= nil),
+        "Spam Click: " .. tostring(events and events:FindFirstChild("Spam Click") ~= nil),
+        "Timed Release: " .. tostring(events and events:FindFirstChild("Timed Release") ~= nil),
+        "Mining QTE: " .. tostring(events and events:FindFirstChild("Mining") ~= nil),
+        "Ore cache: " .. tostring(next(Runtime.Ores) ~= nil),
+        "MobZones: " .. tostring(mobZoneRoot() ~= nil),
+        "MobZone entries: " .. tostring((function()
+            MobZoneService.Rebuild(false)
+            local count = 0
+            for _, list in pairs(MobZoneService.ByMob) do count += #list end
+            return count
+        end)()),
+        "Islands: " .. tostring(Workspace:FindFirstChild("Islands") ~= nil),
+    }
+    return table.concat(rows, "\n")
+end
+
+function TestService.DuplicationRiskReport()
+    local roots = {
+        ReplicatedStorage:FindFirstChild("Events"),
+        ReplicatedStorage:FindFirstChild("Remotes"),
+    }
+    local categories = {
+        Inventory = {"inventory", "item", "equip", "unequip"},
+        Economy = {"buy", "sell", "store", "bank"},
+        Rewards = {"claim", "reward", "chest"},
+        Transfer = {"trade", "give", "transfer", "drop"},
+        Persistence = {"save", "load"},
+    }
+    local counts = {}
+    for name in pairs(categories) do counts[name] = 0 end
+
+    for _, root in ipairs(roots) do
+        if root then
+            for _, object in ipairs(root:GetDescendants()) do
+                if object:IsA("RemoteEvent") or object:IsA("RemoteFunction") then
+                    local name = lower(object.Name)
+                    for category, words in pairs(categories) do
+                        for _, word in ipairs(words) do
+                            if name:find(word, 1, true) then
+                                counts[category] += 1
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return table.concat({
+        "Read-only consistency review; no transaction remote is called.",
+        "Inventory surfaces: " .. tostring(counts.Inventory),
+        "Economy surfaces: " .. tostring(counts.Economy),
+        "Reward surfaces: " .. tostring(counts.Rewards),
+        "Transfer surfaces: " .. tostring(counts.Transfer),
+        "Persistence surfaces: " .. tostring(counts.Persistence),
+        "Use this only to identify areas that need server-side idempotency/validation.",
+    }, "\n")
+end
+
+-- ============================================================
 -- Character movement service
--- Makes Movement-tab controls functional.
 -- ============================================================
 
 MovementService = {}
@@ -6590,6 +7143,7 @@ task.spawn(function()
     while Core.Running do
         local active =
             Config.CurrentTargetESP
+            or Config.PlayerESP
             or Config.MobESP
             or Config.BossESP
             or Config.LootESP
@@ -6818,40 +7372,29 @@ function IslandService.FindLanding(name)
 end
 
 function IslandService.Teleport(name)
-    local landing =
-        IslandService.FindLanding(name)
-
-    local root = rootPart()
-
-    if not landing or not root then
-        notify(
-            "Island",
-            "No landing point: " .. tostring(name),
-            4
-        )
+    local landing = IslandService.FindLanding(name)
+    if not landing or not rootPart() then
+        notify("Island", "No landing point: " .. tostring(name), 4)
         return false
     end
 
-    MotionController.Release(Runtime.Motion.Owner, true)
-
-    local ok = pcall(function()
-        root.CFrame =
-            landing.CFrame
-            * CFrame.new(0, 5, 0)
-
-        root.AssemblyLinearVelocity = Vector3.zero
-        root.AssemblyAngularVelocity = Vector3.zero
-    end)
+    local goal = landing.CFrame * CFrame.new(0, 5, 0)
+    local ok = MotionController.Request(
+        "Manual",
+        goal,
+        {
+            Kind = "manual",
+            FacePosition = landing.Position,
+            Speed = Config.TweenSpeed,
+            ArrivalDistance = 1.6,
+        }
+    )
 
     if ok then
-        notify(
-            "Island",
-            "Teleported to " .. name,
-            3
-        )
+        notify("Island", "Moving to " .. name, 3)
     end
 
-    return ok
+    return ok == true
 end
 
 -- ============================================================
@@ -6891,10 +7434,10 @@ local function runtimeStatus()
         "Progress: " .. Runtime.ProgressState
             .. " • " .. Runtime.ProgressDetail,
         "Farm FSM: " .. tostring(Runtime.FarmFSM.State),
-        "Farm mover: "
-            .. tostring(Runtime.FarmMoveActive)
-            .. " • hold="
-            .. tostring(Runtime.FarmMoveHold),
+        "Motion: "
+            .. tostring(Runtime.Motion.Owner or "None")
+            .. " • active=" .. tostring(Runtime.Motion.Active)
+            .. " • hold=" .. tostring(Runtime.Motion.Hold),
         "Wanted mob: "
             .. tostring(Runtime.CurrentWantedMob or "None"),
         "Hotbar: " .. HotbarService.GetSnapshot(),
@@ -6909,7 +7452,7 @@ local function detectedSystems()
         "Entities / Combat / BossCombat",
         "Fluent UI direct API / Nexomia compatibility",
         "Heartbeat moving platform transport",
-        "Quest-only Bring + mob-only Hitbox",
+        "Fixed MobZone gather + live entity-state filtering",
         "Custom 0-9 Hotbar + Cooldown/EXP",
         "Auto Stats via Radar stat buttons",
         "Skill EXP / hotbar cooldown detection",
@@ -7016,13 +7559,13 @@ end
 
 
 -- ============================================================
--- Fluent UI - direct API
+-- Fluent UI
 -- ============================================================
 
 local Window = Fluent:CreateWindow({
     Title = "SON HUB " .. VERSION,
     SubTitle = "Nexomia | hongson",
-    TabWidth = 155,
+    TabWidth = 150,
     Size = UDim2.fromOffset(720, 520),
     Acrylic = false,
     Theme = "Dark",
@@ -7030,45 +7573,39 @@ local Window = Fluent:CreateWindow({
 })
 
 local Tabs = {
-    Home = Window:AddTab({Title = "Trang Chu", Icon = "home"}),
-    Farm = Window:AddTab({Title = "Farm", Icon = "target"}),
-    Combat = Window:AddTab({Title = "Combat", Icon = "shield"}),
-    Movement = Window:AddTab({Title = "Movement", Icon = "move"}),
+    Home = Window:AddTab({Title = "Home", Icon = "home"}),
+    Minigame = Window:AddTab({Title = "Minigame", Icon = "gamepad-2"}),
     Player = Window:AddTab({Title = "Player", Icon = "user"}),
-    Quest = Window:AddTab({Title = "Quest", Icon = "scroll"}),
+    Teleport = Window:AddTab({Title = "Teleport", Icon = "map-pin"}),
     Settings = Window:AddTab({Title = "Settings", Icon = "settings"}),
-    Info = Window:AddTab({Title = "Info", Icon = "info"}),
+    Test = Window:AddTab({Title = "Test", Icon = "flask-conical"}),
 }
 
-local function bindToggle(section, id, title, defaultValue, callback, description)
+local function bindToggle(section, id, title, defaultValue, callback)
     local option = section:AddToggle(id, {
         Title = title,
         Default = defaultValue == true,
     })
-
     option:OnChanged(function()
         callback(option.Value)
     end)
-
     return option
 end
 
-local function bindDropdown(section, id, title, values, defaultIndex, callback, description)
+local function bindDropdown(section, id, title, values, defaultIndex, callback)
     local option = section:AddDropdown(id, {
         Title = title,
         Values = values,
         Multi = false,
         Default = defaultIndex or 1,
     })
-
     option:OnChanged(function(value)
         callback(value)
     end)
-
     return option
 end
 
-local function bindSlider(section, id, title, minimum, maximum, defaultValue, callback, description)
+local function bindSlider(section, id, title, minimum, maximum, defaultValue, callback)
     return section:AddSlider(id, {
         Title = title,
         Default = defaultValue,
@@ -7079,126 +7616,57 @@ local function bindSlider(section, id, title, minimum, maximum, defaultValue, ca
     })
 end
 
--- ============================================================
--- Home
--- ============================================================
-
-local HomeAutomation = Tabs.Home:AddSection("Main Automation")
-
-HomeAutomation:AddButton({
-    Title = "Runtime Status",
-    Callback = function()
-        notify("Runtime Status", runtimeStatus(), 11)
-    end,
-})
-
-HomeAutomation:AddButton({
-    Title = "Self Test",
-    Callback = function()
-        notify("SON HUB Self Test", selfTest(), 12)
-    end,
-})
-
-HomeAutomation:AddButton({
-    Title = "Worker Health",
-    Callback = function()
-        notify("Worker Health", workerHealth(), 14)
-    end,
-})
-
-local HomeState = Tabs.Home:AddSection("Current State")
-
-HomeState:AddButton({
-    Title = "Current Quest",
-    Callback = function()
-        notify(
-            "Quest",
-            currentQuestSummary()
-                .. "\nProgress: "
-                .. tostring(Runtime.ProgressState)
-                .. "\nDetail: "
-                .. tostring(Runtime.ProgressDetail),
-            9
-        )
-    end,
-})
-
-HomeState:AddButton({
-    Title = "Refresh Game Index",
-    Callback = function()
-        task.spawn(function()
-            RuntimeIndex.Rebuild()
-            QuestCatalogService.Build()
-            HotbarService.Refresh()
-
-            notify(
-                "Game Index",
-                "Ready | "
-                    .. tostring(#Runtime.QuestCatalog)
-                    .. " quest modules mapped",
-                4
-            )
+local function setDropdownValues(dropdown, values)
+    if dropdown and type(dropdown.SetValues) == "function" then
+        pcall(function()
+            dropdown:SetValues(values)
         end)
-    end,
-})
-
--- ============================================================
--- Farm
--- ============================================================
-
-local FarmMain = Tabs.Farm:AddSection("Auto Farm")
-
-bindToggle(
-    FarmMain,
-    "AutoFarmV17",
-    "AUTO FARM",
-    Config.AutoProgress,
-    function(value)
-        Config.AutoProgress = value
-
-        if value then
-            Config.AutoQuest = true
-            Config.AutoAcceptRecommended = true
-            Config.AutoTurnIn = true
-            Config.AutoDialogue = true
-            QuestCatalogService.Build()
-            QuestService.ClearTaskLock()
-            Runtime.FarmFSM.TaskKey = nil
-            MobGatherService.Reset()
-        else
-            Runtime.ProgressLifeSkill = nil
-            Runtime.CurrentTarget = nil
-            Runtime.CurrentWantedMob = nil
-            QuestService.ClearTaskLock()
-            MobGatherService.Reset()
-            MotionController.Release(Runtime.Motion.Owner, true)
-            restoreCollision()
-        end
     end
-)
+end
+
+-- Home
+local FarmSection = Tabs.Home:AddSection("Auto Farm")
+
+bindToggle(FarmSection, "AutoFarm", "Auto Farm", Config.AutoProgress, function(value)
+    Config.AutoProgress = value
+    Runtime.ProgressLifeSkill = nil
+    Runtime.CurrentTarget = nil
+    Runtime.CurrentWantedMob = nil
+    Runtime.FarmFSM.TaskKey = nil
+    QuestService.ClearTaskLock()
+    MobGatherService.Reset()
+
+    if value then
+        Config.AutoQuest = true
+        Config.AutoAcceptRecommended = true
+        Config.AutoTurnIn = true
+        Config.AutoDialogue = true
+        QuestCatalogService.Build()
+    else
+        MotionController.Release(Runtime.Motion.Owner, true)
+        restoreCollision()
+    end
+end)
 
 bindDropdown(
-    FarmMain,
-    "FarmModeV17",
-    "Mode",
+    FarmSection,
+    "FarmMode",
+    "Farm Mode",
     {"Smart Quest", "Selected Mob", "Boss"},
     1,
     function(value)
         Config.FarmMode = value
-        Runtime.FarmFSM.TaskKey = nil
         Runtime.CurrentTarget = nil
+        Runtime.FarmFSM.TaskKey = nil
         MobGatherService.Reset()
-        MotionController.Release(Runtime.Motion.Owner, true)
     end
 )
 
-local mobValuesV17 = TargetService.GetMobOptions()
-
-bindDropdown(
-    FarmMain,
-    "SelectedMobV17",
-    "Manual Mob",
-    mobValuesV17,
+local mobDropdown = bindDropdown(
+    FarmSection,
+    "SelectedMob",
+    "Target Mob",
+    TargetService.GetMobOptions(),
     1,
     function(value)
         Config.SelectedMob = value
@@ -7207,340 +7675,121 @@ bindDropdown(
     end
 )
 
-local GatherSection = Tabs.Farm:AddSection("Mob Gather")
+FarmSection:AddButton({
+    Title = "Refresh Mobs",
+    Callback = function()
+        setDropdownValues(mobDropdown, TargetService.GetMobOptions())
+    end,
+})
 
-bindToggle(
-    GatherSection,
-    "AutoGatherV17",
-    "Gather Mobs",
-    Config.AutoGather,
-    function(value)
-        Config.AutoGather = value
-        MobGatherService.Reset()
-    end
-)
+bindToggle(FarmSection, "AutoGather", "M1 Lure", Config.AutoGather, function(value)
+    Config.AutoGather = value
+    MobGatherService.Reset()
+end)
 
-bindSlider(
-    GatherSection,
-    "GatherRadiusV17",
-    "Gather Radius",
-    30,
-    150,
-    Config.GatherRadius,
-    function(value)
-        Config.GatherRadius = value
-        MobGatherService.Reset()
-    end
-)
+bindToggle(FarmSection, "AutoAttack", "Auto M1", Config.AutoAttack, function(value)
+    Config.AutoAttack = value
+end)
 
-bindSlider(
-    GatherSection,
-    "GatherMaxV17",
-    "Max Mobs",
-    2,
-    7,
-    Config.GatherMax,
-    function(value)
-        Config.GatherMax = value
-        MobGatherService.Reset()
-    end
-)
+bindSlider(FarmSection, "AttackRate", "M1 / sec", 1, 15, Config.AttackRate, function(value)
+    Config.AttackRate = value
+end)
 
-local CombatFarmSection = Tabs.Farm:AddSection("Combat")
+local CombatSection = Tabs.Home:AddSection("Combat Position")
 
-bindToggle(
-    CombatFarmSection,
-    "AutoM1V17",
-    "Auto M1",
-    Config.AutoAttack,
-    function(value)
-        Config.AutoAttack = value
-    end
-)
+bindSlider(CombatSection, "CombatDistance", "M1 Distance", 3, 7, Config.CombatDistance, function(value)
+    Config.CombatDistance = value
+end)
 
-bindSlider(
-    CombatFarmSection,
-    "AttackRateV17",
-    "M1 / Second",
-    2,
-    12,
-    Config.AttackRate,
-    function(value)
-        Config.AttackRate = value
-    end
-)
+bindSlider(CombatSection, "FarmAnchorHeight", "Anchor Y Offset", 0, 3, Config.FarmAnchorHeight, function(value)
+    Config.FarmAnchorHeight = value
+    MobGatherService.Reset()
+end)
 
-local MotionSection = Tabs.Farm:AddSection("Movement")
-
-bindSlider(
-    MotionSection,
-    "MotionSpeedV17",
-    "Travel Speed",
-    60,
-    300,
-    Config.PlatformSpeed,
-    function(value)
-        Config.PlatformSpeed = value
-    end
-)
-
-FarmMain:AddButton({
-    Title = "Farm Status",
+local HomeState = Tabs.Home:AddSection("State")
+HomeState:AddButton({
+    Title = "Current State",
     Callback = function()
         notify(
-            "Auto Farm",
-            table.concat({
-                "State: " .. tostring(Runtime.ProgressState),
-                "Quest: " .. currentQuestSummary(),
-                "Target: " .. tostring(
-                    Runtime.CurrentTarget
-                    and Runtime.CurrentTarget.Name
-                    or "None"
-                ),
-                "Motion: " .. tostring(Runtime.Motion.Owner or "None"),
-                "Gather: " .. MobGatherService.GetStatus(),
-            }, "\n"),
-            10
+            "SON HUB",
+            currentQuestSummary()
+                .. "\nState: " .. tostring(Runtime.ProgressState)
+                .. "\nDetail: " .. tostring(Runtime.ProgressDetail),
+            9
         )
     end,
 })
 
--- ============================================================
--- Combat
--- ============================================================
+-- Minigame
+local MiningSection = Tabs.Minigame:AddSection("Mining")
 
-Tabs.Combat:AddParagraph({
-    Title = "Combat",
-    Content = "Auto Farm uses M1 only. Mob Gather uses normal aggro/follow behaviour."
-})
-
--- ============================================================
--- Movement
--- ============================================================
-
-Tabs.Movement:AddParagraph({
-    Title = "Auto Farm Movement",
-    Content = "Farm travel/platform settings live in the Farm tab. This tab only contains manual character movement."
-})
-
-local CharacterSection = Tabs.Movement:AddSection("Character")
-
-bindToggle(
-    CharacterSection,
-    "SpeedOverride",
-    "WalkSpeed Override",
-    Config.SpeedOverride,
-    function(value)
-        Config.SpeedOverride = value
+bindToggle(MiningSection, "AutoMining", "Auto Mining", Config.AutoMining, function(value)
+    Config.AutoMining = value
+    MiningQTEService.Reset(value and "Enabled" or "Disabled")
+    if value then
+        MiningQTEService.RefreshOreIndex(true)
     end
-)
-
-bindSlider(
-    CharacterSection,
-    "WalkSpeed",
-    "Walk Speed",
-    16,
-    100,
-    Config.WalkSpeed,
-    function(value)
-        Config.WalkSpeed = value
-    end
-)
-
-bindToggle(
-    CharacterSection,
-    "JumpOverride",
-    "Jump Override",
-    Config.JumpOverride,
-    function(value)
-        Config.JumpOverride = value
-    end
-)
-
-bindSlider(
-    CharacterSection,
-    "JumpPower",
-    "Jump Power",
-    40,
-    120,
-    Config.JumpPower,
-    function(value)
-        Config.JumpPower = value
-    end
-)
-
-bindToggle(
-    CharacterSection,
-    "InfiniteJump",
-    "Infinite Jump",
-    Config.InfiniteJump,
-    function(value)
-        Config.InfiniteJump = value
-    end
-)
-
-bindToggle(
-    CharacterSection,
-    "Noclip",
-    "Noclip",
-    Config.Noclip,
-    function(value)
-        Config.Noclip = value
-        if not value and not Runtime.TransportMoving then
-            restoreCollision()
-        end
-    end
-)
-
-bindToggle(
-    CharacterSection,
-    "PlatformNoclip",
-    "Noclip During Auto Progress",
-    Config.PlatformNoclip,
-    function(value)
-        Config.PlatformNoclip = value
-    end
-)
-
--- ============================================================
--- Player
--- ============================================================
-
-local StatsSection = Tabs.Player:AddSection("Auto Stats")
-
-bindToggle(
-    StatsSection,
-    "AutoStats",
-    "Auto Spend Stat Points",
-    Config.AutoStats,
-    function(value)
-        Config.AutoStats = value
-    end
-)
+end)
 
 bindDropdown(
-    StatsSection,
-    "StatBuild",
-    "Stat Build",
-    {"Balanced", "Tank", "Mobility", "Haki"},
+    MiningSection,
+    "MiningMode",
+    "Ore Mode",
+    {"Any Available", "Highest Drop", "Selected Ore", "Quest Required"},
     1,
     function(value)
-        Config.StatBuild = value
-    end,
-    "Reads StatpointText and uses the client-visible Radar stat buttons."
+        Config.MiningMode = value
+        MiningQTEService.Reset("Mode changed")
+    end
 )
 
-StatsSection:AddButton({
-    Title = "Show Stats",
+local oreDropdown = bindDropdown(
+    MiningSection,
+    "SelectedOre",
+    "Selected Ore",
+    MiningQTEService.GetOreOptions(),
+    1,
+    function(value)
+        Config.SelectedOre = value
+        MiningQTEService.Reset("Ore changed")
+    end
+)
+
+MiningSection:AddButton({
+    Title = "Refresh Ores",
     Callback = function()
-        notify("Stats", StatsService.GetSnapshot(), 9)
+        MiningQTEService.RefreshOreIndex(true)
+        setDropdownValues(oreDropdown, MiningQTEService.GetOreOptions())
+        notify("Mining", "Ore index refreshed", 3)
     end,
 })
 
-local LootSection = Tabs.Player:AddSection("Loot / Chests")
-
-bindToggle(
-    LootSection,
-    "AutoPickup",
-    "Auto Pickup",
-    Config.AutoPickup,
-    function(value)
-        Config.AutoPickup = value
-    end
-)
-
-bindToggle(
-    LootSection,
-    "AutoChest",
-    "Auto Chest",
-    Config.AutoChest,
-    function(value)
-        Config.AutoChest = value
-    end
-)
-
-bindToggle(
-    LootSection,
-    "AutoWorldBossChest",
-    "Auto World Boss Chest",
-    Config.AutoWorldBossChest,
-    function(value)
-        Config.AutoWorldBossChest = value
-    end
-)
-
-bindToggle(
-    LootSection,
-    "AutoFruitChest",
-    "Auto Fruit Chest",
-    Config.AutoFruitChest,
-    function(value)
-        Config.AutoFruitChest = value
-    end
-)
-
-bindToggle(
-    LootSection,
-    "AutoChestRoute",
-    "Route To Chests",
-    Config.AutoChestRoute,
-    function(value)
-        Config.AutoChestRoute = value
+MiningSection:AddButton({
+    Title = "Mining Status",
+    Callback = function()
+        local target = Runtime.MiningTarget
+        notify(
+            "Mining",
+            "State: " .. tostring(Runtime.MiningState)
+                .. "\nTarget: " .. tostring(target and oreName(target) or "None")
+                .. "\nDetail: " .. tostring(Runtime.ProgressDetail),
+            8
+        )
     end,
-    "When Auto Farm is OFF, travel to enabled chests. During Auto Farm, nearby chest prompts are opened without stealing quest movement."
-)
+})
 
-bindSlider(
-    LootSection,
-    "ChestCollectRadius",
-    "Chest Collect Radius",
-    15,
-    100,
-    Config.ChestCollectRadius,
-    function(value)
-        Config.ChestCollectRadius = value
-    end
-)
+local FishingSection = Tabs.Minigame:AddSection("Fishing")
 
-bindToggle(
-    LootSection,
-    "AutoQuestItems",
-    "Auto Quest Items",
-    Config.AutoQuestItems,
-    function(value)
-        Config.AutoQuestItems = value
-    end
-)
-
-bindToggle(
-    LootSection,
-    "LootESP",
-    "Loot ESP",
-    Config.LootESP,
-    function(value)
-        Config.LootESP = value
-    end
-)
-
-local FishingSection = Tabs.Player:AddSection("Fishing")
-
-bindToggle(
-    FishingSection,
-    "AutoFishing",
-    "Auto Fishing",
-    Config.AutoFishing,
-    function(value)
-        Config.AutoFishing = value
-        FishingService.Reset(value and "Enabled" or "Disabled")
-    end,
-    "Handles SHAKE, CLICK, Timed Release and the Move/Fish reel controller."
-)
+bindToggle(FishingSection, "AutoFishing", "Auto Fishing", Config.AutoFishing, function(value)
+    Config.AutoFishing = value
+    FishingService.Reset(value and "Enabled" or "Disabled")
+end)
 
 bindDropdown(
     FishingSection,
     "FishingSpotMode",
     "Fishing Spot",
-    {"Saved Position", "Anchor Town Pond", "Current Position"},
+    {"Anchor Town Pond", "Saved Position", "Current Position"},
     1,
     function(value)
         Config.FishingSpotMode = value
@@ -7549,413 +7798,136 @@ bindDropdown(
 )
 
 FishingSection:AddButton({
-    Title = "Save Current Fishing Spot",
+    Title = "Save Current Spot",
     Callback = function()
         local root = rootPart()
-
         if root then
             Runtime.FishingSpotCFrame = root.CFrame
             Config.FishingSpotMode = "Saved Position"
-            FishingService.Reset("Saved current spot")
-            notify("Fishing", "Current fishing position saved.", 3)
+            FishingService.Reset("Spot saved")
+            notify("Fishing", "Saved current position", 3)
         end
     end,
 })
-
-bindToggle(
-    FishingSection,
-    "FishingReturn",
-    "Auto Return To Fishing Spot",
-    Config.FishingAutoReturn,
-    function(value)
-        Config.FishingAutoReturn = value
-    end
-)
-
-bindToggle(
-    FishingSection,
-    "RequireBait",
-    "Require Bait",
-    Config.FishingRequireBait,
-    function(value)
-        Config.FishingRequireBait = value
-    end
-)
-
-bindToggle(
-    FishingSection,
-    "AutoShake",
-    "Auto SHAKE",
-    Config.FishingAutoShake,
-    function(value)
-        Config.FishingAutoShake = value
-    end
-)
-
-bindToggle(
-    FishingSection,
-    "AutoSpamClick",
-    "Auto CLICK QTE",
-    Config.FishingAutoSpamClick,
-    function(value)
-        Config.FishingAutoSpamClick = value
-    end
-)
-
-bindToggle(
-    FishingSection,
-    "AutoTimedRelease",
-    "Auto Timed Release",
-    Config.FishingAutoTimedRelease,
-    function(value)
-        Config.FishingAutoTimedRelease = value
-    end
-)
-
-bindToggle(
-    FishingSection,
-    "AutoReelCalibrate",
-    "Auto Calibrate Reel Direction",
-    Config.FishingAutoCalibrate,
-    function(value)
-        Config.FishingAutoCalibrate = value
-        Runtime.FishingReelCalibrated = false
-    end
-)
-
-bindSlider(
-    FishingSection,
-    "FishingTolerance",
-    "Reel Tolerance",
-    5,
-    40,
-    Config.FishingReelTolerance,
-    function(value)
-        Config.FishingReelTolerance = value
-    end
-)
-
-bindSlider(
-    FishingSection,
-    "FishingBiteTimeout",
-    "Bite Timeout",
-    15,
-    60,
-    Config.FishingBiteTimeout,
-    function(value)
-        Config.FishingBiteTimeout = value
-    end
-)
 
 FishingSection:AddButton({
-    Title = "Fishing Conditions",
+    Title = "Fishing Status",
     Callback = function()
         local data = FishingService.GetConditions()
-
         notify(
-            "Fishing Conditions",
-            table.concat({
-                "State: " .. tostring(data.State),
-                "Can Start: " .. tostring(data.CanStart),
-                "Rod: " .. tostring(data.Rod)
-                    .. " [" .. tostring(data.RodSource) .. "]",
-                "Bait: " .. tostring(data.Bait)
-                    .. " x" .. tostring(data.BaitAmount),
-                "Spot: " .. tostring(data.Spot),
-                "Reason: " .. tostring(data.Reason),
-            }, "\n"),
-            11
+            "Fishing",
+            "State: " .. tostring(data.State)
+                .. "\nRod: " .. tostring(data.Rod) .. " [" .. tostring(data.RodSource) .. "]"
+                .. "\nBait: " .. tostring(data.Bait) .. " x" .. tostring(data.BaitAmount)
+                .. "\nSpot: " .. tostring(data.Spot)
+                .. "\nReady: " .. tostring(data.CanStart),
+            9
         )
     end,
 })
 
-local MiningSection = Tabs.Player:AddSection("Mining")
+-- Player
+local StatsSection = Tabs.Player:AddSection("Auto Stats")
 
-bindToggle(
-    MiningSection,
-    "AutoMining",
-    "Auto Mining",
-    Config.AutoMining,
-    function(value)
-        Config.AutoMining = value
-        MiningQTEService.Reset(value and "Enabled" or "Disabled")
-    end,
-    "Targets real Ore models, holds the mining action and releases inside Critical Zone."
-)
+bindToggle(StatsSection, "AutoStats", "Auto Stats", Config.AutoStats, function(value)
+    Config.AutoStats = value
+end)
 
 bindDropdown(
-    MiningSection,
-    "MiningMode",
-    "Mining Mode",
-    {"Quest Required", "Selected Ore", "Any Available", "Highest Drop"},
+    StatsSection,
+    "StatBuild",
+    "Build",
+    {"Auto", "Balanced", "Strength", "Precision", "Tank", "Mobility", "Haki"},
     1,
     function(value)
-        Config.MiningMode = value
-        MiningQTEService.Reset("Mode changed")
+        Config.StatBuild = value
     end
 )
 
-local oreValues = MiningQTEService.GetOreOptions()
-bindDropdown(
-    MiningSection,
-    "SelectedOre",
-    "Select Ore",
-    oreValues,
+StatsSection:AddButton({
+    Title = "Stats Status",
+    Callback = function()
+        notify("Stats", StatsService.GetSnapshot(), 8)
+    end,
+})
+
+local ESPSection = Tabs.Player:AddSection("ESP")
+bindToggle(ESPSection, "PlayerESP", "Player ESP", Config.PlayerESP, function(value)
+    Config.PlayerESP = value
+end)
+bindToggle(ESPSection, "MobESP", "Mob ESP", Config.MobESP, function(value)
+    Config.MobESP = value
+end)
+bindToggle(ESPSection, "BossESP", "Boss ESP", Config.BossESP, function(value)
+    Config.BossESP = value
+end)
+bindToggle(ESPSection, "TargetESP", "Current Target ESP", Config.CurrentTargetESP, function(value)
+    Config.CurrentTargetESP = value
+end)
+bindToggle(ESPSection, "LootESP", "Loot ESP", Config.LootESP, function(value)
+    Config.LootESP = value
+end)
+
+local CameraSection = Tabs.Player:AddSection("Player Camera")
+local cameraPlayerNames = PlayerToolsService.GetNames()
+local selectedCameraPlayer = cameraPlayerNames[1]
+local cameraDropdown = bindDropdown(
+    CameraSection,
+    "CameraPlayer",
+    "Player",
+    cameraPlayerNames,
     1,
     function(value)
-        Config.SelectedOre = value
-        MiningQTEService.Reset("Ore changed")
+        selectedCameraPlayer = value
     end
 )
 
-bindToggle(
-    MiningSection,
-    "MiningQTE",
-    "Auto Mining QTE",
-    Config.AutoMiningQTE,
-    function(value)
-        Config.AutoMiningQTE = value
-    end
-)
-
-bindToggle(
-    MiningSection,
-    "MiningAim",
-    "Face Ore",
-    Config.MiningAutoAim,
-    function(value)
-        Config.MiningAutoAim = value
-    end
-)
-
-MiningSection:AddButton({
-    Title = "Go To Selected Ore",
+CameraSection:AddButton({
+    Title = "Refresh Players",
     Callback = function()
-        local ore =
-            MiningQTEService.FindOre()
-
-        if not ore then
-            notify(
-                "Mining",
-                "No matching ore is currently client-visible.",
-                5
-            )
-            return
-        end
-
-        Runtime.MiningTarget = ore
-
-        if FarmMovement then
-            FarmMovement.GoNear(
-                ore,
-                2.4,
-                3.5
-            )
-        else
-            PlatformTransport.MoveNear(ore)
-        end
-
-        notify(
-            "Mining",
-            "Moving to " .. tostring(oreName(ore)),
-            4
-        )
+        setDropdownValues(cameraDropdown, PlayerToolsService.GetNames())
     end,
 })
 
-MiningSection:AddButton({
-    Title = "Equip Pickaxe",
+CameraSection:AddButton({
+    Title = "Spectate",
     Callback = function()
-        local pickaxe = findPickaxe()
-
-        if not pickaxe then
-            notify(
-                "Mining",
-                "No Pickaxe detected in the current hotbar.",
-                5
-            )
-            return
-        end
-
-        HotbarService.Press(pickaxe)
-
-        notify(
-            "Mining",
-            "Equipped: " .. tostring(pickaxe.Title),
-            3
-        )
+        local ok, reason = PlayerToolsService.Spectate(selectedCameraPlayer)
+        notify("Camera", ok and ("Spectating " .. tostring(reason)) or tostring(reason), 3)
     end,
 })
 
-MiningSection:AddButton({
-    Title = "Teleport To Ore",
+CameraSection:AddButton({
+    Title = "Stop Spectate",
     Callback = function()
-        local ore = MiningQTEService.FindOre()
-
-        if not ore then
-            notify(
-                "Mining",
-                "No matching ore is client-visible.",
-                4
-            )
-            return
-        end
-
-        Runtime.MiningTarget = ore
-        MiningQTEService.TeleportToOre(ore)
+        PlayerToolsService.StopSpectate()
     end,
 })
 
-MiningSection:AddButton({
-    Title = "Equip Pickaxe",
-    Callback = function()
-        local pickaxe = findPickaxe()
-
-        if not pickaxe then
-            notify(
-                "Mining",
-                "No Pickaxe in live hotbar.",
-                4
-            )
-            return
-        end
-
-        HotbarService.Press(pickaxe)
-        Runtime.MiningEquippedSlot = pickaxe.Slot
-        Runtime.MiningEquipAt = os.clock()
-
-        notify(
-            "Mining",
-            "Equipped: " .. tostring(pickaxe.Title),
-            3
-        )
-    end,
-})
-
-MiningSection:AddButton({
-    Title = "Mining State",
-    Callback = function()
-        notify(
-            "Mining",
-            "State: " .. tostring(Runtime.MiningState)
-                .. "\nWanted: "
-                .. tostring(MiningQTEService.GetWantedOre() or "Any")
-                .. "\nTarget: "
-                .. tostring(
-                    Runtime.MiningTarget
-                    and Runtime.MiningTarget.Name
-                    or "None"
-                ),
-            8
-        )
-    end,
-})
-
-local LifeSection = Tabs.Player:AddSection("Farming")
-
-bindToggle(
-    LifeSection,
-    "AutoFarming",
-    "Auto Farming Prompts",
-    Config.AutoFarming,
-    function(value)
-        Config.AutoFarming = value
-    end,
-    "Uses client-visible Crop, FarmGear and Pest prompts."
-)
-
-
-local UtilitySection = Tabs.Player:AddSection("World Utilities")
-
-UtilitySection:AddButton({
-    Title = "Go To Crafting Table",
-    Callback = function()
-        WorldUtilityService.GoToPrompt("Crafting Table")
-    end,
-})
-
-UtilitySection:AddButton({
-    Title = "Go To Anvil",
-    Callback = function()
-        WorldUtilityService.GoToPrompt("Anvil")
-    end,
-})
-
-UtilitySection:AddButton({
-    Title = "Go To Furnace",
-    Callback = function()
-        WorldUtilityService.GoToPrompt("Furnace")
-    end,
-})
-
-UtilitySection:AddButton({
-    Title = "Go To Ship Spawn",
-    Callback = function()
-        WorldUtilityService.GoToPrompt("Ship Spawn")
-    end,
-})
-
-bindToggle(
-    UtilitySection,
-    "AntiAFK",
-    "Anti AFK",
-    Config.AntiAFK,
-    function(value)
-        Config.AntiAFK = value
-    end
-)
-
-local NPCNavigationSection =
-    Tabs.Player:AddSection("NPC Navigation")
-
-local npcValues =
-    NPCNavigator.GetNames()
-
-local selectedNPC =
-    npcValues[1]
-
-bindDropdown(
-    NPCNavigationSection,
-    "NPCSelectV15",
-    "NPC",
-    npcValues,
-    1,
-    function(value)
-        selectedNPC = value
-    end
-)
-
-NPCNavigationSection:AddButton({
-    Title = "Go To NPC",
-    Callback = function()
-        if selectedNPC then
-            NPCNavigator.GoTo(selectedNPC)
-        end
-    end,
-})
-
-local IslandNavigationSection =
-    Tabs.Player:AddSection("Island Navigation")
-
-local islandValues =
-    IslandService.GetNames()
-
-local selectedIsland =
-    islandValues[1]
-
-bindDropdown(
-    IslandNavigationSection,
-    "IslandSelectV15",
+-- Teleport
+local IslandSection = Tabs.Teleport:AddSection("Islands")
+local islandNames = IslandService.GetNames()
+local selectedIsland = islandNames[1]
+local islandDropdown = bindDropdown(
+    IslandSection,
     "Island",
-    islandValues,
+    "Island",
+    islandNames,
     1,
     function(value)
         selectedIsland = value
     end
 )
 
-IslandNavigationSection:AddButton({
-    Title = "Teleport",
+IslandSection:AddButton({
+    Title = "Refresh Islands",
+    Callback = function()
+        setDropdownValues(islandDropdown, IslandService.GetNames())
+    end,
+})
+
+IslandSection:AddButton({
+    Title = "Tween To Island",
     Callback = function()
         if selectedIsland then
             IslandService.Teleport(selectedIsland)
@@ -7963,182 +7935,121 @@ IslandNavigationSection:AddButton({
     end,
 })
 
--- ============================================================
--- Quest
--- ============================================================
-
-local QuestAutomation = Tabs.Quest:AddSection("Quest Automation")
-
-bindToggle(
-    QuestAutomation,
-    "AutoQuest",
-    "Auto Quest",
-    Config.AutoQuest,
-    function(value)
-        Config.AutoQuest = value
-    end
-)
-
-bindToggle(
-    QuestAutomation,
-    "AutoRecommended",
-    "Auto Accept Recommended",
-    Config.AutoAcceptRecommended,
-    function(value)
-        Config.AutoAcceptRecommended = value
-    end
-)
-
-bindToggle(
-    QuestAutomation,
-    "AutoTurnIn",
-    "Auto Turn-in",
-    Config.AutoTurnIn,
-    function(value)
-        Config.AutoTurnIn = value
-    end
-)
-
-bindToggle(
-    QuestAutomation,
-    "AutoDialogue",
-    "Auto Dialogue",
-    Config.AutoDialogue,
-    function(value)
-        Config.AutoDialogue = value
-    end
-)
-
-bindToggle(
-    QuestAutomation,
-    "AutoClaim",
-    "Auto Claim",
-    Config.AutoClaim,
-    function(value)
-        Config.AutoClaim = value
-    end
-)
-
-QuestAutomation:AddButton({
-    Title = "Quest State",
-    Callback = function()
-        notify(
-            "Quest State",
-            "Level: " .. tostring(PlayerState.GetLevel())
-                .. "\n"
-                .. currentQuestSummary()
-                .. "\nProgress: "
-                .. tostring(Runtime.ProgressState)
-                .. "\nDetail: "
-                .. tostring(Runtime.ProgressDetail),
-            11
-        )
-    end,
-})
-
-local QuestCatalogSection = Tabs.Quest:AddSection("Quest Catalog")
-
-local selectedQuestPath = nil
-local questValues = QuestCatalogService.GetNames()
-
-bindDropdown(
-    QuestCatalogSection,
-    "QuestCatalog",
-    "Quest",
-    questValues,
+local PlayerTeleportSection = Tabs.Teleport:AddSection("Players")
+local teleportPlayerNames = PlayerToolsService.GetNames()
+local selectedTeleportPlayer = teleportPlayerNames[1]
+local playerTeleportDropdown = bindDropdown(
+    PlayerTeleportSection,
+    "TeleportPlayer",
+    "Player",
+    teleportPlayerNames,
     1,
     function(value)
-        selectedQuestPath = value
-    end,
-    "Catalog is built from the client-visible QuestInfo/Quests hierarchy."
+        selectedTeleportPlayer = value
+    end
 )
 
-QuestCatalogSection:AddButton({
-    Title = "Find Selected Quest Giver",
+PlayerTeleportSection:AddButton({
+    Title = "Refresh Players",
     Callback = function()
-        if not selectedQuestPath
-            or selectedQuestPath == "Quest catalog unavailable" then
+        setDropdownValues(playerTeleportDropdown, PlayerToolsService.GetNames())
+    end,
+})
 
-            notify("Quest Catalog", "Select a quest first.", 3)
-            return
-        end
-
-        local questName =
-            selectedQuestPath:match("([^/]+)$")
-            or selectedQuestPath
-
-        local npc = QuestCatalogService.FindQuestGiver(questName)
-
-        if npc then
-            Runtime.CurrentTarget = npc
-            PlatformTransport.MoveNear(npc)
-            notify(
-                "Quest Giver",
-                questName .. " -> " .. npc.Name,
-                5
-            )
-        else
-            notify(
-                "Quest Giver",
-                "No client-visible NPC mapping for " .. questName,
-                5
-            )
+PlayerTeleportSection:AddButton({
+    Title = "Tween To Player",
+    Callback = function()
+        local ok, reason = PlayerToolsService.TeleportTo(selectedTeleportPlayer)
+        if not ok then
+            notify("Teleport", tostring(reason), 4)
         end
     end,
 })
 
--- ============================================================
 -- Settings
--- ============================================================
+local MovementSection = Tabs.Settings:AddSection("Movement")
 
-local CompatibilitySection = Tabs.Settings:AddSection("Nexomia Compatibility")
+bindSlider(MovementSection, "TweenSpeed", "Tween Speed", 50, 450, Config.TweenSpeed, function(value)
+    Config.TweenSpeed = value
+    Config.PlatformSpeed = value
+end)
 
-CompatibilitySection:AddButton({
-    Title = "Executor Status",
-    Callback = function()
-        notify("Executor Status", executorStatus(), 11)
-    end,
-})
-
-CompatibilitySection:AddButton({
-    Title = "Worker Health / Last Errors",
-    Callback = function()
-        notify("Worker Health", workerHealth(), 14)
-    end,
-})
-
-CompatibilitySection:AddButton({
-    Title = "Self Test",
-    Callback = function()
-        notify("Self Test", selfTest(), 12)
-    end,
-})
-
-local ResetSection = Tabs.Settings:AddSection("Runtime")
-
-ResetSection:AddButton({
-    Title = "Reset Automation State",
-    Callback = function()
-        Config.AutoProgress = false
-        Config.AutoFishing = false
-        Config.AutoMining = false
-        Config.AutoFarming = false
-
-        Runtime.ProgressLifeSkill = nil
-        Runtime.CurrentTarget = nil
-        Runtime.CurrentWantedMob = nil
-        Runtime.FarmAnchorCFrame = nil
-
-        FishingService.Reset("Manual reset")
-        MiningQTEService.Reset("Manual reset")
-            PlatformTransport.Cancel(false)
+bindToggle(MovementSection, "SpeedOverride", "WalkSpeed Override", Config.SpeedOverride, function(value)
+    Config.SpeedOverride = value
+end)
+bindSlider(MovementSection, "WalkSpeed", "WalkSpeed", 16, 100, Config.WalkSpeed, function(value)
+    Config.WalkSpeed = value
+end)
+bindToggle(MovementSection, "JumpOverride", "JumpPower Override", Config.JumpOverride, function(value)
+    Config.JumpOverride = value
+end)
+bindSlider(MovementSection, "JumpPower", "JumpPower", 50, 140, Config.JumpPower, function(value)
+    Config.JumpPower = value
+end)
+bindToggle(MovementSection, "InfiniteJump", "Infinite Jump", Config.InfiniteJump, function(value)
+    Config.InfiniteJump = value
+end)
+bindToggle(MovementSection, "Noclip", "Noclip", Config.Noclip, function(value)
+    Config.Noclip = value
+    if not value and not Runtime.Motion.Owner then
         restoreCollision()
+    end
+end)
+bindToggle(MovementSection, "AntiAFK", "Anti AFK", Config.AntiAFK, function(value)
+    Config.AntiAFK = value
+end)
 
-        notify("SON HUB", "Runtime automation state reset.", 3)
+local ServerSection = Tabs.Settings:AddSection("Server")
+ServerSection:AddButton({
+    Title = "Server Info",
+    Callback = function()
+        notify("Server", ServerToolsService.GetInfo(), 10)
+    end,
+})
+ServerSection:AddButton({
+    Title = "Rejoin Server",
+    Callback = function()
+        local ok, reason = ServerToolsService.Rejoin()
+        if not ok then
+            notify("Rejoin", tostring(reason), 5)
+        end
+    end,
+})
+ServerSection:AddButton({
+    Title = "Server Hop",
+    Callback = function()
+        task.spawn(function()
+            local ok, reason = ServerToolsService.Hop()
+            if not ok then
+                notify("Server Hop", tostring(reason), 5)
+            end
+        end)
     end,
 })
 
-ResetSection:AddButton({
+local joinJobId = ""
+ServerSection:AddInput("JoinServerJobId", {
+    Title = "Server UID / JobId",
+    Default = "",
+    Placeholder = "Paste JobId",
+    Numeric = false,
+    Finished = true,
+    Callback = function(value)
+        joinJobId = tostring(value or "")
+    end,
+})
+ServerSection:AddButton({
+    Title = "Join Server UID",
+    Callback = function()
+        local ok, reason = ServerToolsService.JoinJob(joinJobId)
+        if not ok then
+            notify("Join Server", tostring(reason), 5)
+        end
+    end,
+})
+
+local ScriptSection = Tabs.Settings:AddSection("Script")
+ScriptSection:AddButton({
     Title = "Unload SON HUB",
     Callback = function()
         if type(ENV.__SON_HUB_UNLOAD) == "function" then
@@ -8147,53 +8058,45 @@ ResetSection:AddButton({
     end,
 })
 
--- ============================================================
--- Info
--- ============================================================
-
-Tabs.Info:AddParagraph({
-    Title = "SON HUB",
-    Content = VERSION .. " | make by hongson",
-})
-
-Tabs.Info:AddParagraph({
-    Title = "Architecture",
-    Content =
-        "Fluent direct API, heartbeat moving platform, isolated workers, "
-        .. "live Quest UI and client-visible game state.",
-})
-
-local InfoSection = Tabs.Info:AddSection("Game Systems")
-
-InfoSection:AddButton({
-    Title = "Detected Systems",
+-- Test
+local TestSection = Tabs.Test:AddSection("Diagnostics")
+TestSection:AddButton({
+    Title = "Game Structure",
     Callback = function()
-        notify("Detected Systems", detectedSystems(), 14)
+        notify("Game Structure", TestService.StructureReport(), 12)
+    end,
+})
+TestSection:AddButton({
+    Title = "Runtime Self Test",
+    Callback = function()
+        notify("Self Test", selfTest(), 12)
+    end,
+})
+TestSection:AddButton({
+    Title = "Worker Health",
+    Callback = function()
+        notify("Worker Health", workerHealth(), 14)
+    end,
+})
+TestSection:AddButton({
+    Title = "Refresh Index",
+    Callback = function()
+        task.spawn(function()
+            RuntimeIndex.Rebuild()
+            QuestCatalogService.Build()
+            MobZoneService.Rebuild(true)
+            MiningQTEService.RefreshOreIndex(true)
+            HotbarService.Refresh()
+            notify("Index", "Refreshed", 3)
+        end)
     end,
 })
 
-InfoSection:AddButton({
-    Title = "Snapshot Limits",
+local RiskSection = Tabs.Test:AddSection("Duplicate Risk")
+RiskSection:AddButton({
+    Title = "Scan Duplicate-Risk Surfaces",
     Callback = function()
-        notify(
-            "Snapshot Limits",
-            "The supplied snapshot has client-visible Explorer/UI metadata "
-                .. "but no readable script source. Server-only state and hidden "
-                .. "remote contracts are therefore not guessed.",
-            10
-        )
-    end,
-})
-
-InfoSection:AddButton({
-    Title = "Copy Version",
-    Callback = function()
-        if type(clipboardFn) == "function" then
-            pcall(clipboardFn, "SON HUB " .. VERSION)
-            notify("Copied", "SON HUB " .. VERSION, 2)
-        else
-            notify("Clipboard", "setclipboard unavailable.", 3)
-        end
+        notify("Duplicate Risk", TestService.DuplicationRiskReport(), 16)
     end,
 })
 
@@ -8230,7 +8133,8 @@ local function unload()
     end)
 
     pcall(function()
-        end)
+        PlayerToolsService.StopSpectate()
+    end)
 
     pcall(function()
         MotionController.Release(Runtime.Motion.Owner, true)
@@ -8240,10 +8144,7 @@ local function unload()
         restoreCollision()
     end)
 
-    if Runtime.BlockHeld then
-        Runtime.BlockHeld = false
-        keyEvent(Enum.KeyCode.F, false)
-    end
+    Runtime.BlockHeld = false
 
     for object in pairs(ESPService.Map) do
         ESPService.Clear(object)
