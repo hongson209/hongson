@@ -1,6 +1,6 @@
--- SON HUB v21 | Nexomia snapshot rebuild | hongson
+-- SON HUB v22 | Nexomia guarded bootstrap | hongson
 
-local VERSION = "21.0.0"
+local VERSION = "22.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -87,6 +87,16 @@ end
 
 local LocalPlayer = Players.LocalPlayer
 local Workspace = workspace
+
+local BOOT_STAGE = "services"
+local function bootMark(stage)
+    BOOT_STAGE = tostring(stage)
+    pcall(function()
+        print("[SON HUB][BOOT] " .. BOOT_STAGE)
+    end)
+end
+
+bootMark("services-ready")
 
 local Runtime
 
@@ -259,11 +269,13 @@ if type(loadstring) ~= "function" then
     error("SON HUB: loadstring is unavailable")
 end
 
+bootMark("fluent-fetch")
 local fluentSource = fetchText(FLUENT_URL)
 if type(fluentSource) ~= "string" then
     error("SON HUB: unable to fetch Fluent with HttpGet/request")
 end
 
+bootMark("fluent-compile")
 local fluentChunk, fluentCompileError = loadstring(fluentSource)
 if type(fluentChunk) ~= "function" then
     error(
@@ -272,6 +284,7 @@ if type(fluentChunk) ~= "function" then
     )
 end
 
+bootMark("fluent-init")
 local okFluent, Fluent = pcall(fluentChunk)
 if not okFluent or type(Fluent) ~= "table" then
     error(
@@ -279,6 +292,8 @@ if not okFluent or type(Fluent) ~= "table" then
             .. tostring(Fluent)
     )
 end
+
+bootMark("fluent-ready")
 
 
 local Core = {
@@ -400,6 +415,7 @@ local Config = {
     LootColor = Color3.fromRGB(115, 255, 145),
 }
 
+bootMark("runtime-init")
 Runtime = {
     Prompts = setmetatable({}, {__mode = "k"}),
     Entities = setmetatable({}, {__mode = "k"}),
@@ -7265,6 +7281,8 @@ connect(
     end
 )
 
+bootMark("core-services-ready")
+
 -- ============================================================
 -- Schedulers
 -- ============================================================
@@ -7773,6 +7791,7 @@ local function executorStatus()
         "getscriptclosure: not required",
         "filesystem: not required",
         "soft UI/event guard: enabled",
+        "boot stage: " .. tostring(BOOT_STAGE),
     }, "\n")
 end
 
@@ -7810,23 +7829,115 @@ end
 -- Fluent UI
 -- ============================================================
 
-local Window = Fluent:CreateWindow({
-    Title = "SON HUB " .. VERSION,
-    SubTitle = "Nexomia | hongson",
-    TabWidth = 150,
-    Size = UDim2.fromOffset(720, 520),
-    Acrylic = false,
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl,
-})
+bootMark("ui-window")
+local okWindow, Window = safeCall(function()
+    return Fluent:CreateWindow({
+        Title = "SON HUB " .. VERSION,
+        SubTitle = "Nexomia | hongson",
+        TabWidth = 150,
+        Size = UDim2.fromOffset(720, 520),
+        Acrylic = false,
+        Theme = "Dark",
+        MinimizeKey = Enum.KeyCode.LeftControl,
+    })
+end)
 
+if not okWindow or not Window then
+    error("SON HUB UI bootstrap failed at ui-window: " .. tostring(Window))
+end
+
+local function uiMethod(object, methodName, ...)
+    if not object then
+        return false, "missing UI object for " .. tostring(methodName)
+    end
+    local method = object[methodName]
+    if type(method) ~= "function" then
+        return false, "missing UI method " .. tostring(methodName)
+    end
+    return safeCall(method, object, ...)
+end
+
+local function dummySection()
+    return {
+        AddToggle = function(_, _, data) return dummyOption(data and data.Default) end,
+        AddDropdown = function(_, _, data)
+            local values = data and data.Values or {}
+            return dummyOption(values[(data and data.Default) or 1])
+        end,
+        AddSlider = function(_, _, data) return dummyOption(data and data.Default) end,
+        AddButton = function() return dummyOption(false) end,
+        AddInput = function(_, _, data) return dummyOption(data and data.Default or "") end,
+    }
+end
+
+local function addTab(title, icon)
+    local ok, tab = uiMethod(Window, "AddTab", {Title = title, Icon = icon})
+    if not ok or not tab then
+        markSoftError("UI", "AddTab failed: " .. tostring(title) .. " | " .. tostring(tab))
+        return dummySection()
+    end
+    return tab
+end
+
+local function addSection(tab, title)
+    local ok, section = uiMethod(tab, "AddSection", title)
+    if not ok or not section then
+        markSoftError("UI", "AddSection failed: " .. tostring(title) .. " | " .. tostring(section))
+        return dummySection()
+    end
+    return section
+end
+
+local function addButton(section, spec)
+    if not section or type(section.AddButton) ~= "function" then
+        markSoftError("UI", "AddButton unavailable: " .. tostring(spec and spec.Title))
+        return dummyOption(false)
+    end
+    local wrapped = {}
+    for k, v in pairs(spec or {}) do wrapped[k] = v end
+    local original = wrapped.Callback
+    wrapped.Callback = function(...)
+        local ok, result = safeCall(original, ...)
+        if not ok then markSoftError("UI", result) end
+        return result
+    end
+    local ok, result = safeCall(section.AddButton, section, wrapped)
+    if not ok then
+        markSoftError("UI", result)
+        return dummyOption(false)
+    end
+    return result or dummyOption(false)
+end
+
+local function addInput(section, id, spec)
+    if not section or type(section.AddInput) ~= "function" then
+        markSoftError("UI", "AddInput unavailable: " .. tostring(id))
+        return dummyOption(spec and spec.Default or "")
+    end
+    local wrapped = {}
+    for k, v in pairs(spec or {}) do wrapped[k] = v end
+    local original = wrapped.Callback
+    wrapped.Callback = function(...)
+        local ok, result = safeCall(original, ...)
+        if not ok then markSoftError("UI", result) end
+        return result
+    end
+    local ok, result = safeCall(section.AddInput, section, id, wrapped)
+    if not ok then
+        markSoftError("UI", result)
+        return dummyOption(spec and spec.Default or "")
+    end
+    return result or dummyOption(spec and spec.Default or "")
+end
+
+bootMark("ui-tabs")
 local Tabs = {
-    Home = Window:AddTab({Title = "Home", Icon = "home"}),
-    Minigame = Window:AddTab({Title = "Minigame", Icon = "gamepad-2"}),
-    Player = Window:AddTab({Title = "Player", Icon = "user"}),
-    Teleport = Window:AddTab({Title = "Teleport", Icon = "map-pin"}),
-    Settings = Window:AddTab({Title = "Settings", Icon = "settings"}),
-    Test = Window:AddTab({Title = "Test", Icon = "flask-conical"}),
+    Home = addTab("Home", "home"),
+    Minigame = addTab("Minigame", "gamepad-2"),
+    Player = addTab("Player", "user"),
+    Teleport = addTab("Teleport", "map-pin"),
+    Settings = addTab("Settings", "settings"),
+    Test = addTab("Test", "flask-conical"),
 }
 
 local function bindToggle(section, id, title, defaultValue, callback)
@@ -7835,18 +7946,24 @@ local function bindToggle(section, id, title, defaultValue, callback)
         return dummyOption(defaultValue == true)
     end
 
-    local option = section:AddToggle(id, {
+    local okCreate, option = safeCall(section.AddToggle, section, id, {
         Title = title,
         Default = defaultValue == true,
     })
 
+    if not okCreate then
+        markSoftError("UI", option)
+        return dummyOption(defaultValue == true)
+    end
+
     if option and type(option.OnChanged) == "function" then
-        option:OnChanged(function()
+        local okBind, bindErr = safeCall(option.OnChanged, option, function()
             local ok, result = safeCall(callback, option.Value)
             if not ok then
                 markSoftError("UI", result)
             end
         end)
+        if not okBind then markSoftError("UI", bindErr) end
     end
 
     return option or dummyOption(defaultValue == true)
@@ -7858,20 +7975,26 @@ local function bindDropdown(section, id, title, values, defaultIndex, callback)
         return dummyOption(values and values[defaultIndex or 1])
     end
 
-    local option = section:AddDropdown(id, {
+    local okCreate, option = safeCall(section.AddDropdown, section, id, {
         Title = title,
         Values = values,
         Multi = false,
         Default = defaultIndex or 1,
     })
 
+    if not okCreate then
+        markSoftError("UI", option)
+        return dummyOption(values and values[defaultIndex or 1])
+    end
+
     if option and type(option.OnChanged) == "function" then
-        option:OnChanged(function(value)
+        local okBind, bindErr = safeCall(option.OnChanged, option, function(value)
             local ok, result = safeCall(callback, value)
             if not ok then
                 markSoftError("UI", result)
             end
         end)
+        if not okBind then markSoftError("UI", bindErr) end
     end
 
     return option or dummyOption(values and values[defaultIndex or 1])
@@ -7883,7 +8006,7 @@ local function bindSlider(section, id, title, minimum, maximum, defaultValue, ca
         return dummyOption(defaultValue)
     end
 
-    return section:AddSlider(id, {
+    local okCreate, option = safeCall(section.AddSlider, section, id, {
         Title = title,
         Default = defaultValue,
         Min = minimum,
@@ -7896,6 +8019,13 @@ local function bindSlider(section, id, title, minimum, maximum, defaultValue, ca
             end
         end,
     })
+
+    if not okCreate then
+        markSoftError("UI", option)
+        return dummyOption(defaultValue)
+    end
+
+    return option or dummyOption(defaultValue)
 end
 
 local function setDropdownValues(dropdown, values)
@@ -7910,7 +8040,7 @@ local function setDropdownValues(dropdown, values)
 end
 
 -- Home
-local FarmSection = Tabs.Home:AddSection("Auto Farm")
+local FarmSection = addSection(Tabs.Home, "Auto Farm")
 
 bindToggle(FarmSection, "AutoFarm", "Auto Farm", Config.AutoProgress, function(value)
     Config.AutoProgress = value
@@ -7960,7 +8090,7 @@ local mobDropdown = bindDropdown(
     end
 )
 
-FarmSection:AddButton({
+addButton(FarmSection, {
     Title = "Refresh Mobs",
     Callback = function()
         setDropdownValues(mobDropdown, TargetService.GetMobOptions())
@@ -7980,7 +8110,7 @@ bindSlider(FarmSection, "AttackRate", "M1 / sec", 1, 15, Config.AttackRate, func
     Config.AttackRate = value
 end)
 
-local CombatSection = Tabs.Home:AddSection("Combat Position")
+local CombatSection = addSection(Tabs.Home, "Combat Position")
 
 bindSlider(CombatSection, "CombatDistance", "M1 Distance", 3, 7, Config.CombatDistance, function(value)
     Config.CombatDistance = value
@@ -8004,8 +8134,8 @@ bindSlider(CombatSection, "MobHitboxSize", "Hitbox Size", 4, 20, Config.MobHitbo
     Config.MobHitboxSize = value
 end)
 
-local HomeState = Tabs.Home:AddSection("State")
-HomeState:AddButton({
+local HomeState = addSection(Tabs.Home, "State")
+addButton(HomeState, {
     Title = "Current State",
     Callback = function()
         notify(
@@ -8019,7 +8149,7 @@ HomeState:AddButton({
 })
 
 -- Minigame
-local MiningSection = Tabs.Minigame:AddSection("Mining")
+local MiningSection = addSection(Tabs.Minigame, "Mining")
 
 bindToggle(MiningSection, "AutoMining", "Auto Mining", Config.AutoMining, function(value)
     Config.AutoMining = value
@@ -8053,7 +8183,7 @@ local oreDropdown = bindDropdown(
     end
 )
 
-MiningSection:AddButton({
+addButton(MiningSection, {
     Title = "Refresh Ores",
     Callback = function()
         MiningQTEService.RefreshOreIndex(true)
@@ -8062,7 +8192,7 @@ MiningSection:AddButton({
     end,
 })
 
-MiningSection:AddButton({
+addButton(MiningSection, {
     Title = "Mining Status",
     Callback = function()
         local target = Runtime.MiningTarget
@@ -8076,7 +8206,7 @@ MiningSection:AddButton({
     end,
 })
 
-local FishingSection = Tabs.Minigame:AddSection("Fishing")
+local FishingSection = addSection(Tabs.Minigame, "Fishing")
 
 bindToggle(FishingSection, "AutoFishing", "Auto Fishing", Config.AutoFishing, function(value)
     Config.AutoFishing = value
@@ -8095,7 +8225,7 @@ bindDropdown(
     end
 )
 
-FishingSection:AddButton({
+addButton(FishingSection, {
     Title = "Save Current Spot",
     Callback = function()
         local root = rootPart()
@@ -8108,7 +8238,7 @@ FishingSection:AddButton({
     end,
 })
 
-FishingSection:AddButton({
+addButton(FishingSection, {
     Title = "Fishing Status",
     Callback = function()
         local data = FishingService.GetConditions()
@@ -8125,7 +8255,7 @@ FishingSection:AddButton({
 })
 
 -- Player
-local StatsSection = Tabs.Player:AddSection("Auto Stats")
+local StatsSection = addSection(Tabs.Player, "Auto Stats")
 
 bindToggle(StatsSection, "AutoStats", "Auto Stats", Config.AutoStats, function(value)
     Config.AutoStats = value
@@ -8142,14 +8272,14 @@ bindDropdown(
     end
 )
 
-StatsSection:AddButton({
+addButton(StatsSection, {
     Title = "Stats Status",
     Callback = function()
         notify("Stats", StatsService.GetSnapshot(), 8)
     end,
 })
 
-local ESPSection = Tabs.Player:AddSection("ESP")
+local ESPSection = addSection(Tabs.Player, "ESP")
 bindToggle(ESPSection, "PlayerESP", "Player ESP", Config.PlayerESP, function(value)
     Config.PlayerESP = value
 end)
@@ -8166,7 +8296,7 @@ bindToggle(ESPSection, "LootESP", "Loot ESP", Config.LootESP, function(value)
     Config.LootESP = value
 end)
 
-local CameraSection = Tabs.Player:AddSection("Player Camera")
+local CameraSection = addSection(Tabs.Player, "Player Camera")
 local cameraPlayerNames = PlayerToolsService.GetNames()
 local selectedCameraPlayer = cameraPlayerNames[1]
 local cameraDropdown = bindDropdown(
@@ -8180,14 +8310,14 @@ local cameraDropdown = bindDropdown(
     end
 )
 
-CameraSection:AddButton({
+addButton(CameraSection, {
     Title = "Refresh Players",
     Callback = function()
         setDropdownValues(cameraDropdown, PlayerToolsService.GetNames())
     end,
 })
 
-CameraSection:AddButton({
+addButton(CameraSection, {
     Title = "Spectate",
     Callback = function()
         local ok, reason = PlayerToolsService.Spectate(selectedCameraPlayer)
@@ -8195,7 +8325,7 @@ CameraSection:AddButton({
     end,
 })
 
-CameraSection:AddButton({
+addButton(CameraSection, {
     Title = "Stop Spectate",
     Callback = function()
         PlayerToolsService.StopSpectate()
@@ -8203,7 +8333,7 @@ CameraSection:AddButton({
 })
 
 -- Teleport
-local IslandSection = Tabs.Teleport:AddSection("Islands")
+local IslandSection = addSection(Tabs.Teleport, "Islands")
 local islandNames = IslandService.GetNames()
 local selectedIsland = islandNames[1]
 local islandDropdown = bindDropdown(
@@ -8217,14 +8347,14 @@ local islandDropdown = bindDropdown(
     end
 )
 
-IslandSection:AddButton({
+addButton(IslandSection, {
     Title = "Refresh Islands",
     Callback = function()
         setDropdownValues(islandDropdown, IslandService.GetNames())
     end,
 })
 
-IslandSection:AddButton({
+addButton(IslandSection, {
     Title = "Tween To Island",
     Callback = function()
         if selectedIsland then
@@ -8233,7 +8363,7 @@ IslandSection:AddButton({
     end,
 })
 
-local PlayerTeleportSection = Tabs.Teleport:AddSection("Players")
+local PlayerTeleportSection = addSection(Tabs.Teleport, "Players")
 local teleportPlayerNames = PlayerToolsService.GetNames()
 local selectedTeleportPlayer = teleportPlayerNames[1]
 local playerTeleportDropdown = bindDropdown(
@@ -8247,14 +8377,14 @@ local playerTeleportDropdown = bindDropdown(
     end
 )
 
-PlayerTeleportSection:AddButton({
+addButton(PlayerTeleportSection, {
     Title = "Refresh Players",
     Callback = function()
         setDropdownValues(playerTeleportDropdown, PlayerToolsService.GetNames())
     end,
 })
 
-PlayerTeleportSection:AddButton({
+addButton(PlayerTeleportSection, {
     Title = "Tween To Player",
     Callback = function()
         local ok, reason = PlayerToolsService.TeleportTo(selectedTeleportPlayer)
@@ -8265,7 +8395,7 @@ PlayerTeleportSection:AddButton({
 })
 
 -- Settings
-local MovementSection = Tabs.Settings:AddSection("Movement")
+local MovementSection = addSection(Tabs.Settings, "Movement")
 
 bindSlider(MovementSection, "TweenSpeed", "Tween Speed", 50, 450, Config.TweenSpeed, function(value)
     Config.TweenSpeed = value
@@ -8297,14 +8427,14 @@ bindToggle(MovementSection, "AntiAFK", "Anti AFK", Config.AntiAFK, function(valu
     Config.AntiAFK = value
 end)
 
-local ServerSection = Tabs.Settings:AddSection("Server")
-ServerSection:AddButton({
+local ServerSection = addSection(Tabs.Settings, "Server")
+addButton(ServerSection, {
     Title = "Server Info",
     Callback = function()
         notify("Server", ServerToolsService.GetInfo(), 10)
     end,
 })
-ServerSection:AddButton({
+addButton(ServerSection, {
     Title = "Rejoin Server",
     Callback = function()
         local ok, reason = ServerToolsService.Rejoin()
@@ -8313,7 +8443,7 @@ ServerSection:AddButton({
         end
     end,
 })
-ServerSection:AddButton({
+addButton(ServerSection, {
     Title = "Server Hop",
     Callback = function()
         task.spawn(function()
@@ -8326,7 +8456,7 @@ ServerSection:AddButton({
 })
 
 local joinJobId = ""
-ServerSection:AddInput("JoinServerJobId", {
+addInput(ServerSection, "JoinServerJobId", {
     Title = "Server UID / JobId",
     Default = "",
     Placeholder = "Paste JobId",
@@ -8336,7 +8466,7 @@ ServerSection:AddInput("JoinServerJobId", {
         joinJobId = tostring(value or "")
     end,
 })
-ServerSection:AddButton({
+addButton(ServerSection, {
     Title = "Join Server UID",
     Callback = function()
         local ok, reason = ServerToolsService.JoinJob(joinJobId)
@@ -8346,8 +8476,8 @@ ServerSection:AddButton({
     end,
 })
 
-local ScriptSection = Tabs.Settings:AddSection("Script")
-ScriptSection:AddButton({
+local ScriptSection = addSection(Tabs.Settings, "Script")
+addButton(ScriptSection, {
     Title = "Unload SON HUB",
     Callback = function()
         if type(ENV.__SON_HUB_UNLOAD) == "function" then
@@ -8357,26 +8487,26 @@ ScriptSection:AddButton({
 })
 
 -- Test
-local TestSection = Tabs.Test:AddSection("Diagnostics")
-TestSection:AddButton({
+local TestSection = addSection(Tabs.Test, "Diagnostics")
+addButton(TestSection, {
     Title = "Game Structure",
     Callback = function()
         notify("Game Structure", TestService.StructureReport(), 12)
     end,
 })
-TestSection:AddButton({
+addButton(TestSection, {
     Title = "Runtime Self Test",
     Callback = function()
         notify("Self Test", selfTest(), 12)
     end,
 })
-TestSection:AddButton({
+addButton(TestSection, {
     Title = "Worker Health",
     Callback = function()
         notify("Worker Health", workerHealth(), 14)
     end,
 })
-TestSection:AddButton({
+addButton(TestSection, {
     Title = "Refresh Index",
     Callback = function()
         task.spawn(function()
@@ -8390,8 +8520,8 @@ TestSection:AddButton({
     end,
 })
 
-local CleanSection = Tabs.Settings:AddSection("Clean / Compatibility")
-CleanSection:AddButton({
+local CleanSection = addSection(Tabs.Settings, "Clean / Compatibility")
+addButton(CleanSection, {
     Title = "Clean Runtime State",
     Callback = function()
         HitboxService.RestoreAll()
@@ -8406,22 +8536,28 @@ CleanSection:AddButton({
     end,
 })
 
-CleanSection:AddButton({
+addButton(CleanSection, {
     Title = "Executor Compatibility",
     Callback = function()
         notify("Compatibility", executorStatus(), 10)
     end,
 })
 
-local RiskSection = Tabs.Test:AddSection("Duplicate Risk")
-RiskSection:AddButton({
+local RiskSection = addSection(Tabs.Test, "Duplicate Risk")
+addButton(RiskSection, {
     Title = "Scan Duplicate-Risk Surfaces",
     Callback = function()
         notify("Duplicate Risk", TestService.DuplicationRiskReport(), 16)
     end,
 })
 
-Window:SelectTab(1)
+do
+    local ok, result = uiMethod(Window, "SelectTab", 1)
+    if not ok then
+        markSoftError("UI", result)
+    end
+end
+bootMark("ui-ready")
 
 
 -- ============================================================
@@ -8489,7 +8625,7 @@ local function unload()
 
     pcall(function()
         if Fluent and type(Fluent.Destroy) == "function" then
-            Fluent:Destroy()
+            safeCall(Fluent.Destroy, Fluent)
         end
     end)
 
@@ -8507,6 +8643,7 @@ task.defer(function()
             .. tostring(PlayerState.GetLevel())
             .. " | Quest: "
             .. currentQuestSummary()
+            .. "\nBoot: " .. tostring(BOOT_STAGE)
             .. "\nRun Self Test before enabling AUTO QUEST / FARM.",
         7
     )
