@@ -14,7 +14,7 @@
       - Large Workspace scan occurs once; caches update incrementally.
 ]]
 
-local VERSION = "13.0.0"
+local VERSION = "14.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -187,10 +187,10 @@ local Config = {
     SelectedMob = "Nearest Hostile",
 
     -- Auto Farm combat
-    AutoAttack = false,
+    AutoAttack = true,
     AttackRate = 8,
     SelectedWeapon = "Auto",
-    AutoMastery = true,
+    AutoMastery = false,
     MasteryMode = "All Combat",
     MasteryReadyOnly = true,
     MasteryInterval = 0.75,
@@ -211,20 +211,20 @@ local Config = {
     TravelMaxAboveTarget = 30,
     TravelHorizontalThreshold = 22,
     FarmAnchorRecenterDistance = 55,
-    FarmHoldCorrectionDistance = 3.5,
+    FarmHoldCorrectionDistance = 5.0,
     PlatformNoclip = true,
 
     -- Bring + hitbox
-    BringMobs = false,
-    BringRadius = 135,
+    BringMobs = true,
+    BringRadius = 165,
     BringLimit = 12,
     MobBelowFeet = 9,
     BringSpread = 1.5,
 
-    MobHitbox = false,
-    HitboxSize = 24,
+    MobHitbox = true,
+    HitboxSize = 28,
     HitboxTransparency = 0.72,
-    HitboxRange = 190,
+    HitboxRange = 220,
 
     -- Combat
     AutoAim = false,
@@ -1331,6 +1331,97 @@ function QuestService.StateKey()
     end
 
     return "idle"
+end
+
+-- ============================================================
+-- Integrated Quest Planner
+-- ============================================================
+
+QuestPlannerService = {}
+
+function QuestPlannerService.GetPlan()
+    local level = PlayerState.GetLevel()
+    local active = QuestService.GetActiveQuests()
+
+    if #active > 0 then
+        local completed = QuestService.GetCompletedQuest()
+        if completed then
+            return {
+                Mode = "TURN_IN",
+                Level = level,
+                ActiveCount = #active,
+                Quest = completed,
+                Task = nil,
+            }
+        end
+
+        local quest, taskData = QuestService.GetStableTask()
+
+        return {
+            Mode = quest and taskData and "ACTIVE_TASK" or "ACTIVE_WAIT",
+            Level = level,
+            ActiveCount = #active,
+            Quest = quest,
+            Task = taskData,
+        }
+    end
+
+    -- The game's RecommendedQuest object is preferred over a guessed
+    -- hard-coded level table. It is the client-visible recommendation
+    -- produced by the game for the current player state/level.
+    QuestService.ClearTaskLock()
+
+    local recommended = QuestService.GetRecommended()
+
+    if recommended then
+        return {
+            Mode = "ACCEPT_RECOMMENDED",
+            Level = level,
+            ActiveCount = 0,
+            Recommended = recommended,
+        }
+    end
+
+    return {
+        Mode = "NO_QUEST",
+        Level = level,
+        ActiveCount = 0,
+    }
+end
+
+function QuestPlannerService.GetSummary()
+    local plan = QuestPlannerService.GetPlan()
+
+    if plan.Mode == "TURN_IN" then
+        return string.format(
+            "Lv.%s • Turn-in • %s",
+            tostring(plan.Level),
+            tostring(plan.Quest and plan.Quest.Name or "Unknown")
+        )
+    elseif plan.Mode == "ACTIVE_TASK" then
+        return string.format(
+            "Lv.%s • %s • %s",
+            tostring(plan.Level),
+            tostring(plan.Quest and plan.Quest.Name or "Quest"),
+            tostring(plan.Task and plan.Task.Text or "Task")
+        )
+    elseif plan.Mode == "ACCEPT_RECOMMENDED" then
+        return string.format(
+            "Lv.%s • No active quest • Recommended: %s",
+            tostring(plan.Level),
+            tostring(
+                plan.Recommended
+                and plan.Recommended.Name
+                or "Unknown"
+            )
+        )
+    end
+
+    return string.format(
+        "Lv.%s • %s",
+        tostring(plan.Level),
+        plan.Mode
+    )
 end
 
 -- ============================================================
@@ -2497,8 +2588,86 @@ local function farmAnchorGround(anchor)
 end
 
 function BringService.Step(wanted, anchor)
-    Runtime.LastBringCount = 0
-    return 0
+    if not Config.BringMobs or not anchor then
+        Runtime.LastBringCount = 0
+        return 0
+    end
+
+    local now = os.clock()
+    if now - Runtime.LastBring < 0.12 then
+        return Runtime.LastBringCount or 0
+    end
+    Runtime.LastBring = now
+
+    local ground = farmAnchorGround(anchor)
+    if not ground then
+        Runtime.LastBringCount = 0
+        return 0
+    end
+
+    local candidates = {}
+    local bossAllowed = farmTargetAllowsBoss(wanted)
+
+    for model in pairs(Runtime.Entities) do
+        if model
+            and model.Parent
+            and TargetService.IsFarmMob(model, wanted)
+            and (
+                not TargetService.IsBoss(model)
+                or bossAllowed
+            ) then
+
+            local part =
+                model:FindFirstChild("HumanoidRootPart")
+                or objectRoot(model)
+
+            if part and not part.Anchored then
+                local distance =
+                    (part.Position - ground).Magnitude
+
+                if distance <= Config.BringRadius then
+                    table.insert(candidates, {
+                        Model = model,
+                        Part = part,
+                        Distance = distance,
+                    })
+                end
+            end
+        end
+    end
+
+    table.sort(candidates, function(a, b)
+        return a.Distance < b.Distance
+    end)
+
+    local count =
+        math.min(#candidates, Config.BringLimit)
+
+    for index = 1, count do
+        local data = candidates[index]
+        local column = ((index - 1) % 3) - 1
+        local row = math.floor((index - 1) / 3)
+
+        local position =
+            anchor.Position
+            + Vector3.new(
+                column * Config.BringSpread,
+                -Config.MobBelowFeet,
+                row * Config.BringSpread
+            )
+
+        local destination = CFrame.new(position)
+
+        pcall(function()
+            data.Part.AssemblyLinearVelocity = Vector3.zero
+            data.Part.AssemblyAngularVelocity = Vector3.zero
+            data.Model:PivotTo(destination)
+            data.Part.CFrame = destination
+        end)
+    end
+
+    Runtime.LastBringCount = count
+    return count
 end
 
 HitboxService = {}
@@ -2545,8 +2714,6 @@ function HitboxService.Apply(model, wanted)
     end
 
     local part = model:FindFirstChild("HumanoidRootPart")
-        or model:FindFirstChild("UpperTorso")
-        or model:FindFirstChild("Torso")
 
     if not part then
         return
@@ -2577,9 +2744,57 @@ function HitboxService.Apply(model, wanted)
 end
 
 function HitboxService.Step(wanted, anchor)
-    HitboxService.Clear()
-    Runtime.LastHitboxCount = 0
-    return 0
+    local now = os.clock()
+
+    if now - Runtime.LastHitbox < 0.12 then
+        return Runtime.LastHitboxCount or 0
+    end
+    Runtime.LastHitbox = now
+
+    local keep = {}
+    local count = 0
+    local ground = farmAnchorGround(anchor)
+    local bossAllowed = farmTargetAllowsBoss(wanted)
+
+    if Config.MobHitbox then
+        for model in pairs(Runtime.Entities) do
+            if model
+                and model.Parent
+                and TargetService.IsFarmMob(model, wanted)
+                and (
+                    not TargetService.IsBoss(model)
+                    or bossAllowed
+                ) then
+
+                local part =
+                    model:FindFirstChild("HumanoidRootPart")
+
+                local inRange =
+                    not ground
+                    or (
+                        part
+                        and (
+                            part.Position - ground
+                        ).Magnitude <= Config.HitboxRange
+                    )
+
+                if inRange then
+                    keep[model] = true
+                    count += 1
+                    HitboxService.Apply(model, wanted)
+                end
+            end
+        end
+    end
+
+    for model in pairs(Runtime.ExpandedHitboxes) do
+        if not keep[model] then
+            HitboxService.Restore(model)
+        end
+    end
+
+    Runtime.LastHitboxCount = count
+    return count
 end
 
 -- ============================================================
@@ -3137,11 +3352,29 @@ local function setBlock(held)
 end
 
 function CombatService.AimAt(model)
+    -- Auto Farm v14 deliberately avoids rotating the character every
+    -- scheduler tick because that caused stationary jitter.
     return false
 end
 
 function CombatService.AttackStep()
-    return false
+    if not Config.AutoAttack then
+        return false
+    end
+
+    local now = os.clock()
+    local minimumDelay =
+        1 / math.max(1, Config.AttackRate)
+
+    if now - Runtime.LastAttack < minimumDelay then
+        return false
+    end
+
+    Runtime.LastAttack = now
+
+    -- Generic normal attack only.
+    -- No 1/2/3/4/5/6/7 hotbar skill input in this route.
+    return mouseClickCenter()
 end
 
 function CombatService.BlockStep()
@@ -4048,11 +4281,26 @@ function FishingService.Step()
         end
 
         setFishingState("MOVE_TO_SPOT", spotReason)
-        PlatformTransport.MoveToRootCFrame(spot)
+
+        if FarmMovement then
+            FarmMovement.Go(
+                spot,
+                false,
+                "fishing",
+                spot.Position
+            )
+        else
+            PlatformTransport.MoveToRootCFrame(spot)
+        end
+
         return 0.20
     end
 
-    PlatformTransport.Cancel(true)
+    if FarmMovement then
+        FarmMovement.Stop(false, true)
+    else
+        PlatformTransport.Cancel(true)
+    end
 
     if Runtime.FishingState == "WAIT_QTE" then
         if os.clock() - Runtime.FishingStateSince >= Config.FishingBiteTimeout then
@@ -4143,7 +4391,7 @@ local function oreIsAvailable(model)
 end
 
 local function questRequiredOre()
-    local _, taskData = QuestService.GetNextTask()
+    local _, taskData = QuestService.GetStableTask()
     if not taskData or taskData.Kind ~= "Mine" then
         return nil
     end
@@ -4355,14 +4603,28 @@ function MiningQTEService.Step()
     local wanted = oreName(ore)
     local distance = distanceTo(ore)
 
-    if distance > Config.PlatformArrivalDistance then
+    if distance > Config.PlatformArrivalDistance + 1 then
         miningMouse(false, ore)
         setMiningState("MOVE", "Moving to " .. wanted)
-        PlatformTransport.MoveNear(ore)
+
+        if FarmMovement then
+            FarmMovement.GoNear(
+                ore,
+                2.4,
+                3.5
+            )
+        else
+            PlatformTransport.MoveNear(ore)
+        end
+
         return 0.18
     end
 
-    PlatformTransport.Cancel(true)
+    if FarmMovement then
+        FarmMovement.Stop(false, true)
+    else
+        PlatformTransport.Cancel(true)
+    end
 
     local pickaxe = findPickaxe()
     if not pickaxe then
@@ -5864,7 +6126,6 @@ local function stepDefeatTask(wanted)
     end
 
     CombatService.AttackStep()
-    MasteryService.Step()
 
     farmSetState(
         "FARM_COMBAT",
@@ -6182,22 +6443,27 @@ function AutoFarmController.Step()
         return
     end
 
-    local completed =
-        QuestService.GetCompletedQuest()
+    local plan = QuestPlannerService.GetPlan()
 
-    if completed and Config.AutoTurnIn then
+    if plan.Mode == "TURN_IN"
+        and plan.Quest
+        and Config.AutoTurnIn then
+
         stepQuestNpc(
-            completed.Name,
+            plan.Quest.Name,
             nil,
             "QUEST_TURN_IN"
         )
         return
     end
 
-    local quest, taskData =
-        QuestService.GetStableTask()
+    if plan.Mode == "ACTIVE_TASK"
+        and plan.Quest
+        and plan.Task then
 
-    if quest and taskData then
+        local quest = plan.Quest
+        local taskData = plan.Task
+
         local taskKey =
             tostring(quest.Id)
             .. "|"
@@ -6212,22 +6478,13 @@ function AutoFarmController.Step()
             Runtime.FarmFSM.InteractionAttempts = 0
             Runtime.FarmFSM.LastInteraction = 0
             Runtime.FarmAnchorCFrame = nil
+            Runtime.CurrentTarget = nil
+            Runtime.CurrentWantedMob = nil
             HitboxService.Clear()
         end
 
         if taskData.Kind == "Defeat" then
-            Runtime.ProgressLifeSkill = nil
-            Runtime.CurrentTarget = nil
-            Runtime.CurrentWantedMob = nil
-            Runtime.FarmAnchorCFrame = nil
-
-            FarmMovement.Stop(true, true)
-            HitboxService.Clear()
-
-            farmSetState(
-                "MANUAL_COMBAT",
-                taskData.Target
-            )
+            stepDefeatTask(taskData.Target)
             return
         elseif taskData.Kind == "Talk"
             or taskData.Kind == "Return"
@@ -6242,69 +6499,44 @@ function AutoFarmController.Step()
         elseif taskData.Kind == "Collect"
             or taskData.Kind == "Find"
             or taskData.Kind == "Interact"
+            or taskData.Kind == "Reach"
+            or taskData.Kind == "Use"
             or taskData.Kind == "Claim"
             or taskData.Kind == "Destroy" then
 
-            stepPromptTask(taskData)
-            return
-        elseif taskData.Kind == "Reach" then
-            stepReachTask(
-                quest,
-                taskData
-            )
-            return
-        elseif taskData.Kind == "Equip"
-            or taskData.Kind == "Use" then
-
-            stepEquipOrUseTask(
-                taskData
-            )
-            return
-        elseif taskData.Kind == "Fish" then
-            routeLifeSkill(
-                "Fishing",
-                taskData.Text
-            )
+            if taskData.Kind == "Reach" then
+                stepReachTask(quest, taskData)
+            else
+                stepPromptTask(taskData)
+            end
             return
         elseif taskData.Kind == "Mine" then
-            routeLifeSkill(
-                "Mining",
-                taskData.Text
-            )
+            routeLifeSkill("Mining", taskData.Text)
+            return
+        elseif taskData.Kind == "Fish" then
+            routeLifeSkill("Fishing", taskData.Text)
             return
         elseif taskData.Kind == "Farm" then
-            routeLifeSkill(
-                "Farming",
-                taskData.Text
-            )
+            routeLifeSkill("Farming", taskData.Text)
             return
         elseif taskData.Kind == "Treasure" then
-            routeLifeSkill(
-                "Treasure",
-                taskData.Text
-            )
+            routeLifeSkill("Treasure", taskData.Text)
             return
         end
 
-        stepUtilityTask(
-            quest,
-            taskData
-        )
+        stepUtilityTask(quest, taskData)
         return
     end
 
-    local recommended =
-        QuestService.GetRecommended()
-
-    if recommended
+    if plan.Mode == "ACCEPT_RECOMMENDED"
+        and plan.Recommended
         and Config.AutoAcceptRecommended then
 
         stepQuestNpc(
-            recommended.Name,
+            plan.Recommended.Name,
             nil,
             "QUEST_ACCEPT"
         )
-
         return
     end
 
@@ -6313,7 +6545,9 @@ function AutoFarmController.Step()
 
     farmSetState(
         "QUEST_WAIT",
-        "No active / recommended quest"
+        "Lv."
+            .. tostring(plan.Level)
+            .. " • no active/recommended quest"
     )
 end
 
@@ -6693,6 +6927,81 @@ task.spawn(function()
 end)
 
 -- ============================================================
+-- NPC Navigator
+-- ============================================================
+
+NPCNavigator = {}
+
+local NAV_NPCS = {
+    ["Fishing NPC — Fisherman Jack"] = "Fisherman Jack",
+    ["Blacksmith — Shinozaki"] = "Blacksmith Shinozaki",
+    ["Merchant"] = "Merchant",
+    ["Miner — Song Jil Wu"] = "Miner Song Jil Wu",
+    ["Miner — Song Kim Wu"] = "Miner Song Kim Wu",
+}
+
+function NPCNavigator.GetNames()
+    local result = {}
+
+    for display in pairs(NAV_NPCS) do
+        table.insert(result, display)
+    end
+
+    table.sort(result)
+    return result
+end
+
+function NPCNavigator.Resolve(displayOrName)
+    local targetName =
+        NAV_NPCS[displayOrName]
+        or displayOrName
+
+    return TargetService.FindNamedDialogueNPC(
+        targetName
+    )
+end
+
+function NPCNavigator.GoTo(displayOrName)
+    local npc =
+        NPCNavigator.Resolve(displayOrName)
+
+    if not npc then
+        notify(
+            "NPC Navigation",
+            "NPC not found: "
+                .. tostring(displayOrName),
+            5
+        )
+        return false
+    end
+
+    Runtime.CurrentTarget = npc
+
+    local prompt =
+        InteractionService.FindPromptNear(
+            npc,
+            "Dialogue"
+        )
+
+    if FarmMovement then
+        FarmMovement.GoInteract(
+            npc,
+            prompt
+        )
+    else
+        PlatformTransport.MoveNear(npc)
+    end
+
+    notify(
+        "NPC Navigation",
+        "Moving to " .. npc.Name,
+        4
+    )
+
+    return true
+end
+
+-- ============================================================
 -- UI helpers
 -- ============================================================
 
@@ -7044,7 +7353,7 @@ local FarmMaster = bindToggle(
 
             notify(
                 "Auto Farm",
-                "Started • one state machine owns Quest, movement, mob control and combat.",
+                "Started • active quest first; otherwise accept the game's level-appropriate RecommendedQuest.",
                 4
             )
         else
@@ -7138,7 +7447,7 @@ FarmMain:AddButton({
                 "Hitbox count: " .. tostring(Runtime.LastHitboxCount or 0)
                     .. " • size="
                     .. tostring(Config.HitboxSize),
-                "Mastery: " .. tostring(Config.AutoMastery),
+                "Planner: " .. QuestPlannerService.GetSummary(),
             }, "\n"),
             11
         )
@@ -7186,11 +7495,98 @@ bindSlider(
     end
 )
 
+local MobSection = Tabs.Farm:AddSection("Mob Farm")
+
+bindToggle(
+    MobSection,
+    "BringMobsV14",
+    "Bring Matching Mobs",
+    Config.BringMobs,
+    function(value)
+        Config.BringMobs = value
+    end,
+    "Only mobs matching the current Defeat task are moved."
+)
+
+bindSlider(
+    MobSection,
+    "BringRadiusV14",
+    "Bring Radius",
+    40,
+    240,
+    Config.BringRadius,
+    function(value)
+        Config.BringRadius = value
+    end
+)
+
+bindToggle(
+    MobSection,
+    "HitboxV14",
+    "Large Mob Hitbox",
+    Config.MobHitbox,
+    function(value)
+        Config.MobHitbox = value
+        if not value then
+            HitboxService.Clear()
+        end
+    end,
+    "HumanoidRootPart only; quest NPCs and players are excluded."
+)
+
+bindSlider(
+    MobSection,
+    "HitboxSizeV14",
+    "Hitbox Size",
+    10,
+    40,
+    Config.HitboxSize,
+    function(value)
+        Config.HitboxSize = value
+    end
+)
+
+local AttackSection = Tabs.Farm:AddSection("Basic Attack")
+
+bindToggle(
+    AttackSection,
+    "AutoM1V14",
+    "Auto M1",
+    Config.AutoAttack,
+    function(value)
+        Config.AutoAttack = value
+    end,
+    "Only normal M1. Auto Farm does not press numeric skill keys."
+)
+
+bindSlider(
+    AttackSection,
+    "AttackRateV14",
+    "M1 / Second",
+    2,
+    12,
+    Config.AttackRate,
+    function(value)
+        Config.AttackRate = value
+    end
+)
+
 local QuestOnlySection = Tabs.Farm:AddSection("Quest Routing")
 
 QuestOnlySection:AddParagraph({
-    Title = "Combat Tasks",
-    Content = "Navigation, NPC interaction, locations, chests and life-skill tasks are automated. Combat tasks pause for manual completion."
+    Title = "Integrated Quest Planner",
+    Content = "Existing quests are always processed first. If none are active, SON HUB uses the game's RecommendedQuest for the current player level and routes to its quest giver."
+})
+
+QuestOnlySection:AddButton({
+    Title = "Quest Planner Status",
+    Callback = function()
+        notify(
+            "Quest Planner",
+            QuestPlannerService.GetSummary(),
+            8
+        )
+    end,
 })
 
 -- ============================================================
@@ -7617,6 +8013,66 @@ bindToggle(
 )
 
 MiningSection:AddButton({
+    Title = "Go To Selected Ore",
+    Description = "Finds the selected/quest-required ore and moves to it using the SON HUB mover.",
+    Callback = function()
+        local ore =
+            MiningQTEService.FindOre()
+
+        if not ore then
+            notify(
+                "Mining",
+                "No matching ore is currently client-visible.",
+                5
+            )
+            return
+        end
+
+        Runtime.MiningTarget = ore
+
+        if FarmMovement then
+            FarmMovement.GoNear(
+                ore,
+                2.4,
+                3.5
+            )
+        else
+            PlatformTransport.MoveNear(ore)
+        end
+
+        notify(
+            "Mining",
+            "Moving to " .. tostring(oreName(ore)),
+            4
+        )
+    end,
+})
+
+MiningSection:AddButton({
+    Title = "Equip Pickaxe",
+    Callback = function()
+        local pickaxe = findPickaxe()
+
+        if not pickaxe then
+            notify(
+                "Mining",
+                "No Pickaxe detected in the current hotbar.",
+                5
+            )
+            return
+        end
+
+        HotbarService.Press(pickaxe)
+
+        notify(
+            "Mining",
+            "Equipped: " .. tostring(pickaxe.Title),
+            3
+        )
+    end,
+})
+
+MiningSection:AddButton({
     Title = "Mining State",
     Callback = function()
         notify(
@@ -7740,6 +8196,53 @@ bindToggle(
         Config.AntiAFK = value
     end
 )
+
+local NPCNavigationSection =
+    Tabs.Player:AddSection("NPC Navigation")
+
+NPCNavigationSection:AddButton({
+    Title = "Fishing NPC — Fisherman Jack",
+    Description = "Move to the client-visible fishing NPC.",
+    Callback = function()
+        NPCNavigator.GoTo(
+            "Fishing NPC — Fisherman Jack"
+        )
+    end,
+})
+
+NPCNavigationSection:AddButton({
+    Title = "Blacksmith — Shinozaki",
+    Callback = function()
+        NPCNavigator.GoTo(
+            "Blacksmith — Shinozaki"
+        )
+    end,
+})
+
+NPCNavigationSection:AddButton({
+    Title = "Merchant",
+    Callback = function()
+        NPCNavigator.GoTo("Merchant")
+    end,
+})
+
+NPCNavigationSection:AddButton({
+    Title = "Miner — Song Jil Wu",
+    Callback = function()
+        NPCNavigator.GoTo(
+            "Miner — Song Jil Wu"
+        )
+    end,
+})
+
+NPCNavigationSection:AddButton({
+    Title = "Miner — Song Kim Wu",
+    Callback = function()
+        NPCNavigator.GoTo(
+            "Miner — Song Kim Wu"
+        )
+    end,
+})
 
 -- ============================================================
 -- Quest
