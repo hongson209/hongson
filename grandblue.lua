@@ -14,7 +14,7 @@
       - Large Workspace scan occurs once; caches update incrementally.
 ]]
 
-local VERSION = "12.0.0"
+local VERSION = "12.1.0"
 local EXPECTED_PLACE_ID = 118635363908336
 local FLUENT_URL =
     "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
@@ -302,6 +302,7 @@ local Runtime = {
     DialogueQuestNames = setmetatable({}, {__mode = "k"}),
     Ores = setmetatable({}, {__mode = "k"}),
     DigSpots = setmetatable({}, {__mode = "k"}),
+    WorldMarkers = setmetatable({}, {__mode = "k"}),
 
     IndexReady = false,
 
@@ -319,6 +320,11 @@ local Runtime = {
         LastResolverRefresh = 0,
         NoMobSince = 0,
         LastAnchorRefresh = 0,
+        InteractionNPC = nil,
+        InteractionPrompt = nil,
+        InteractionArrivedAt = 0,
+        PromptAttemptAt = 0,
+        PromptAttemptCount = 0,
     },
 
     FarmMovePart = nil,
@@ -743,6 +749,11 @@ function RuntimeIndex.Register(instance)
         return
     end
 
+    if instance:IsA("BillboardGui") then
+        Runtime.WorldMarkers[instance] = true
+        return
+    end
+
     if instance:IsA("BasePart") then
         local parent = instance.Parent
         if parent and lower(parent.Name):find("digspots", 1, true) then
@@ -795,6 +806,7 @@ function RuntimeIndex.Unregister(instance)
     Runtime.DialogueQuestNames[instance] = nil
     Runtime.Ores[instance] = nil
     Runtime.DigSpots[instance] = nil
+    Runtime.WorldMarkers[instance] = nil
 end
 
 function RuntimeIndex.Rebuild()
@@ -805,6 +817,7 @@ function RuntimeIndex.Rebuild()
     table.clear(Runtime.DialogueNPCs)
     table.clear(Runtime.DialogueQuestNames)
     table.clear(Runtime.Ores)
+    table.clear(Runtime.WorldMarkers)
 
     local descendants = Workspace:GetDescendants()
 
@@ -2597,6 +2610,19 @@ local function cacheClaimButton(object)
     end
 end
 
+local function cacheWorldMarker(object)
+    if object
+        and object:IsA("BillboardGui")
+        and not isScriptTemplateDescendant(object) then
+        Runtime.WorldMarkers[object] = true
+    end
+end
+
+local function cacheGuiObject(object)
+    cacheClaimButton(object)
+    cacheWorldMarker(object)
+end
+
 local function initGuiCaches()
     local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not playerGui then
@@ -2606,16 +2632,17 @@ local function initGuiCaches()
     local descendants = playerGui:GetDescendants()
 
     for index, object in ipairs(descendants) do
-        cacheClaimButton(object)
+        cacheGuiObject(object)
 
         if index % 4000 == 0 then
             task.wait()
         end
     end
 
-    connect(playerGui.DescendantAdded, cacheClaimButton)
+    connect(playerGui.DescendantAdded, cacheGuiObject)
     connect(playerGui.DescendantRemoving, function(object)
         Runtime.ClaimButtons[object] = nil
+        Runtime.WorldMarkers[object] = nil
     end)
 end
 
@@ -2692,6 +2719,19 @@ function InteractionService.FindPromptNear(object, desiredKind)
         return nil
     end
 
+    if object and object:IsA("Model") then
+        for _, candidate in ipairs(object:GetDescendants()) do
+            if candidate:IsA("ProximityPrompt")
+                and candidate.Enabled
+                and (
+                    not desiredKind
+                    or promptKind(candidate) == desiredKind
+                ) then
+                return candidate
+            end
+        end
+    end
+
     local best
     local bestDistance
 
@@ -2758,9 +2798,35 @@ local function dialogueUI()
     return playerGui and playerGui:FindFirstChild("DialogueUI")
 end
 
-local function dialogueIsOpen()
+local function dialogueHasVisibleResponse()
     local ui = dialogueUI()
-    return ui and (not ui:IsA("ScreenGui") or ui.Enabled)
+    if not ui then
+        return false
+    end
+
+    if ui:IsA("ScreenGui") and not ui.Enabled then
+        return false
+    end
+
+    for _, object in ipairs(ui:GetDescendants()) do
+        if object:IsA("ImageButton")
+            and not isScriptTemplateDescendant(object)
+            and isOnScreen(object) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function dialogueIsOpen(npc)
+    if npc
+        and npc.Parent
+        and npc:GetAttribute("InConversation") == true then
+        return true
+    end
+
+    return dialogueHasVisibleResponse()
 end
 
 local function scoreDialogueButton(button, questName)
@@ -2805,8 +2871,8 @@ local function scoreDialogueButton(button, questName)
     return score
 end
 
-function InteractionService.ProcessDialogue(questName)
-    if not Config.AutoDialogue or not dialogueIsOpen() then
+function InteractionService.ProcessDialogue(questName, npc)
+    if not Config.AutoDialogue or not dialogueIsOpen(npc) then
         return false
     end
 
@@ -2876,26 +2942,64 @@ function InteractionService.InteractWithQuestNPC(object, questName)
         return false
     end
 
-    if dialogueIsOpen() then
-        return InteractionService.ProcessDialogue(questName)
-    end
+    local npc = object:IsA("Model")
+        and object
+        or object:FindFirstAncestorWhichIsA("Model")
 
-    if os.clock() - Runtime.LastInteraction < 0.75 then
-        return false
+    if dialogueIsOpen(npc) then
+        return InteractionService.ProcessDialogue(questName, npc)
     end
-
-    Runtime.LastInteraction = os.clock()
 
     local prompt = object:IsA("ProximityPrompt")
         and object
         or InteractionService.FindPromptNear(object, "Dialogue")
 
-    if prompt then
-        InteractionService.FirePrompt(prompt)
+    Runtime.FarmFSM.InteractionPrompt = prompt
+
+    if not prompt then
+        return false
+    end
+
+    local ownRoot = rootPart()
+    local promptPart = objectRoot(prompt)
+    if not ownRoot or not promptPart then
+        return false
+    end
+
+    local maxDistance = tonumber(prompt.MaxActivationDistance) or 16
+    if (ownRoot.Position - promptPart.Position).Magnitude > math.max(3, maxDistance - 1.5) then
+        return false
+    end
+
+    local now = os.clock()
+    if now - Runtime.FarmFSM.PromptAttemptAt < 0.80 then
+        return false
+    end
+
+    Runtime.FarmFSM.PromptAttemptAt = now
+    Runtime.FarmFSM.PromptAttemptCount += 1
+    Runtime.LastInteraction = now
+
+    -- Manual E is confirmed working in this game. Use the prompt's real key first.
+    local inputOk = pressKey(
+        prompt.KeyboardKeyCode,
+        math.max(0.07, (prompt.HoldDuration or 0) + 0.04)
+    )
+
+    task.wait(0.10)
+    if dialogueIsOpen(npc) then
         return true
     end
 
-    return false
+    -- Executor helper is only fallback because some custom prompts ignore it.
+    if firePromptFn then
+        pcall(function()
+            firePromptFn(prompt, math.max(0, prompt.HoldDuration or 0))
+        end)
+        task.wait(0.08)
+    end
+
+    return inputOk == true or dialogueIsOpen(npc)
 end
 
 -- ============================================================
@@ -4687,6 +4791,85 @@ local function worldTargetCandidateScore(object, wanted)
     return 0
 end
 
+local function worldMarkerText(marker)
+    if not marker or not marker.Parent then
+        return ""
+    end
+
+    local parts = {marker.Name}
+    for _, object in ipairs(marker:GetDescendants()) do
+        if object:IsA("TextLabel") or object:IsA("TextButton") then
+            local value = normalize(object.Text)
+            if value ~= "" then
+                table.insert(parts, value)
+            end
+        end
+    end
+
+    return normalize(table.concat(parts, " "))
+end
+
+local function worldMarkerTarget(marker)
+    if not marker or not marker.Parent then
+        return nil
+    end
+
+    local adornee
+    pcall(function()
+        adornee = marker.Adornee
+    end)
+
+    if adornee then
+        if adornee:IsA("Attachment") then
+            return adornee.Parent
+        end
+        if adornee:IsA("BasePart") or adornee:IsA("Model") then
+            return adornee
+        end
+    end
+
+    if marker.Parent:IsA("Attachment") then
+        return marker.Parent.Parent
+    end
+    if marker.Parent:IsA("BasePart") or marker.Parent:IsA("Model") then
+        return marker.Parent
+    end
+
+    return marker:FindFirstAncestorWhichIsA("Model")
+end
+
+local function findTrackedWorldMarker(name)
+    local wanted = lower(stripRuntimeSuffix(name))
+    if wanted == "" then
+        return nil
+    end
+
+    local best, bestScore, bestDistance = nil, -math.huge, math.huge
+    for marker in pairs(Runtime.WorldMarkers) do
+        if marker and marker.Parent and marker.Enabled then
+            local blob = lower(worldMarkerText(marker))
+            local score = 0
+            if blob == wanted then
+                score = 180
+            elseif blob:find(wanted, 1, true) then
+                score = 145
+            end
+
+            if score > 0 then
+                local target = worldMarkerTarget(marker)
+                if target and objectRoot(target) then
+                    local distance = distanceTo(target)
+                    if score > bestScore or (score == bestScore and distance < bestDistance) then
+                        best, bestScore, bestDistance = target, score, distance
+                    end
+                end
+            end
+        end
+    end
+
+    return best
+end
+
 function WorldTargetService.Find(name)
     local wanted = normalize(name)
     if wanted == "" then
@@ -4701,6 +4884,15 @@ function WorldTargetService.Find(name)
         and cached.Object.Parent
         and os.clock() - cached.At < 3 then
         return cached.Object
+    end
+
+    local trackedMarker = findTrackedWorldMarker(wanted)
+    if trackedMarker then
+        WorldTargetService.Cache[key] = {
+            Object = trackedMarker,
+            At = os.clock(),
+        }
+        return trackedMarker
     end
 
     local prompt = InteractionService.FindPromptByText(
@@ -5154,6 +5346,43 @@ function FarmMovement.GoNear(
     )
 end
 
+function FarmMovement.GetInteractionGoal(object, prompt)
+    local target = objectRoot(prompt) or objectRoot(object)
+    if not target then
+        return nil
+    end
+
+    local maxDistance = prompt and tonumber(prompt.MaxActivationDistance) or 16
+    local desiredDistance = math.clamp(maxDistance * 0.38, 4.5, 6.5)
+
+    local look = target.CFrame.LookVector
+    local flatLook = Vector3.new(look.X, 0, look.Z)
+    if flatLook.Magnitude <= 0.05 then
+        flatLook = Vector3.new(0, 0, -1)
+    else
+        flatLook = flatLook.Unit
+    end
+
+    -- Fixed target-relative point. It does not change as the player approaches.
+    local position = target.Position + flatLook * desiredDistance + Vector3.new(0, 0.15, 0)
+    return yawCFrame(position, target.Position)
+end
+
+function FarmMovement.GoInteract(object, prompt)
+    local goal = FarmMovement.GetInteractionGoal(object, prompt)
+    if not goal then
+        return false
+    end
+
+    local target = objectRoot(prompt) or objectRoot(object)
+    return FarmMovement.Go(
+        goal,
+        false,
+        "interaction",
+        target and target.Position or goal.Position
+    )
+end
+
 function FarmMovement.GoAnchor(anchor)
     if not anchor then
         return false
@@ -5493,83 +5722,83 @@ end
 local function stepQuestNpc(questName, preferredNpc, finalState)
     farmResetRoute(false)
 
-    local npc = resolveQuestNpc(
-        questName,
-        preferredNpc
-    )
+    local fsm = Runtime.FarmFSM
+    local npc = resolveQuestNpc(questName, preferredNpc)
 
     if not npc then
         FarmMovement.Stop(false, true)
-
         local now = os.clock()
-
-        if now - Runtime.FarmFSM.LastResolverRefresh >= 1.5 then
-            Runtime.FarmFSM.LastResolverRefresh = now
+        if now - fsm.LastResolverRefresh >= 1.5 then
+            fsm.LastResolverRefresh = now
             QuestCatalogService.Build()
         end
 
-        farmSetState(
-            "NPC_SEARCH",
-            preferredNpc and preferredNpc ~= ""
-                and preferredNpc
-                or questName
-        )
-
+        fsm.InteractionNPC = nil
+        fsm.InteractionPrompt = nil
+        farmSetState("NPC_SEARCH", preferredNpc and preferredNpc ~= "" and preferredNpc or questName)
         return
     end
 
     Runtime.CurrentTarget = npc
+    local prompt = InteractionService.FindPromptNear(npc, "Dialogue")
+    local targetPart = objectRoot(prompt) or objectRoot(npc)
 
-    local distance = distanceTo(npc)
-
-    if distance > math.max(
-        8,
-        Config.PlatformArrivalDistance + 2
-    ) then
-
-        FarmMovement.GoNear(
-            npc,
-            Config.PlatformNpcHeight,
-            Config.PlatformBackDistance
-        )
-
-        farmSetState(
-            "NPC_TRAVEL",
-            npc.Name
-        )
-
+    if not targetPart then
+        FarmMovement.Stop(false, true)
+        farmSetState("NPC_NO_ROOT", npc.Name)
         return
     end
 
+    if fsm.InteractionNPC ~= npc or fsm.InteractionPrompt ~= prompt then
+        fsm.InteractionNPC = npc
+        fsm.InteractionPrompt = prompt
+        fsm.InteractionArrivedAt = 0
+        fsm.PromptAttemptAt = 0
+        fsm.PromptAttemptCount = 0
+    end
+
+    if dialogueIsOpen(npc) then
+        FarmMovement.Stop(false, true)
+        InteractionService.ProcessDialogue(questName, npc)
+        farmSetState("NPC_DIALOGUE", npc.Name)
+        return
+    end
+
+    local maxActivation = prompt and tonumber(prompt.MaxActivationDistance) or 16
+    local interactionRange = math.clamp(maxActivation - 3, 7, 12)
+    local ownRoot = rootPart()
+    local distance = ownRoot and (ownRoot.Position - targetPart.Position).Magnitude or math.huge
+
+    if distance > interactionRange then
+        fsm.InteractionArrivedAt = 0
+        FarmMovement.GoInteract(npc, prompt)
+        farmSetState("NPC_TRAVEL", npc.Name .. " • " .. string.format("%.1f", distance) .. " studs")
+        return
+    end
+
+    -- Release the movement owner before the game's dialogue/camera logic starts.
     FarmMovement.Stop(false, true)
 
-    local fsm = Runtime.FarmFSM
-    local now = os.clock()
-
-    if dialogueIsOpen() then
-        InteractionService.ProcessDialogue(questName)
-
-        farmSetState(
-            "NPC_DIALOGUE",
-            npc.Name
-        )
-
+    if fsm.InteractionArrivedAt == 0 then
+        fsm.InteractionArrivedAt = os.clock()
+        farmSetState("NPC_SETTLE", npc.Name)
         return
     end
 
-    if now - fsm.LastInteraction >= 0.75 then
-        fsm.LastInteraction = now
-        fsm.InteractionAttempts += 1
-
-        InteractionService.InteractWithQuestNPC(
-            npc,
-            questName
-        )
+    if os.clock() - fsm.InteractionArrivedAt < 0.18 then
+        farmSetState("NPC_SETTLE", npc.Name)
+        return
     end
 
+    if not prompt then
+        farmSetState("NPC_NO_PROMPT", npc.Name)
+        return
+    end
+
+    local triggered = InteractionService.InteractWithQuestNPC(npc, questName)
     farmSetState(
-        finalState,
-        npc.Name
+        triggered and "NPC_TRIGGER" or "NPC_PRESS_E",
+        npc.Name .. " • E attempts=" .. tostring(fsm.PromptAttemptCount)
     )
 end
 
@@ -5727,6 +5956,25 @@ local function stepPromptTask(taskData)
     )
 end
 
+local function stableReachGoal(target, standHeight)
+    local part = objectRoot(target)
+    if not part then
+        return nil
+    end
+
+    standHeight = standHeight or 3
+    local look = part.CFrame.LookVector
+    local flatLook = Vector3.new(look.X, 0, look.Z)
+    if flatLook.Magnitude <= 0.05 then
+        flatLook = Vector3.new(0, 0, -1)
+    else
+        flatLook = flatLook.Unit
+    end
+
+    local position = part.Position + Vector3.new(0, standHeight, 0) - flatLook * 2.5
+    return yawCFrame(position, part.Position)
+end
+
 local function stepReachTask(quest, taskData)
     farmResetRoute(false)
 
@@ -5765,32 +6013,46 @@ local function stepReachTask(quest, taskData)
         )
 
     if distanceTo(target) > requiredDistance then
-        FarmMovement.GoNear(
+        local goal = stableReachGoal(
             target,
             target:IsA("Model")
-                and target:FindFirstChildOfClass(
-                    "Humanoid"
-                )
+                and target:FindFirstChildOfClass("Humanoid")
                 and 0.25
-                or 3,
-            2.5
+                or 3
         )
+
+        if goal then
+            FarmMovement.Go(
+                goal,
+                taskData.EventGated == true,
+                "reach",
+                objectRoot(target) and objectRoot(target).Position or goal.Position
+            )
+        end
 
         farmSetState(
             "REACH_TRAVEL",
-            taskData.Target
+            taskData.Target .. (findTrackedWorldMarker(taskData.Target) and " • tracked marker" or "")
         )
 
         return
     end
 
-    FarmMovement.Stop(false, true)
+    if taskData.EventGated then
+        local goal = stableReachGoal(target, 3)
+        if goal then
+            Runtime.FarmMoveHold = true
+            Runtime.FarmMoveHoldCFrame = goal
+        end
+    else
+        FarmMovement.Stop(false, true)
+    end
 
     farmSetState(
         taskData.EventGated
             and "REACH_WAIT_EVENT"
             or "REACH_ARRIVED",
-        taskData.Target
+        taskData.Target .. (findTrackedWorldMarker(taskData.Target) and " • marker locked" or "")
     )
 end
 
@@ -6599,6 +6861,8 @@ local function selfTest()
     add("RecommendedQuest storage", questStorage() ~= nil)
     add("Entities", entitiesFolder() ~= nil)
     add("DialogueNPCs", dialogueRoot() ~= nil)
+    add("Dialogue E input", VirtualInputManager ~= nil)
+    add("World marker cache", Runtime.WorldMarkers ~= nil)
     add("Hotbar", findHotbar() ~= nil)
     add("Quest catalog", #Runtime.QuestCatalog > 0)
     add("Runtime index", Runtime.IndexReady)
