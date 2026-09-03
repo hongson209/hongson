@@ -1,10 +1,7 @@
--- SON HUB v22 | Nexomia guarded bootstrap | hongson
+-- SON HUB v27 | Info + stats rebuild | hongson
 
-local VERSION = "22.0.0"
+local VERSION = "27.0.0"
 local EXPECTED_PLACE_ID = 118635363908336
-local FLUENT_URL =
-    "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
-
 local ENV = _G
 if type(getgenv) == "function" then
     local okEnv, customEnv = pcall(getgenv)
@@ -54,12 +51,16 @@ end
 local firePromptFn = envFunction("fireproximityprompt")
 local fireSignalFn = envFunction("firesignal")
 local clipboardFn = envFunction("setclipboard")
+local hookMetamethodFn = envFunction("hookmetamethod")
+local getNamecallMethodFn = envFunction("getnamecallmethod")
+local newCClosureFn = envFunction("newcclosure")
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local GuiService = game:GetService("GuiService")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local RobloxStats = game:GetService("Stats")
@@ -98,15 +99,97 @@ end
 
 bootMark("services-ready")
 
+-- Snapshot diagnostics only. Do not mutate replicated game data merely to
+-- suppress warnings: doing so can break dialogue or asset state and is not clean.
+local NoiseGuard = {
+    ArchivedSoundIds = {
+        ["rbxassetid://105775129468752"] = true,
+    },
+    MalformedDialogue = 0,
+    ArchivedSounds = 0,
+    SeenDialogue = setmetatable({}, {__mode = "k"}),
+    SeenSounds = setmetatable({}, {__mode = "k"}),
+}
+
+local function sanitizeGenderText(text)
+    if type(text) ~= "string" or not text:find("{Gender:", 1, true) then
+        return text, false
+    end
+
+    local changed = false
+    local result = text:gsub("%{Gender:%s*([^|}]+)%s*|%s*([^}]+)%}", function(first)
+        changed = true
+        local value = tostring(first or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        return value ~= "" and value or "friend"
+    end)
+
+    return result, changed
+end
+
+function NoiseGuard.PatchDialogueObject(object)
+    if not object or not object.Parent or not object:IsA("StringValue") then
+        return false
+    end
+    if NoiseGuard.SeenDialogue[object] then
+        return false
+    end
+
+    local _, malformed = sanitizeGenderText(object.Value)
+    if malformed then
+        NoiseGuard.SeenDialogue[object] = true
+        NoiseGuard.MalformedDialogue += 1
+    end
+    return malformed
+end
+
+function NoiseGuard.PatchSound(object)
+    if not object or not object.Parent or not object:IsA("Sound") then
+        return false
+    end
+    if NoiseGuard.SeenSounds[object] then
+        return false
+    end
+    if NoiseGuard.ArchivedSoundIds[tostring(object.SoundId)] then
+        NoiseGuard.SeenSounds[object] = true
+        NoiseGuard.ArchivedSounds += 1
+        return true
+    end
+    return false
+end
+
+function NoiseGuard.ScanNow()
+    local important = Workspace:FindFirstChild("AA IMPORTANT")
+    local liveDialogue = important and important:FindFirstChild("DialogueNPCs")
+    if liveDialogue then
+        for _, object in ipairs(liveDialogue:GetDescendants()) do
+            NoiseGuard.PatchDialogueObject(object)
+        end
+    end
+
+    local assets = ReplicatedStorage:FindFirstChild("Assets")
+    local sounds = assets and assets:FindFirstChild("Sounds")
+    if sounds then
+        for _, object in ipairs(sounds:GetDescendants()) do
+            NoiseGuard.PatchSound(object)
+        end
+    end
+end
+
+pcall(NoiseGuard.ScanNow)
+bootMark("snapshot-noise-guard")
+
 local Runtime
 
 local ExecutorCaps = {
     Http = false,
     Request = type(requestFn) == "function",
-    VirtualInput = VirtualInputManager ~= nil,
+    VirtualKey = VirtualInputManager ~= nil,
+    VirtualMouse = VirtualInputManager ~= nil or VirtualUser ~= nil,
     FireSignal = type(fireSignalFn) == "function",
     FirePrompt = type(firePromptFn) == "function",
     Clipboard = type(clipboardFn) == "function",
+    HookMetamethod = type(hookMetamethodFn) == "function"
+        and type(getNamecallMethodFn) == "function",
 }
 
 local Compat = {}
@@ -166,39 +249,114 @@ local function markSoftError(bucket, err)
     Runtime.WorkerErrorCount[bucket] = (Runtime.WorkerErrorCount[bucket] or 0) + 1
 end
 
+local CapabilityFailures = {}
+local CapabilityRetryAt = {}
+
+local function canTryCap(name)
+    return ExecutorCaps[name] ~= false
+        or os.clock() >= (CapabilityRetryAt[name] or 0)
+end
+
 local function markCap(name, ok)
-    if ok == false then
+    if ok then
+        ExecutorCaps[name] = true
+        CapabilityFailures[name] = 0
+        CapabilityRetryAt[name] = 0
+    else
+        local failures = (CapabilityFailures[name] or 0) + 1
+        CapabilityFailures[name] = failures
         ExecutorCaps[name] = false
-    elseif ExecutorCaps[name] == nil then
-        ExecutorCaps[name] = ok == true
+        CapabilityRetryAt[name] = os.clock() + math.min(2.0, 0.15 * (2 ^ math.min(4, failures - 1)))
     end
     return ok
 end
 
 function Compat.Key(held, key)
-    if not ExecutorCaps.VirtualInput or not VirtualInputManager or not key then
+    if not VirtualInputManager or not key or not canTryCap("VirtualKey") then
         return false
     end
+
     local ok = pcall(function()
         VirtualInputManager:SendKeyEvent(held, key, false, game)
     end)
-    markCap("VirtualInput", ok)
+    markCap("VirtualKey", ok)
+    return ok
+end
+
+function Compat.ReleaseKey(key)
+    if not key then
+        return false
+    end
+
+    local ok = false
+    if VirtualInputManager then
+        ok = pcall(function()
+            VirtualInputManager:SendKeyEvent(false, key, false, game)
+        end)
+    end
     return ok
 end
 
 function Compat.Mouse(x, y, held)
-    if not ExecutorCaps.VirtualInput or not VirtualInputManager then
-        return false
+    local vimOk = false
+
+    if VirtualInputManager and canTryCap("VirtualMouse") then
+        vimOk = pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, held, game, 0)
+        end)
+        markCap("VirtualMouse", vimOk)
+        if vimOk then
+            return true
+        end
     end
-    local ok = pcall(function()
-        VirtualInputManager:SendMouseButtonEvent(x, y, 0, held, game, 0)
-    end)
-    markCap("VirtualInput", ok)
-    return ok
+
+    -- Some partial-UNC executors expose VirtualInputManager but its mouse
+    -- methods are incomplete. VirtualUser is a safe client-input fallback.
+    if VirtualUser then
+        local point = Vector2.new(tonumber(x) or 0, tonumber(y) or 0)
+        local camera = Workspace.CurrentCamera
+        local cameraCFrame = camera and camera.CFrame or CFrame.new()
+        local vuOk = pcall(function()
+            if held then
+                VirtualUser:Button1Down(point, cameraCFrame)
+            else
+                VirtualUser:Button1Up(point, cameraCFrame)
+            end
+        end)
+        if vuOk then
+            markCap("VirtualMouse", true)
+            return true
+        end
+    end
+
+    markCap("VirtualMouse", false)
+    return false
+end
+
+function Compat.ReleaseMouse(x, y)
+    local released = false
+    x = tonumber(x) or 0
+    y = tonumber(y) or 0
+
+    if VirtualInputManager then
+        released = pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+        end) or released
+    end
+
+    if VirtualUser then
+        local camera = Workspace.CurrentCamera
+        local cameraCFrame = camera and camera.CFrame or CFrame.new()
+        released = pcall(function()
+            VirtualUser:Button1Up(Vector2.new(x, y), cameraCFrame)
+        end) or released
+    end
+
+    return released
 end
 
 function Compat.FireSignal(signal)
-    if not ExecutorCaps.FireSignal or not fireSignalFn or not signal then
+    if not fireSignalFn or not signal or not canTryCap("FireSignal") then
         return false
     end
     local ok = pcall(fireSignalFn, signal)
@@ -207,7 +365,7 @@ function Compat.FireSignal(signal)
 end
 
 function Compat.FirePrompt(prompt, holdDuration)
-    if not ExecutorCaps.FirePrompt or not firePromptFn or not prompt then
+    if not firePromptFn or not prompt or not canTryCap("FirePrompt") then
         return false
     end
     local ok = pcall(
@@ -220,7 +378,7 @@ function Compat.FirePrompt(prompt, holdDuration)
 end
 
 function Compat.Clipboard(text)
-    if not ExecutorCaps.Clipboard or not clipboardFn then
+    if not clipboardFn or not canTryCap("Clipboard") then
         return false
     end
     local ok = pcall(clipboardFn, tostring(text or ""))
@@ -228,72 +386,734 @@ function Compat.Clipboard(text)
     return ok
 end
 
-local function fetchText(url)
-    local okHttp, body = pcall(function()
-        local method = game.HttpGet
-        if type(method) == "function" then
-            return game:HttpGet(url)
-        end
-    end)
+bootMark("native-ui-build")
 
-    if okHttp
-        and type(body) == "string"
-        and #body > 500 then
-        ExecutorCaps.Http = true
-        return body
+local connect, track
+
+local NativeUI = {}
+NativeUI.__index = NativeUI
+NativeUI.RootGui = nil
+NativeUI.Window = nil
+NativeUI.Toasts = {}
+
+local function uiNew(className, props, parent)
+    local object = Instance.new(className)
+    if props then
+        for key, value in pairs(props) do
+            pcall(function()
+                object[key] = value
+            end)
+        end
+    end
+    if parent then
+        object.Parent = parent
+    end
+    return object
+end
+
+local function uiCorner(parent, radius)
+    return uiNew("UICorner", {
+        CornerRadius = UDim.new(0, radius or 8),
+    }, parent)
+end
+
+local function uiStroke(parent, transparency)
+    return uiNew("UIStroke", {
+        Thickness = 1,
+        Transparency = transparency or 0.72,
+    }, parent)
+end
+
+local function uiPadding(parent, left, right, top, bottom)
+    return uiNew("UIPadding", {
+        PaddingLeft = UDim.new(0, left or 8),
+        PaddingRight = UDim.new(0, right or 8),
+        PaddingTop = UDim.new(0, top or 8),
+        PaddingBottom = UDim.new(0, bottom or 8),
+    }, parent)
+end
+
+local function uiList(parent, padding)
+    return uiNew("UIListLayout", {
+        Padding = UDim.new(0, padding or 6),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, parent)
+end
+
+local function attachCanvas(scroller, layout)
+    local function refresh()
+        pcall(function()
+            scroller.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
+        end)
+    end
+    connect(layout:GetPropertyChangedSignal("AbsoluteContentSize"), refresh)
+    refresh()
+end
+
+local function nativeParent()
+    local playerGui = LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if playerGui then
+        return playerGui
+    end
+    return CoreGui
+end
+
+local function createOption(defaultValue)
+    local option = {
+        Value = defaultValue,
+        _callbacks = {},
+    }
+
+    function option:OnChanged(callback)
+        if type(callback) == "function" then
+            table.insert(self._callbacks, callback)
+        end
+        return self
     end
 
-    if type(requestFn) == "function" then
-        local okRequest, response = pcall(requestFn, {
-            Url = url,
-            Method = "GET",
-            Headers = {
-                ["User-Agent"] = "SON-HUB-Nexomia",
-            },
-        })
-
-        if okRequest and type(response) == "table" then
-            local responseBody = response.Body or response.body
-
-            if type(responseBody) == "string"
-                and #responseBody > 500 then
-                return responseBody
+    function option:_emit(value)
+        self.Value = value
+        for _, callback in ipairs(self._callbacks) do
+            local ok, err = safeCall(callback, value)
+            if not ok then
+                markSoftError("UI", err)
             end
         end
     end
 
-    return nil
+    function option:SetValue(value)
+        self:_emit(value)
+    end
+
+    function option:SetValues(values)
+        self.Values = values or {}
+    end
+
+    return option
 end
 
-if type(loadstring) ~= "function" then
-    error("SON HUB: loadstring is unavailable")
+local function labelText(parent, text, size, transparency)
+    return uiNew("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, size or 22),
+        Font = Enum.Font.Gotham,
+        Text = tostring(text or ""),
+        TextSize = 13,
+        TextColor3 = Color3.fromRGB(225, 229, 238),
+        TextTransparency = transparency or 0,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, parent)
 end
 
-bootMark("fluent-fetch")
-local fluentSource = fetchText(FLUENT_URL)
-if type(fluentSource) ~= "string" then
-    error("SON HUB: unable to fetch Fluent with HttpGet/request")
+local function createRow(parent, height)
+    local row = uiNew("Frame", {
+        BackgroundColor3 = Color3.fromRGB(28, 31, 39),
+        BackgroundTransparency = 0.08,
+        Size = UDim2.new(1, -4, 0, height or 42),
+        BorderSizePixel = 0,
+    }, parent)
+    uiCorner(row, 7)
+    uiStroke(row, 0.82)
+    return row
 end
 
-bootMark("fluent-compile")
-local fluentChunk, fluentCompileError = loadstring(fluentSource)
-if type(fluentChunk) ~= "function" then
-    error(
-        "SON HUB: Fluent compile failed: "
-            .. tostring(fluentCompileError)
-    )
+local NativeSection = {}
+NativeSection.__index = NativeSection
+
+function NativeSection:AddToggle(id, data)
+    data = data or {}
+    local option = createOption(data.Default == true)
+    local row = createRow(self.Container, 42)
+    local title = labelText(row, data.Title or id, 42)
+    title.Size = UDim2.new(1, -58, 1, 0)
+    title.Position = UDim2.fromOffset(12, 0)
+
+    local button = uiNew("TextButton", {
+        AutoButtonColor = false,
+        BackgroundColor3 = Color3.fromRGB(57, 62, 74),
+        BorderSizePixel = 0,
+        Size = UDim2.fromOffset(38, 22),
+        Position = UDim2.new(1, -50, 0.5, -11),
+        Text = "",
+    }, row)
+    uiCorner(button, 11)
+
+    local knob = uiNew("Frame", {
+        BackgroundColor3 = Color3.fromRGB(235, 238, 245),
+        BorderSizePixel = 0,
+        Size = UDim2.fromOffset(18, 18),
+        Position = UDim2.fromOffset(2, 2),
+    }, button)
+    uiCorner(knob, 9)
+
+    local function render(value)
+        button.BackgroundColor3 = value and Color3.fromRGB(76, 130, 255) or Color3.fromRGB(57, 62, 74)
+        knob.Position = value and UDim2.fromOffset(18, 2) or UDim2.fromOffset(2, 2)
+    end
+    render(option.Value)
+
+    connect(button.Activated, function()
+        option:_emit(not option.Value)
+        render(option.Value)
+    end)
+
+    local baseSet = option.SetValue
+    function option:SetValue(value)
+        baseSet(self, value == true)
+        render(self.Value)
+    end
+
+    return option
 end
 
-bootMark("fluent-init")
-local okFluent, Fluent = pcall(fluentChunk)
-if not okFluent or type(Fluent) ~= "table" then
-    error(
-        "SON HUB: Fluent init failed: "
-            .. tostring(Fluent)
-    )
+function NativeSection:AddButton(spec)
+    spec = spec or {}
+    local row = createRow(self.Container, 40)
+    local button = uiNew("TextButton", {
+        AutoButtonColor = true,
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        Font = Enum.Font.GothamMedium,
+        Text = tostring(spec.Title or "Button"),
+        TextSize = 13,
+        TextColor3 = Color3.fromRGB(220, 226, 239),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, row)
+    uiPadding(button, 12, 12, 0, 0)
+
+    local lastActivatedAt = 0
+    connect(button.Activated, function()
+        local now = os.clock()
+        if now - lastActivatedAt < 0.18 then
+            return
+        end
+        lastActivatedAt = now
+
+        if type(spec.Callback) == "function" then
+            local ok, err = safeCall(spec.Callback)
+            if not ok then
+                markSoftError("UI", err)
+            end
+        end
+    end)
+
+    return createOption(false)
 end
 
-bootMark("fluent-ready")
+function NativeSection:AddInput(id, spec)
+    spec = spec or {}
+    local option = createOption(spec.Default or "")
+    local row = createRow(self.Container, 58)
+    local title = labelText(row, spec.Title or id, 20)
+    title.Position = UDim2.fromOffset(12, 5)
+    title.Size = UDim2.new(1, -24, 0, 18)
+
+    local box = uiNew("TextBox", {
+        BackgroundColor3 = Color3.fromRGB(20, 23, 30),
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(10, 27),
+        Size = UDim2.new(1, -20, 0, 25),
+        ClearTextOnFocus = false,
+        Font = Enum.Font.Gotham,
+        PlaceholderText = tostring(spec.Placeholder or ""),
+        Text = tostring(spec.Default or ""),
+        TextSize = 12,
+        TextColor3 = Color3.fromRGB(230, 233, 240),
+        PlaceholderColor3 = Color3.fromRGB(120, 126, 140),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, row)
+    uiCorner(box, 6)
+    uiPadding(box, 8, 8, 0, 0)
+
+    connect(box.FocusLost, function(enterPressed)
+        if spec.Finished == false or enterPressed or spec.Finished == true then
+            option:_emit(box.Text)
+            if type(spec.Callback) == "function" then
+                local ok, err = safeCall(spec.Callback, box.Text)
+                if not ok then markSoftError("UI", err) end
+            end
+        end
+    end)
+
+    function option:SetValue(value)
+        value = tostring(value or "")
+        self:_emit(value)
+        box.Text = value
+    end
+
+    return option
+end
+
+function NativeSection:AddSlider(id, data)
+    data = data or {}
+    local minValue = tonumber(data.Min) or 0
+    local maxValue = tonumber(data.Max) or 100
+    local option = createOption(math.clamp(tonumber(data.Default) or minValue, minValue, maxValue))
+    local row = createRow(self.Container, 56)
+    local title = labelText(row, data.Title or id, 22)
+    title.Position = UDim2.fromOffset(12, 3)
+    title.Size = UDim2.new(1, -70, 0, 20)
+
+    local valueLabel = labelText(row, tostring(option.Value), 20)
+    valueLabel.Position = UDim2.new(1, -58, 0, 3)
+    valueLabel.Size = UDim2.fromOffset(46, 20)
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+    local bar = uiNew("Frame", {
+        BackgroundColor3 = Color3.fromRGB(52, 56, 68),
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(12, 34),
+        Size = UDim2.new(1, -24, 0, 6),
+    }, row)
+    uiCorner(bar, 3)
+    local fill = uiNew("Frame", {
+        BackgroundColor3 = Color3.fromRGB(76, 130, 255),
+        BorderSizePixel = 0,
+        Size = UDim2.fromScale(0, 1),
+    }, bar)
+    uiCorner(fill, 3)
+
+    local dragging = false
+    local function setFromX(x, emit)
+        local width = math.max(1, bar.AbsoluteSize.X)
+        local alpha = math.clamp((x - bar.AbsolutePosition.X) / width, 0, 1)
+        local value = minValue + (maxValue - minValue) * alpha
+        local rounding = tonumber(data.Rounding)
+        if rounding == nil or rounding == 0 then
+            value = math.floor(value + 0.5)
+        else
+            local scale = 10 ^ rounding
+            value = math.floor(value * scale + 0.5) / scale
+        end
+        option.Value = value
+        fill.Size = UDim2.fromScale((value - minValue) / math.max(1e-6, maxValue - minValue), 1)
+        valueLabel.Text = tostring(value)
+        if emit and type(data.Callback) == "function" then
+            local ok, err = safeCall(data.Callback, value)
+            if not ok then markSoftError("UI", err) end
+        end
+    end
+
+    local function renderValue(value)
+        local clamped = math.clamp(tonumber(value) or minValue, minValue, maxValue)
+        option.Value = clamped
+        fill.Size = UDim2.fromScale((clamped - minValue) / math.max(1e-6, maxValue - minValue), 1)
+        valueLabel.Text = tostring(clamped)
+    end
+    renderValue(option.Value)
+
+    connect(bar.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            setFromX(input.Position.X, true)
+        end
+    end)
+    connect(UserInputService.InputChanged, function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            setFromX(input.Position.X, true)
+        end
+    end)
+    connect(UserInputService.InputEnded, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    function option:SetValue(value)
+        renderValue(value)
+        if type(data.Callback) == "function" then
+            local ok, err = safeCall(data.Callback, self.Value)
+            if not ok then markSoftError("UI", err) end
+        end
+    end
+
+    return option
+end
+
+function NativeSection:AddDropdown(id, data)
+    data = data or {}
+    local values = data.Values or {}
+    local index = math.clamp(tonumber(data.Default) or 1, 1, math.max(1, #values))
+    local option = createOption(values[index])
+    option.Values = values
+    local row = createRow(self.Container, 44)
+    local title = labelText(row, data.Title or id, 44)
+    title.Position = UDim2.fromOffset(12, 0)
+    title.Size = UDim2.new(0.48, -12, 1, 0)
+
+    local button = uiNew("TextButton", {
+        BackgroundColor3 = Color3.fromRGB(20, 23, 30),
+        BorderSizePixel = 0,
+        Position = UDim2.new(0.48, 0, 0.5, -14),
+        Size = UDim2.new(0.52, -10, 0, 28),
+        Font = Enum.Font.Gotham,
+        Text = tostring(option.Value or "None"),
+        TextSize = 12,
+        TextColor3 = Color3.fromRGB(220, 225, 235),
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+    uiCorner(button, 6)
+
+    local popup
+    local function closePopup()
+        if popup then
+            popup:Destroy()
+            popup = nil
+        end
+    end
+
+    local function choose(value)
+        option:_emit(value)
+        button.Text = tostring(value or "None")
+        closePopup()
+    end
+
+    connect(button.Activated, function()
+        if popup then
+            closePopup()
+            return
+        end
+        popup = uiNew("ScrollingFrame", {
+            BackgroundColor3 = Color3.fromRGB(22, 25, 32),
+            BorderSizePixel = 0,
+            Position = UDim2.new(0.48, 0, 1, 2),
+            Size = UDim2.new(0.52, -10, 0, math.min(150, math.max(34, #option.Values * 30))),
+            CanvasSize = UDim2.new(),
+            ScrollBarThickness = 3,
+            ZIndex = 40,
+        }, row)
+        uiCorner(popup, 6)
+        local layout = uiList(popup, 2)
+        uiPadding(popup, 4, 4, 4, 4)
+        for _, value in ipairs(option.Values) do
+            local entryValue = value
+            local entry = uiNew("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -8, 0, 26),
+                Font = Enum.Font.Gotham,
+                Text = tostring(entryValue),
+                TextSize = 12,
+                TextColor3 = Color3.fromRGB(218, 223, 234),
+                ZIndex = 41,
+            }, popup)
+            connect(entry.Activated, function()
+                choose(entryValue)
+            end)
+        end
+        attachCanvas(popup, layout)
+    end)
+
+    function option:SetValues(newValues)
+        self.Values = newValues or {}
+        local stillExists = false
+        for _, value in ipairs(self.Values) do
+            if value == self.Value then
+                stillExists = true
+                break
+            end
+        end
+
+        if not stillExists then
+            local replacement = self.Values[1]
+            self:_emit(replacement)
+            button.Text = tostring(replacement or "None")
+        else
+            button.Text = tostring(self.Value or "None")
+        end
+        closePopup()
+    end
+
+    function option:SetValue(value)
+        choose(value)
+    end
+
+    return option
+end
+
+local NativeTab = {}
+NativeTab.__index = NativeTab
+
+function NativeTab:AddSection(title)
+    local header = labelText(self.Container, title, 28)
+    header.Font = Enum.Font.GothamBold
+    header.TextSize = 13
+    header.TextColor3 = Color3.fromRGB(150, 164, 195)
+    header.LayoutOrder = self.NextOrder
+    self.NextOrder += 1
+
+    local holder = uiNew("Frame", {
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 0),
+        LayoutOrder = self.NextOrder,
+    }, self.Container)
+    self.NextOrder += 1
+    local layout = uiList(holder, 6)
+
+    return setmetatable({
+        Container = holder,
+        Layout = layout,
+    }, NativeSection)
+end
+
+local NativeWindow = {}
+NativeWindow.__index = NativeWindow
+
+function NativeWindow:AddTab(spec)
+    spec = spec or {}
+    local index = #self.Tabs + 1
+    local tabButton = uiNew("TextButton", {
+        AutoButtonColor = false,
+        BackgroundColor3 = Color3.fromRGB(27, 30, 38),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, -12, 0, 34),
+        Font = Enum.Font.GothamMedium,
+        Text = tostring(spec.Title or ("Tab " .. index)),
+        TextSize = 12,
+        TextColor3 = Color3.fromRGB(160, 166, 180),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, self.Sidebar)
+    uiPadding(tabButton, 12, 8, 0, 0)
+    uiCorner(tabButton, 7)
+
+    local page = uiNew("ScrollingFrame", {
+        Active = true,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Size = UDim2.fromScale(1, 1),
+        CanvasSize = UDim2.new(),
+        ScrollBarThickness = 3,
+        Visible = false,
+    }, self.Content)
+    uiPadding(page, 12, 12, 10, 12)
+    local layout = uiList(page, 7)
+    attachCanvas(page, layout)
+
+    local tab = setmetatable({
+        Title = spec.Title,
+        Button = tabButton,
+        Container = page,
+        Layout = layout,
+        NextOrder = 1,
+    }, NativeTab)
+    table.insert(self.Tabs, tab)
+
+    connect(tabButton.Activated, function()
+        self:SelectTab(index)
+    end)
+
+    if index == 1 then
+        self:SelectTab(1)
+    end
+    return tab
+end
+
+function NativeWindow:SelectTab(index)
+    index = tonumber(index) or 1
+    for i, tab in ipairs(self.Tabs) do
+        local active = i == index
+        tab.Container.Visible = active
+        tab.Button.BackgroundTransparency = active and 0.05 or 1
+        tab.Button.BackgroundColor3 = active and Color3.fromRGB(42, 48, 61) or Color3.fromRGB(27, 30, 38)
+        tab.Button.TextColor3 = active and Color3.fromRGB(235, 238, 245) or Color3.fromRGB(160, 166, 180)
+    end
+end
+
+function NativeUI:CreateWindow(spec)
+    spec = spec or {}
+    if self.RootGui then
+        pcall(function() self.RootGui:Destroy() end)
+        self.RootGui = nil
+    end
+
+    local parent = nativeParent()
+    if not parent then
+        return nil
+    end
+
+    local gui = uiNew("ScreenGui", {
+        Name = "SON_HUB_NATIVE",
+        ResetOnSpawn = false,
+        IgnoreGuiInset = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+        DisplayOrder = 50,
+    }, parent)
+    self.RootGui = gui
+    track(gui)
+
+    local panel = uiNew("Frame", {
+        Active = true,
+        BackgroundColor3 = Color3.fromRGB(18, 20, 26),
+        BorderSizePixel = 0,
+        Position = UDim2.new(0.5, -360, 0.5, -260),
+        Size = UDim2.fromOffset(720, 520),
+    }, gui)
+    uiCorner(panel, 10)
+    uiStroke(panel, 0.62)
+
+    local header = uiNew("Frame", {
+        Active = true,
+        BackgroundColor3 = Color3.fromRGB(21, 24, 31),
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 50),
+    }, panel)
+    uiCorner(header, 10)
+
+    local title = labelText(header, spec.Title or ("SON HUB " .. VERSION), 24)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 14
+    title.Position = UDim2.fromOffset(16, 6)
+    title.Size = UDim2.new(1, -80, 0, 22)
+    local sub = labelText(header, spec.SubTitle or "Nexomia", 18, 0.25)
+    sub.TextSize = 11
+    sub.Position = UDim2.fromOffset(16, 27)
+    sub.Size = UDim2.new(1, -80, 0, 16)
+
+    local minimize = uiNew("TextButton", {
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -44, 0, 8),
+        Size = UDim2.fromOffset(34, 30),
+        Font = Enum.Font.GothamBold,
+        Text = "—",
+        TextSize = 16,
+        TextColor3 = Color3.fromRGB(188, 193, 205),
+    }, header)
+
+    local body = uiNew("Frame", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(0, 50),
+        Size = UDim2.new(1, 0, 1, -50),
+    }, panel)
+
+    local sidebar = uiNew("Frame", {
+        BackgroundColor3 = Color3.fromRGB(21, 24, 31),
+        BorderSizePixel = 0,
+        Size = UDim2.new(0, 150, 1, 0),
+    }, body)
+    uiPadding(sidebar, 6, 6, 8, 8)
+    uiList(sidebar, 4)
+
+    local content = uiNew("Frame", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(150, 0),
+        Size = UDim2.new(1, -150, 1, 0),
+        ClipsDescendants = false,
+    }, body)
+
+    local window = setmetatable({
+        Gui = gui,
+        Panel = panel,
+        Header = header,
+        Sidebar = sidebar,
+        Content = content,
+        Tabs = {},
+        Body = body,
+        Minimized = false,
+    }, NativeWindow)
+    self.Window = window
+
+    local dragStart
+    local startPos
+    local dragging = false
+    connect(header.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = panel.Position
+        end
+    end)
+    connect(UserInputService.InputChanged, function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    connect(UserInputService.InputEnded, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    local function setMinimized(value)
+        window.Minimized = value == true
+        body.Visible = not window.Minimized
+        panel.Size = window.Minimized and UDim2.fromOffset(720, 50) or UDim2.fromOffset(720, 520)
+    end
+    connect(minimize.Activated, function()
+        setMinimized(not window.Minimized)
+    end)
+    connect(UserInputService.InputBegan, function(input, processed)
+        if not processed and input.KeyCode == Enum.KeyCode.LeftControl then
+            setMinimized(not window.Minimized)
+        end
+    end)
+
+    return window
+end
+
+function NativeUI:Notify(spec)
+    spec = spec or {}
+    local gui = self.RootGui
+    if not gui or not gui.Parent then
+        pcall(function()
+            print("[SON HUB] " .. tostring(spec.Title or "Notice") .. ": " .. tostring(spec.Content or ""))
+        end)
+        return
+    end
+
+    local toast = uiNew("Frame", {
+        BackgroundColor3 = Color3.fromRGB(23, 26, 34),
+        BorderSizePixel = 0,
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -14, 0, 14 + (#self.Toasts * 74)),
+        Size = UDim2.fromOffset(310, 64),
+        ZIndex = 100,
+    }, gui)
+    uiCorner(toast, 8)
+    uiStroke(toast, 0.7)
+    local title = labelText(toast, spec.Title or "SON HUB", 20)
+    title.Position = UDim2.fromOffset(10, 7)
+    title.Size = UDim2.new(1, -20, 0, 18)
+    title.Font = Enum.Font.GothamBold
+    title.ZIndex = 101
+    local content = labelText(toast, spec.Content or "", 30, 0.08)
+    content.Position = UDim2.fromOffset(10, 27)
+    content.Size = UDim2.new(1, -20, 0, 30)
+    content.TextWrapped = true
+    content.TextSize = 11
+    content.ZIndex = 101
+    table.insert(self.Toasts, toast)
+
+    task.delay(math.max(1, tonumber(spec.Duration) or 3), function()
+        for i, item in ipairs(self.Toasts) do
+            if item == toast then
+                table.remove(self.Toasts, i)
+                break
+            end
+        end
+        pcall(function() toast:Destroy() end)
+        for i, item in ipairs(self.Toasts) do
+            pcall(function()
+                item.Position = UDim2.new(1, -14, 0, 14 + ((i - 1) * 74))
+            end)
+        end
+    end)
+end
+
+function NativeUI:Destroy()
+    if self.RootGui then
+        pcall(function() self.RootGui:Destroy() end)
+    end
+    self.RootGui = nil
+    self.Window = nil
+    table.clear(self.Toasts)
+end
+
+local UIFramework = NativeUI
+bootMark("native-ui-ready")
+
 
 
 local Core = {
@@ -312,6 +1132,7 @@ local Config = {
     AutoTurnIn = true,
     AutoDialogue = true,
     AutoClaim = true,
+    DirectQuest = true,
 
     -- Farm
     FarmMode = "Smart Quest",
@@ -401,6 +1222,11 @@ local Config = {
     Noclip = false,
     AntiAFK = true,
 
+    -- Server info / live watch
+    InfoBossNotify = false,
+    InfoEventNotify = false,
+    InfoPollInterval = 2.0,
+
     -- ESP
     CurrentTargetESP = true,
     PlayerESP = false,
@@ -464,6 +1290,8 @@ Runtime = {
         Target = nil,
         InitialTargetDistance = 0,
         PhaseSince = 0,
+        TagAttempts = 0,
+        AggroDeadline = 0,
         Failures = 0,
         Gathered = 0,
         Total = 0,
@@ -484,7 +1312,14 @@ Runtime = {
     LastAttack = 0,
     LastStatsSpend = 0,
     StatsSpendFailures = 0,
+    StatsSpendPending = false,
     StatsSpendStatus = "Idle",
+    StatsSpendAttemptId = 0,
+    StatsPhysicalFallbacks = 0,
+    StatsLastConfirmed = nil,
+
+    InfoLastBossKey = nil,
+    InfoLastEventKey = nil,
 
     CharacterCollisionBackup = setmetatable({}, {__mode = "k"}),
 
@@ -500,6 +1335,7 @@ Runtime = {
     FishingEquippedAt = 0,
     FishingRodCache = nil,
     FishingRodCacheAt = 0,
+    FishingRodReason = "Not checked",
     FishingBaitCache = nil,
     FishingBaitCacheAt = 0,
     FishingLastShakeClick = 0,
@@ -523,6 +1359,7 @@ Runtime = {
     MiningEquipAt = 0,
     MiningTeleportedTarget = nil,
     MiningLastIndexRefresh = 0,
+    MiningIndexRefreshes = 0,
     ProgressLifeSkill = nil,
 
     IslandLandingCache = {},
@@ -537,6 +1374,8 @@ Runtime = {
     QuestToNPCs = {},
 
     LastLevel = nil,
+    ServerHopBusy = false,
+    IndexRefreshBusy = false,
 
     WorkerTicks = {
         Progress = 0,
@@ -553,34 +1392,50 @@ Runtime = {
     LastWorkerErrorNotify = {},
 }
 
-local function connect(signal, callback)
+connect = function(signal, callback)
     if not signal or type(callback) ~= "function" then
         return nil
     end
 
-    local connection = signal:Connect(function(...)
-        local ok, result = safeCall(callback, ...)
-        if not ok then
-            markSoftError("Events", result)
-        end
+    local okConnect, connection = pcall(function()
+        return signal:Connect(function(...)
+            local ok, result = safeCall(callback, ...)
+            if not ok then
+                markSoftError("Events", result)
+            end
+        end)
     end)
+
+    if not okConnect or not connection then
+        markSoftError("Events", connection or "signal connect failed")
+        return nil
+    end
 
     table.insert(Core.Connections, connection)
     return connection
 end
 
-local function track(instance)
+track = function(instance)
     table.insert(Core.Instances, instance)
     return instance
 end
 
+connect(Workspace.DescendantAdded, function(object)
+    NoiseGuard.PatchDialogueObject(object)
+end)
+
+connect(ReplicatedStorage.DescendantAdded, function(object)
+    NoiseGuard.PatchDialogueObject(object)
+    NoiseGuard.PatchSound(object)
+end)
+
 local function notify(title, description, duration)
-    if not Fluent then
+    if not UIFramework then
         return
     end
 
     pcall(function()
-        Fluent:Notify({
+        UIFramework:Notify({
             Title = tostring(title or "SON HUB"),
             Content = tostring(description or ""),
             Duration = tonumber(duration) or 3,
@@ -736,17 +1591,48 @@ local function isScriptTemplateDescendant(object)
     return false
 end
 
+local function guiScreenPosition(guiObject)
+    if not guiObject or not guiObject:IsA("GuiObject") then
+        return nil
+    end
+
+    local pos = guiObject.AbsolutePosition
+    local screen = guiObject:FindFirstAncestorWhichIsA("ScreenGui")
+
+    if screen and screen.IgnoreGuiInset == false and GuiService then
+        local ok, topLeftInset = pcall(function()
+            local topLeft = GuiService:GetGuiInset()
+            return topLeft
+        end)
+        if ok and typeof(topLeftInset) == "Vector2" then
+            pos += topLeftInset
+        end
+    end
+
+    return pos
+end
+
+local function guiClickPoint(guiObject)
+    local pos = guiScreenPosition(guiObject)
+    if not pos then
+        return nil
+    end
+    local size = guiObject.AbsoluteSize
+    return Vector2.new(pos.X + size.X / 2, pos.Y + size.Y / 2)
+end
+
 local function isOnScreen(guiObject)
     if not guiObject or not guiObject:IsA("GuiObject") or not isGuiVisible(guiObject) then
         return false
     end
 
-    local pos = guiObject.AbsolutePosition
+    local pos = guiScreenPosition(guiObject)
     local size = guiObject.AbsoluteSize
     local camera = Workspace.CurrentCamera
     local viewport = camera and camera.ViewportSize or Vector2.new(1920, 1080)
 
-    return size.X > 0
+    return pos ~= nil
+        and size.X > 0
         and size.Y > 0
         and pos.X + size.X >= 0
         and pos.Y + size.Y >= 0
@@ -782,19 +1668,15 @@ local function pressKey(key, holdTime)
         return false
     end
     task.wait(holdTime)
-    return Compat.Key(false, key)
+    return Compat.Key(false, key) or Compat.ReleaseKey(key)
 end
 
 local function mouseClickAt(x, y)
-    if not VirtualInputManager then
-        return false
-    end
-
     if not Compat.Mouse(x, y, true) then
         return false
     end
     task.wait(0.025)
-    return Compat.Mouse(x, y, false)
+    return Compat.Mouse(x, y, false) or Compat.ReleaseMouse(x, y)
 end
 
 local function mouseClickCenter()
@@ -804,10 +1686,6 @@ local function mouseClickCenter()
 end
 
 local function mouseButtonAt(x, y, held)
-    if not VirtualInputManager then
-        return false
-    end
-
     return Compat.Mouse(x, y, held)
 end
 
@@ -818,8 +1696,27 @@ local function screenPointOf(object)
         return nil
     end
 
-    local point, visible = camera:WorldToViewportPoint(part.Position)
-    if not visible or point.Z <= 0 then
+    -- Virtual mouse input uses screen coordinates. WorldToViewportPoint omits
+    -- the CoreGui inset, which is exactly the ~58 px offset present in this
+    -- game's snapshot. Prefer WorldToScreenPoint so mining/world M1 is aimed
+    -- at the same coordinate space as QTE button clicks.
+    local okScreen, point, visible = pcall(function()
+        return camera:WorldToScreenPoint(part.Position)
+    end)
+
+    if not okScreen then
+        point, visible = camera:WorldToViewportPoint(part.Position)
+        if visible and point.Z > 0 and GuiService then
+            local okInset, topLeft = pcall(function()
+                return GuiService:GetGuiInset()
+            end)
+            if okInset and typeof(topLeft) == "Vector2" then
+                point = Vector3.new(point.X + topLeft.X, point.Y + topLeft.Y, point.Z)
+            end
+        end
+    end
+
+    if not visible or not point or point.Z <= 0 then
         return nil
     end
 
@@ -831,21 +1728,29 @@ local function clickButton(button, allowHiddenSignal)
         return false
     end
 
-    if Compat.FireSignal(button.Activated) then
-        return true
-    end
-
-    if allowHiddenSignal ~= true and not isGuiVisible(button) then
+    local interactable = true
+    pcall(function()
+        interactable = button.Interactable ~= false
+    end)
+    if not interactable then
         return false
     end
 
-    if not isOnScreen(button) then
-        return false
+    -- Prefer a real screen click whenever the button is visible. On Nexomia,
+    -- firesignal can return without throwing even when the game handler did not
+    -- actually run; using it first created false-positive "clicked" states.
+    if isOnScreen(button) then
+        local point = guiClickPoint(button)
+        if point and mouseClickAt(point.X, point.Y) then
+            return true
+        end
     end
 
-    local pos = button.AbsolutePosition
-    local size = button.AbsoluteSize
-    return mouseClickAt(pos.X + size.X / 2, pos.Y + size.Y / 2)
+    if allowHiddenSignal == true or isGuiVisible(button) then
+        return Compat.FireSignal(button.Activated)
+    end
+
+    return false
 end
 
 local function clickButtonReliable(button)
@@ -853,29 +1758,22 @@ local function clickButtonReliable(button)
         return false
     end
 
-    if type(fireSignalFn) == "function" then
-        return clickButton(button, true)
+    if isOnScreen(button) then
+        return clickButton(button, false)
     end
 
-    local screen = button:FindFirstAncestorWhichIsA("ScreenGui")
-    local wasEnabled = screen and screen.Enabled
+    -- Hidden menu buttons cannot be physically clicked without changing the
+    -- player's UI. Signal firing is therefore only the hidden-button fallback.
+    return Compat.FireSignal(button.Activated)
+end
 
-    if screen and not wasEnabled then
-        screen.Enabled = true
-        RunService.RenderStepped:Wait()
+local function clickVisibleButton(button)
+    if not button or not button:IsA("GuiButton") or not isOnScreen(button) then
+        return false
     end
 
-    local ok = clickButton(button, false)
-
-    if screen and not wasEnabled then
-        task.defer(function()
-            if screen and screen.Parent then
-                screen.Enabled = false
-            end
-        end)
-    end
-
-    return ok
+    local point = guiClickPoint(button)
+    return point ~= nil and mouseClickAt(point.X, point.Y) or false
 end
 
 -- ============================================================
@@ -1796,6 +2694,9 @@ HotbarService = {
     Slots = {},
     TitleToSlot = {},
     Hotbar = nil,
+    LastPressedSlot = nil,
+    LastPressedTitle = nil,
+    LastPressedAt = 0,
 }
 
 local KEY_BY_SLOT = {
@@ -1948,7 +2849,17 @@ function HotbarService.IsReady(data)
 end
 
 function HotbarService.Press(data)
-    return data and pressKey(data.Key, 0.03) or false
+    if not data then
+        return false
+    end
+
+    local ok = pressKey(data.Key, 0.03)
+    if ok then
+        HotbarService.LastPressedSlot = data.Slot
+        HotbarService.LastPressedTitle = data.Title
+        HotbarService.LastPressedAt = os.clock()
+    end
+    return ok
 end
 
 function HotbarService.RequiresHold(data)
@@ -2089,6 +3000,11 @@ function TargetService.GetLifeState(model)
         return "INVALID"
     end
 
+    if model:GetAttribute("Dead") == true
+        and model:GetAttribute("Ragdolled") == true then
+        return "CORPSE"
+    end
+
     for _, name in ipairs({"Dead", "Died", "IsDead", "Death", "Respawning"}) do
         if model:GetAttribute(name) == true then
             return "DEAD"
@@ -2104,16 +3020,32 @@ function TargetService.GetLifeState(model)
         return "DEAD"
     end
 
-    if model:GetAttribute("Ragdolled") == true
-        and model:GetAttribute("Dead") == true then
-        return "CORPSE"
-    end
-
     return objectRoot(model) and "ALIVE" or "INVALID"
 end
 
 function TargetService.IsAliveNPC(model)
     return TargetService.GetLifeState(model) == "ALIVE"
+end
+
+function TargetService.IsAggroedToLocal(model)
+    if not TargetService.IsAliveNPC(model) then
+        return false
+    end
+
+    local target = model:GetAttribute("Target")
+
+    -- Snapshot evidence shows Target is the exact player/entity name. If the
+    -- attribute exists, trust it instead of falling through to generic combat
+    -- flags (which can be true while the mob is fighting somebody else).
+    if target ~= nil then
+        local current = lower(target)
+        local wanted = lower(LocalPlayer.Name)
+        return current ~= "" and current == wanted
+    end
+
+    -- Compatibility fallback only for entities that do not expose Target.
+    return model:GetAttribute("NPCCombat") == true
+        and model:GetAttribute("PlayerCombat") == true
 end
 
 function TargetService.IsBoss(model)
@@ -2303,42 +3235,59 @@ function TargetService.FindNamedDialogueNPC(name)
 end
 
 function TargetService.GetMobOptions()
-    local set = {
-        ["Nearest Hostile"] = true,
-        ["Boss Only"] = true,
-    }
+    local set = {}
 
+    -- Use persistent MobZone metadata first. A mob being dead/respawning should
+    -- not make its dropdown entry disappear and later cause a false not-found.
+    local important = Workspace:FindFirstChild("AA IMPORTANT")
+    local zonesRoot = important and important:FindFirstChild("MobZones")
+    if zonesRoot then
+        for _, object in ipairs(zonesRoot:GetDescendants()) do
+            if object:IsA("BasePart") and object:GetAttribute("Active") ~= false then
+                local mobName = normalize(object:GetAttribute("Mob") or "")
+                if mobName ~= "" then
+                    set[mobName] = true
+                end
+            end
+        end
+    end
+
+    -- Merge currently live hostile entities so streamed/runtime-only mobs still
+    -- appear even when no MobZone metadata exists for them.
     local folder = entitiesFolder()
     if folder then
         for _, model in ipairs(folder:GetChildren()) do
-            if model:IsA("Model")
-                and not isPlayerEntity(model)
-                and not TargetService.IsDialogueNPC(model) then
-
+            if model:IsA("Model") and TargetService.IsHostile(model) then
                 local name = tostring(
                     model:GetAttribute("NPCType")
                     or model:GetAttribute("NPCName")
                     or stripRuntimeSuffix(model.Name)
                 )
 
-                if name ~= "" then
+                if name ~= ""
+                    and name ~= "Nearest Hostile"
+                    and name ~= "Boss Only" then
                     set[name] = true
                 end
             end
         end
     end
 
-    local result = {}
+    local rows = {}
     for name in pairs(set) do
+        table.insert(rows, name)
+    end
+    table.sort(rows)
+
+    local result = {"Nearest Hostile", "Boss Only"}
+    for _, name in ipairs(rows) do
         table.insert(result, name)
     end
-
-    table.sort(result)
     return result
 end
 
 -- ============================================================
--- Platform transport
+-- Motion
 -- ============================================================
 
 MotionController = {}
@@ -2369,6 +3318,7 @@ Runtime.Motion = {
     AutoRotate = nil,
     Kind = nil,
     Tween = nil,
+    SnapOnArrival = false,
 }
 
 local function motionYawCFrame(position, facePosition)
@@ -2402,7 +3352,7 @@ local function restoreMotionHumanoid()
     Runtime.Motion.AutoRotate = nil
 end
 
-function MotionController.Release(owner, force)
+function MotionController.Release(owner, force, preserveVelocity)
     local motion = Runtime.Motion
 
     if not motion.Owner then
@@ -2423,7 +3373,7 @@ function MotionController.Release(owner, force)
     end
 
     local root = rootPart()
-    if root then
+    if root and not preserveVelocity then
         pcall(function()
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
@@ -2441,6 +3391,7 @@ function MotionController.Release(owner, force)
     motion.HoldGoal = nil
     motion.UpdatedAt = 0
     motion.Kind = nil
+    motion.SnapOnArrival = false
 
     return true
 end
@@ -2465,7 +3416,7 @@ function MotionController.Request(owner, goal, options)
     end
 
     if motion.Owner and motion.Owner ~= owner then
-        MotionController.Release(motion.Owner, true)
+        MotionController.Release(motion.Owner, true, true)
     end
 
     local root = rootPart()
@@ -2511,6 +3462,7 @@ function MotionController.Request(owner, goal, options)
         or Config.PlatformArrivalDistance
     motion.UpdatedAt = os.clock()
     motion.Kind = options.Kind or owner
+    motion.SnapOnArrival = options.SnapOnArrival == true
 
     if motion.Tween then
         pcall(function()
@@ -2583,12 +3535,19 @@ function MotionController.Step(deltaTime)
             end
 
             pcall(function()
+                local finalPosition = motion.SnapOnArrival
+                    and goal.Position
+                    or root.Position
                 root.CFrame = motionYawCFrame(
-                    goal.Position,
+                    finalPosition,
                     motion.FacePosition or goal.Position
                 )
-                root.AssemblyLinearVelocity = Vector3.zero
-                root.AssemblyAngularVelocity = Vector3.zero
+                if root.AssemblyLinearVelocity.Magnitude > 0.75 then
+                    root.AssemblyLinearVelocity = Vector3.zero
+                end
+                if root.AssemblyAngularVelocity.Magnitude > 0.75 then
+                    root.AssemblyAngularVelocity = Vector3.zero
+                end
             end)
 
             motion.Active = false
@@ -2866,8 +3825,7 @@ function MobZoneService.Find(mobName, hintPosition)
     local best, bestDistance
     for _, part in ipairs(rows or {}) do
         if part and part.Parent
-            and part:GetAttribute("Active") ~= false
-            and part:GetAttribute("Spawned") ~= false then
+            and part:GetAttribute("Active") ~= false then
 
             local distance = hintPosition and (part.Position - hintPosition).Magnitude or 0
             if not bestDistance or distance < bestDistance then
@@ -2993,6 +3951,8 @@ function MobGatherService.Reset(reason)
     gather.Target = nil
     gather.InitialTargetDistance = 0
     gather.PhaseSince = 0
+    gather.TagAttempts = 0
+    gather.AggroDeadline = 0
     gather.Failures = 0
     gather.Gathered = 0
     gather.Total = 0
@@ -3152,6 +4112,8 @@ function MobGatherService.Step(wanted)
             and (targetPart.Position - gather.Anchor.Position).Magnitude
             or 0
         gather.State = "TAG_TRAVEL"
+        gather.TagAttempts = 0
+        gather.AggroDeadline = 0
         gather.PhaseSince = now
     end
 
@@ -3195,22 +4157,60 @@ function MobGatherService.Step(wanted)
 
         if distanceTo(target) <= Config.GatherAggroDistance + 1.4
             and TargetService.IsAliveNPC(target) then
+
             MotionController.Release("Combat", true)
-            mouseClickCenter()
-            gather.State = "TAGGED"
+
+            if TargetService.IsAggroedToLocal(target) then
+                gather.State = "RETURN"
+                gather.PhaseSince = now
+                return false, "already aggroed"
+            end
+
+            local clicked = mouseClickCenter()
+            if not clicked then
+                gather.TagAttempts += 1
+                if gather.TagAttempts >= 3 then
+                    gather.Failures += 1
+                    gather.Cooldown[target] = now + 1.5
+                    gather.Target = nil
+                    gather.State = "PICK"
+                    return false, "tag input failed"
+                end
+                return false, "tag input retry"
+            end
+
+            gather.TagAttempts += 1
+            gather.AggroDeadline = now + 0.55
+            gather.State = "WAIT_AGGRO"
             gather.PhaseSince = now
         end
 
         return false, "tagging"
     end
 
-    if gather.State == "TAGGED" then
-        if now - gather.PhaseSince < 0.22 then
-            return false, "tag settle"
+    if gather.State == "WAIT_AGGRO" then
+        if TargetService.IsAggroedToLocal(target) then
+            gather.State = "RETURN"
+            gather.PhaseSince = now
+            return false, "aggro confirmed"
         end
 
-        gather.State = "RETURN"
+        if now < (gather.AggroDeadline or 0) then
+            return false, "confirming aggro"
+        end
+
+        if gather.TagAttempts < 3 then
+            gather.State = "TAG_TRAVEL"
+            gather.PhaseSince = now
+            return false, "retrying tag"
+        end
+
+        gather.Failures += 1
+        gather.Cooldown[target] = now + 2.0
+        gather.Target = nil
+        gather.State = "PICK"
         gather.PhaseSince = now
+        return false, "aggro not confirmed"
     end
 
     if gather.State == "RETURN" then
@@ -3333,6 +4333,409 @@ local function initGuiCaches()
 end
 
 task.spawn(initGuiCaches)
+
+-- ============================================================
+-- Direct quest bridge
+-- Learns a verified outbound quest call from the game's own dialogue flow.
+-- It never guesses a RemoteEvent/RemoteFunction signature.
+-- ============================================================
+
+QuestDirectService = {}
+
+Runtime.QuestDirect = {
+    Installed = false,
+    HookOld = nil,
+    Context = nil,
+    Candidate = nil,
+    Template = nil,
+    ExactTemplates = {},
+    Busy = false,
+    Replaying = false,
+    AttemptAt = 0,
+    BeforeState = nil,
+    TargetQuest = nil,
+    LastResult = "not learned",
+    LastError = nil,
+    Failures = 0,
+}
+
+local DIRECT_QUEST_REMOTE_NAMES = {
+    PromptQuest = true,
+    RunDialogueFunctionOnServer = true,
+    DialogueRemote = true,
+}
+
+local function directRelativePath(root, object)
+    if not root or not object then
+        return nil
+    end
+    local names = {}
+    local current = object
+    while current and current ~= root do
+        table.insert(names, 1, current.Name)
+        current = current.Parent
+    end
+    if current ~= root then
+        return nil
+    end
+    return names
+end
+
+local function directResolvePath(root, names)
+    local current = root
+    for _, name in ipairs(names or {}) do
+        current = current and current:FindFirstChild(name)
+        if not current then
+            return nil
+        end
+    end
+    return current
+end
+
+local function encodeDirectValue(value, context, depth)
+    depth = depth or 0
+    if depth > 4 then
+        return nil, false, false
+    end
+
+    local valueType = typeof(value)
+    if valueType == "string" then
+        if context and context.Name and lower(value) == lower(context.Name) then
+            return {__son = "quest_name"}, true, true
+        end
+        return {__son = "literal", value = value}, true, false
+    elseif valueType == "number" then
+        if context and context.Id ~= nil and tostring(value) == tostring(context.Id) then
+            return {__son = "quest_id"}, true, true
+        end
+        return {__son = "literal", value = value}, true, false
+    elseif valueType == "boolean" or value == nil then
+        return {__son = "literal", value = value}, true, false
+    elseif valueType == "Instance" then
+        if context and context.NPC and value == context.NPC then
+            return {__son = "npc"}, true, true
+        end
+        if context and context.NPC and value:IsDescendantOf(context.NPC) then
+            local path = directRelativePath(context.NPC, value)
+            if path then
+                return {__son = "npc_path", path = path}, true, true
+            end
+        end
+        -- ReplicatedStorage references are stable enough to preserve exactly.
+        if value:IsDescendantOf(ReplicatedStorage) then
+            return {__son = "instance", value = value}, true, false
+        end
+        return nil, false, false
+    elseif valueType == "table" then
+        local result = {__son = "table", values = {}}
+        local dynamic = false
+        for key, child in pairs(value) do
+            local encodedKey, okKey, keyDynamic = encodeDirectValue(key, context, depth + 1)
+            local encodedValue, okValue, valueDynamic = encodeDirectValue(child, context, depth + 1)
+            if not okKey or not okValue then
+                return nil, false, false
+            end
+            table.insert(result.values, {encodedKey, encodedValue})
+            dynamic = dynamic or keyDynamic or valueDynamic
+        end
+        return result, true, dynamic
+    end
+
+    return nil, false, false
+end
+
+local function decodeDirectValue(encoded, context)
+    if type(encoded) ~= "table" then
+        return nil, false
+    end
+    local kind = encoded.__son
+    if kind == "literal" then
+        return encoded.value, true
+    elseif kind == "quest_name" then
+        return context and context.Name or nil, context and context.Name ~= nil
+    elseif kind == "quest_id" then
+        return context and context.Id or nil, context and context.Id ~= nil
+    elseif kind == "npc" then
+        return context and context.NPC or nil, context and context.NPC ~= nil
+    elseif kind == "npc_path" then
+        local value = context and directResolvePath(context.NPC, encoded.path)
+        return value, value ~= nil
+    elseif kind == "instance" then
+        return encoded.value, encoded.value ~= nil and encoded.value.Parent ~= nil
+    elseif kind == "table" then
+        local result = {}
+        for _, pair in ipairs(encoded.values or {}) do
+            local key, okKey = decodeDirectValue(pair[1], context)
+            local value, okValue = decodeDirectValue(pair[2], context)
+            if not okKey or not okValue then
+                return nil, false
+            end
+            result[key] = value
+        end
+        return result, true
+    end
+    return nil, false
+end
+
+local function makeDirectContext(questName, npc)
+    local id
+    local recommended = QuestService.GetRecommended()
+    if recommended and lower(recommended.Name) == lower(questName) then
+        id = recommended.Id
+    else
+        for _, quest in ipairs(QuestService.GetActiveQuests()) do
+            if lower(quest.Name) == lower(questName) then
+                id = quest.Id
+                break
+            end
+        end
+    end
+    return {
+        Name = questName,
+        Id = id,
+        NPC = npc,
+    }
+end
+
+function QuestDirectService.SetContext(questName, npc)
+    if not questName or questName == "" then
+        Runtime.QuestDirect.Context = nil
+        return
+    end
+    Runtime.QuestDirect.Context = makeDirectContext(questName, npc)
+end
+
+function QuestDirectService.Observe(remote, method, args)
+    local state = Runtime.QuestDirect
+    if state.Replaying or not Config.DirectQuest or not state.Context then
+        return
+    end
+    if not remote or not DIRECT_QUEST_REMOTE_NAMES[remote.Name] then
+        return
+    end
+    if method ~= "FireServer" and method ~= "InvokeServer" then
+        return
+    end
+
+    local encodedArgs = {}
+    local dynamic = false
+    for index = 1, args.n do
+        local encoded, ok, isDynamic = encodeDirectValue(args[index], state.Context, 0)
+        if not ok then
+            return
+        end
+        encodedArgs[index] = encoded
+        dynamic = dynamic or isDynamic
+    end
+
+    state.Candidate = {
+        Remote = remote,
+        Method = method,
+        Args = encodedArgs,
+        ArgCount = args.n,
+        Dynamic = dynamic,
+        QuestName = state.Context.Name,
+        BeforeState = QuestService.StateKey(),
+        SeenAt = os.clock(),
+    }
+end
+
+function QuestDirectService.Poll()
+    local state = Runtime.QuestDirect
+    local now = os.clock()
+
+    if state.Candidate then
+        local changed = QuestService.StateKey() ~= state.Candidate.BeforeState
+        if changed then
+            local candidate = state.Candidate
+            if candidate.Dynamic then
+                state.Template = candidate
+            else
+                state.ExactTemplates[lower(candidate.QuestName)] = candidate
+            end
+            state.LastResult = candidate.Dynamic
+                and "learned generic quest call"
+                or "learned exact quest call"
+            state.Candidate = nil
+        elseif now - state.Candidate.SeenAt > 2.0 then
+            state.Candidate = nil
+        end
+    end
+
+    if state.Busy then
+        if QuestService.StateKey() ~= state.BeforeState then
+            state.Busy = false
+            state.Failures = 0
+            state.LastResult = "direct quest accepted"
+            state.LastError = nil
+            return true
+        end
+        if now - state.AttemptAt > 1.35 then
+            state.Busy = false
+            state.Replaying = false
+            state.Failures += 1
+            state.LastResult = "direct call had no quest-state confirmation"
+            return false
+        end
+    end
+
+    return nil
+end
+
+local function resolveDirectNpc(questName)
+    if TargetService and QuestCatalogService then
+        return QuestCatalogService.FindQuestGiver(questName, nil)
+            or TargetService.FindNamedDialogueNPC(questName)
+    end
+    return nil
+end
+
+local function directBuildArgs(template, context)
+    local args = table.create(template.ArgCount or 0)
+    for index = 1, template.ArgCount or 0 do
+        local value, ok = decodeDirectValue(template.Args[index], context)
+        if not ok then
+            return nil, "argument " .. tostring(index) .. " could not be resolved"
+        end
+        args[index] = value
+    end
+    return args
+end
+
+function QuestDirectService.TryAccept(recommended)
+    local state = Runtime.QuestDirect
+    QuestDirectService.Poll()
+
+    if not Config.DirectQuest then
+        return false, "disabled"
+    end
+    if state.Busy then
+        return false, "pending"
+    end
+    if not recommended or not recommended.Name then
+        return false, "missing recommended quest"
+    end
+    if state.Failures >= 2 then
+        return false, "direct quest temporarily disabled after failed verification"
+    end
+
+    local template = state.Template or state.ExactTemplates[lower(recommended.Name)]
+    if not template or not template.Remote or not template.Remote.Parent then
+        return false, state.Installed and "learning" or "hook unavailable"
+    end
+
+    local context = makeDirectContext(
+        recommended.Name,
+        resolveDirectNpc(recommended.Name)
+    )
+    context.Id = recommended.Id or context.Id
+
+    if not template.Dynamic and lower(template.QuestName) ~= lower(recommended.Name) then
+        return false, "exact template belongs to another quest"
+    end
+
+    local args, buildError = directBuildArgs(template, context)
+    if not args then
+        return false, buildError
+    end
+
+    state.Busy = true
+    state.Replaying = true
+    state.AttemptAt = os.clock()
+    state.BeforeState = QuestService.StateKey()
+    state.TargetQuest = recommended.Name
+    state.LastResult = "direct quest call pending"
+
+    task.spawn(function()
+        local ok, result
+        if template.Method == "InvokeServer" and template.Remote:IsA("RemoteFunction") then
+            ok, result = safeCall(template.Remote.InvokeServer, template.Remote, table.unpack(args, 1, template.ArgCount))
+        elseif template.Method == "FireServer" and template.Remote:IsA("RemoteEvent") then
+            ok, result = safeCall(template.Remote.FireServer, template.Remote, table.unpack(args, 1, template.ArgCount))
+        else
+            ok, result = false, "remote/method mismatch"
+        end
+        state.Replaying = false
+        if not ok then
+            state.LastError = tostring(result)
+        end
+    end)
+
+    return false, "pending"
+end
+
+function QuestDirectService.Status()
+    local state = Runtime.QuestDirect
+    return table.concat({
+        "Installed: " .. tostring(state.Installed),
+        "Generic template: " .. tostring(state.Template ~= nil),
+        "Busy: " .. tostring(state.Busy),
+        "Failures: " .. tostring(state.Failures),
+        "Last: " .. tostring(state.LastResult),
+        "Error: " .. tostring(state.LastError or "none"),
+    }, "\n")
+end
+
+function QuestDirectService.Install()
+    local state = Runtime.QuestDirect
+    if state.Installed then
+        return true
+    end
+    if type(hookMetamethodFn) ~= "function" or type(getNamecallMethodFn) ~= "function" then
+        state.LastResult = "hookmetamethod/getnamecallmethod unavailable"
+        return false
+    end
+
+    local oldNamecall
+    local callback = function(self, ...)
+        local method
+        local remoteName
+        pcall(function()
+            method = getNamecallMethodFn()
+            remoteName = self and self.Name or nil
+        end)
+
+        if remoteName and DIRECT_QUEST_REMOTE_NAMES[remoteName] then
+            local packed = table.pack(...)
+            pcall(QuestDirectService.Observe, self, method, packed)
+        end
+
+        if type(oldNamecall) == "function" then
+            return oldNamecall(self, ...)
+        end
+        return nil
+    end
+
+    if type(newCClosureFn) == "function" then
+        local okWrap, wrapped = pcall(newCClosureFn, callback)
+        if okWrap and type(wrapped) == "function" then
+            callback = wrapped
+        end
+    end
+
+    local ok, old = pcall(hookMetamethodFn, game, "__namecall", callback)
+    if not ok or type(old) ~= "function" then
+        state.LastResult = "namecall hook failed"
+        return false
+    end
+
+    oldNamecall = old
+    state.HookOld = old
+    state.Installed = true
+    state.LastResult = "waiting for verified quest call"
+    return true
+end
+
+function QuestDirectService.Uninstall()
+    local state = Runtime.QuestDirect
+    if state.Installed and state.HookOld and type(hookMetamethodFn) == "function" then
+        pcall(hookMetamethodFn, game, "__namecall", state.HookOld)
+    end
+    state.Installed = false
+    state.HookOld = nil
+end
+
+pcall(QuestDirectService.Install)
 
 -- ============================================================
 -- Interaction service
@@ -3660,8 +5063,12 @@ function InteractionService.InteractWithQuestNPC(object, questName)
     Runtime.FarmFSM.PromptAttemptCount += 1
     Runtime.LastInteraction = now
 
-    -- Manual E is confirmed working in this game. Use the prompt's real key first.
-    local inputOk = pressKey(
+    -- Sending input is not proof that the game accepted it. Record the
+    -- quest state and only report success after dialogue opens or quest state
+    -- changes. This prevents false NPC_TRIGGER states on partial-UNC input.
+    local beforeQuestState = QuestService.StateKey()
+
+    pressKey(
         prompt.KeyboardKeyCode,
         math.max(0.07, (prompt.HoldDuration or 0) + 0.04)
     )
@@ -3673,10 +5080,12 @@ function InteractionService.InteractWithQuestNPC(object, questName)
 
     -- Executor helper is only fallback because some custom prompts ignore it.
     if Compat.FirePrompt(prompt, prompt.HoldDuration) then
-        task.wait(0.08)
+        task.wait(0.10)
     end
 
-    return inputOk == true or dialogueIsOpen(npc)
+    local afterQuestState = QuestService.StateKey()
+    return dialogueIsOpen(npc)
+        or afterQuestState ~= beforeQuestState
 end
 
 -- ============================================================
@@ -3687,14 +5096,18 @@ CombatService = {}
 
 local function setBlock(held)
     if Runtime.BlockHeld == held then
-        return
+        return true
     end
 
-    Runtime.BlockHeld = held
+    local ok = Compat.Key(held, Enum.KeyCode.F)
+    if not ok and not held then
+        ok = Compat.ReleaseKey(Enum.KeyCode.F)
+    end
 
-    pcall(function()
-        Compat.Key(held, Enum.KeyCode.F)
-    end)
+    if ok then
+        Runtime.BlockHeld = held
+    end
+    return ok
 end
 
 function CombatService.AimAt(model)
@@ -3705,7 +5118,7 @@ end
 
 function CombatService.AttackStep()
     if not Config.AutoAttack then
-        return false
+        return false, "disabled"
     end
 
     local now = os.clock()
@@ -3713,14 +5126,18 @@ function CombatService.AttackStep()
         1 / math.max(1, Config.AttackRate)
 
     if now - Runtime.LastAttack < minimumDelay then
-        return false
+        return false, "cooldown"
+    end
+
+    -- Do not consume the attack timer if executor input failed; otherwise one
+    -- failed click is incorrectly treated like a successful attack cooldown.
+    local sent = mouseClickCenter()
+    if not sent then
+        return false, "input-failed"
     end
 
     Runtime.LastAttack = now
-
-    -- Generic normal attack only.
-    -- No 1/2/3/4/5/6/7 hotbar skill input in this route.
-    return mouseClickCenter()
+    return true, "sent"
 end
 
 function CombatService.BlockStep()
@@ -3808,10 +5225,12 @@ function StatsService.GetStatPoints()
     local label = statpoint and statpoint:FindFirstChild("StatpointText")
 
     if label and label:IsA("TextLabel") then
-        return tonumber(label.Text:match("(%d+)")) or 0
+        local digits = tostring(label.Text or ""):gsub("[%s,%.]", ""):match("(%d+)")
+        return digits and tonumber(digits) or nil
     end
 
-    return 0
+    -- nil means "unknown / UI not replicated". Zero means a real 0.
+    return nil
 end
 
 function StatsService.GetValues()
@@ -3830,12 +5249,110 @@ function StatsService.GetValues()
                 and radar[name]:FindFirstChild("Number")
 
             values[name] = label
-                and tonumber((label.Text or ""):match("(%d+)"))
+                and tonumber((tostring(label.Text or ""):gsub("[%s,%.]", "")):match("(%d+)"))
                 or 0
         end
     end
 
     return values
+end
+
+local function statButton(stat)
+    local radar = radarFrame()
+    local frame = radar and radar:FindFirstChild(stat or "")
+    local button = frame and frame:FindFirstChild("ImageButton")
+    return button and button:IsA("ImageButton") and button or nil
+end
+
+local function fireStatSignals(button)
+    if not button then
+        return false
+    end
+
+    local sent = false
+    local signals = {
+        button.Activated,
+        button.MouseButton1Click,
+        button.MouseButton1Down,
+        button.MouseButton1Up,
+    }
+
+    for _, signal in ipairs(signals) do
+        if signal and Compat.FireSignal(signal) then
+            sent = true
+        end
+    end
+
+    return sent
+end
+
+local function physicalStatClick(button)
+    if not button or not button.Parent then
+        return false, "button unavailable"
+    end
+
+    local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    local menu = playerGui and playerGui:FindFirstChild("Menu")
+    if not menu or not menu:IsA("ScreenGui") then
+        return false, "menu unavailable"
+    end
+
+    local previousEnabled = menu.Enabled
+    local hubGui = NativeUI and NativeUI.Window and NativeUI.Window.Gui
+    local hubWasEnabled = hubGui and hubGui.Enabled
+
+    if hubGui and hubWasEnabled then
+        hubGui.Enabled = false
+    end
+
+    if not previousEnabled then
+        menu.Enabled = true
+        RunService.RenderStepped:Wait()
+        RunService.RenderStepped:Wait()
+    end
+
+    local ok = clickVisibleButton(button)
+
+    task.defer(function()
+        if not previousEnabled and menu and menu.Parent then
+            menu.Enabled = false
+        end
+        if hubGui and hubGui.Parent and hubWasEnabled then
+            hubGui.Enabled = true
+        end
+    end)
+
+    return ok, ok and "physical click" or "physical click failed"
+end
+
+function StatsService.ClickStat(stat, physicalOnly)
+    local button = statButton(stat)
+    if not button then
+        return false, "Radar button unavailable"
+    end
+
+    if physicalOnly == true then
+        return physicalStatClick(button)
+    end
+
+    if isOnScreen(button) then
+        local clicked = clickVisibleButton(button)
+        return clicked, clicked and "visible click" or "visible click failed"
+    end
+
+    if fireStatSignals(button) then
+        return true, "signal click"
+    end
+
+    return physicalStatClick(button)
+end
+
+local function statsConfirmationDelay()
+    local ping = 0.15
+    pcall(function()
+        ping = math.max(0.05, LocalPlayer:GetNetworkPing())
+    end)
+    return math.clamp(0.30 + ping * 3.0, 0.35, 1.25)
 end
 
 local function autoWeaponBuild()
@@ -3883,8 +5400,8 @@ function StatsService.ChooseStat()
     local totalValue = 0
 
     for _, name in ipairs(STAT_NAMES) do
-        totalWeight = totalWeight + weights[name] or 0
-        totalValue = totalValue + values[name] or 0
+        totalWeight += (weights[name] or 0)
+        totalValue += (values[name] or 0)
     end
 
     local best
@@ -3907,57 +5424,116 @@ function StatsService.ChooseStat()
     return best
 end
 
-function StatsService.SpendOne()
-    if not Config.AutoStats then
+function StatsService.SpendOne(force)
+    local forceOnce = force == true
+    if not Config.AutoStats and not forceOnce then
         Runtime.StatsSpendStatus = "Disabled"
         return false
     end
 
+    if Runtime.StatsSpendPending then
+        Runtime.StatsSpendStatus = "Waiting for confirmation"
+        return false
+    end
+
     local now = os.clock()
-    local backoff = math.min(1.5, (Runtime.StatsSpendFailures or 0) * 0.2)
-    if now - Runtime.LastStatsSpend < Config.StatSpendInterval + backoff then
+    local backoff = math.min(1.0, (Runtime.StatsSpendFailures or 0) * 0.12)
+    if now - Runtime.LastStatsSpend < math.max(0.12, Config.StatSpendInterval + backoff) then
         return false
     end
 
     local before = StatsService.GetStatPoints()
+    if before == nil then
+        Runtime.StatsSpendStatus = "Waiting for Radar/stat points"
+        return false
+    end
     if before <= 0 then
         Runtime.StatsSpendStatus = "No points"
+        Runtime.StatsSpendFailures = 0
         return false
     end
 
     local stat = StatsService.ChooseStat()
-    local radar = radarFrame()
-    local frame = radar and radar:FindFirstChild(stat or "")
-    local button = frame and frame:FindFirstChild("ImageButton")
-
-    if not button or not button:IsA("ImageButton") then
-        Runtime.StatsSpendFailures += 1
-        Runtime.StatsSpendStatus = "Radar button unavailable"
-        Runtime.LastStatsSpend = now
+    if not stat then
+        Runtime.StatsSpendStatus = "No stat target"
         return false
     end
 
     Runtime.LastStatsSpend = now
-    local clicked = clickButtonReliable(button)
+    Runtime.StatsSpendAttemptId += 1
+    local attemptId = Runtime.StatsSpendAttemptId
+
+    local clicked, clickReason = StatsService.ClickStat(stat, false)
     if not clicked then
         Runtime.StatsSpendFailures += 1
-        Runtime.StatsSpendStatus = "Input failed: " .. tostring(stat)
+        Runtime.StatsSpendStatus = "Input failed: " .. tostring(clickReason)
         return false
     end
 
-    Runtime.StatsSpendStatus = "Pending: " .. tostring(stat)
-    task.delay(0.22, function()
-        if not Core.Running then
-            return
+    Runtime.StatsSpendPending = true
+    Runtime.StatsSpendStatus = "Pending " .. tostring(stat) .. " via " .. tostring(clickReason)
+
+    task.spawn(function()
+        local deadline = os.clock() + statsConfirmationDelay()
+        local confirmed = false
+
+        while Core.Running
+            and (Config.AutoStats or forceOnce)
+            and Runtime.StatsSpendAttemptId == attemptId
+            and os.clock() <= deadline do
+
+            local after = StatsService.GetStatPoints()
+            if after ~= nil and after < before then
+                confirmed = true
+                Runtime.StatsSpendFailures = 0
+                Runtime.StatsLastConfirmed = stat
+                Runtime.StatsSpendStatus = "Spent: " .. tostring(stat)
+                break
+            end
+            task.wait(0.08)
         end
 
-        local after = StatsService.GetStatPoints()
-        if after < before then
-            Runtime.StatsSpendFailures = 0
-            Runtime.StatsSpendStatus = "Spent: " .. tostring(stat)
-        else
+        if not confirmed
+            and Core.Running
+            and (Config.AutoStats or forceOnce)
+            and Runtime.StatsSpendAttemptId == attemptId then
+
+            -- Hidden GUI signals are executor-sensitive. If the server did not
+            -- confirm them, briefly expose the real Radar and perform one
+            -- physical click using the exact screen coordinate.
+            local physicalOk, physicalReason = StatsService.ClickStat(stat, true)
+            if physicalOk then
+                Runtime.StatsPhysicalFallbacks += 1
+                Runtime.StatsSpendStatus = "Physical retry: " .. tostring(stat)
+                local physicalDeadline = os.clock() + statsConfirmationDelay()
+
+                while Core.Running
+                    and (Config.AutoStats or forceOnce)
+                    and Runtime.StatsSpendAttemptId == attemptId
+                    and os.clock() <= physicalDeadline do
+
+                    local after = StatsService.GetStatPoints()
+                    if after ~= nil and after < before then
+                        confirmed = true
+                        Runtime.StatsSpendFailures = 0
+                        Runtime.StatsLastConfirmed = stat
+                        Runtime.StatsSpendStatus = "Spent: " .. tostring(stat) .. " (physical fallback)"
+                        break
+                    end
+                    task.wait(0.08)
+                end
+            else
+                Runtime.StatsSpendStatus = "Physical retry failed: " .. tostring(physicalReason)
+            end
+        end
+
+        if not confirmed and Runtime.StatsSpendAttemptId == attemptId then
             Runtime.StatsSpendFailures += 1
             Runtime.StatsSpendStatus = "No server confirmation: " .. tostring(stat)
+        end
+
+        if Runtime.StatsSpendAttemptId == attemptId then
+            Runtime.StatsSpendPending = false
         end
     end)
 
@@ -3966,10 +5542,14 @@ end
 
 function StatsService.GetSnapshot()
     local values = StatsService.GetValues()
+    local points = StatsService.GetStatPoints()
     local rows = {
-        "Points: " .. StatsService.GetStatPoints(),
+        "Points: " .. tostring(points ~= nil and points or "Unavailable"),
         "Build: " .. StatsService.GetBuild(),
         "Status: " .. tostring(Runtime.StatsSpendStatus),
+        "Last confirmed: " .. tostring(Runtime.StatsLastConfirmed or "none"),
+        "Physical fallbacks: " .. tostring(Runtime.StatsPhysicalFallbacks or 0),
+        "Failures: " .. tostring(Runtime.StatsSpendFailures or 0),
     }
 
     for _, name in ipairs(STAT_NAMES) do
@@ -3980,7 +5560,7 @@ function StatsService.GetSnapshot()
 end
 
 -- ============================================================
--- Fishing service + QTE
+-- Fishing
 -- ============================================================
 
 FishingService = {}
@@ -4019,48 +5599,65 @@ local function setFishingState(state, reason)
     Runtime.FishingReason = reason or Runtime.FishingReason
 end
 
-local function setFishingMouseHeld(held)
-    if Runtime.FishingMouseHeld == held then
-        return
+local function setFishingMouseHeld(held, force)
+    if Runtime.FishingMouseHeld == held and not (force and held == false) then
+        return true
     end
-
-    Runtime.FishingMouseHeld = held
 
     local camera = Workspace.CurrentCamera
     local viewport = camera and camera.ViewportSize or Vector2.new(800, 600)
+    local x = viewport.X / 2
+    local y = viewport.Y / 2
 
-    pcall(function()
-        Compat.Mouse(viewport.X / 2, viewport.Y / 2, held)
-    end)
+    local ok = Compat.Mouse(x, y, held)
+    if not held then
+        -- A toggle can be switched off while our bookkeeping says "released"
+        -- even though the executor dropped the previous Button1Up. Force a real
+        -- release on reset/clean so the user's screen cannot remain held.
+        ok = Compat.ReleaseMouse(x, y) or ok
+    end
+
+    if ok then
+        Runtime.FishingMouseHeld = held
+    end
+    return ok
 end
 
 local function releaseFishingKey()
     if not Runtime.FishingKeyHeld then
-        return
+        return true
     end
 
     local key = Runtime.FishingKeyHeld
-    Runtime.FishingKeyHeld = nil
-
-    pcall(function()
-        Compat.Key(false, key)
-    end)
+    local ok = Compat.Key(false, key) or Compat.ReleaseKey(key)
+    if ok then
+        Runtime.FishingKeyHeld = nil
+    end
+    return ok
 end
 
 local function holdFishingKey(key)
     if Runtime.FishingKeyHeld == key then
-        return
+        return true
     end
 
-    releaseFishingKey()
-    Runtime.FishingKeyHeld = key
+    if not releaseFishingKey() then
+        return false
+    end
 
-    pcall(function()
-        Compat.Key(true, key)
-    end)
+    local ok = Compat.Key(true, key)
+    if ok then
+        Runtime.FishingKeyHeld = key
+    end
+    return ok
 end
 
 local function findHotbarRod()
+    local hotbar = findHotbar()
+    if not hotbar then
+        return nil, "Hotbar UI is not client-visible yet"
+    end
+
     HotbarService.Refresh()
 
     for _, data in pairs(HotbarService.Slots) do
@@ -4071,17 +5668,20 @@ local function findHotbarRod()
                 Name = data.Title,
                 Source = "Hotbar",
                 Hotbar = data,
-            }
+            }, "Rod found in hotbar"
         end
     end
 
-    return nil
+    return nil, "No rod in live hotbar"
 end
 
 local function findInventoryRod()
     local inventory = fishInventory()
-    local root = inventory
-        and inventory:FindFirstChild("Inventory")
+    if not inventory then
+        return nil, "FishInventory UI is not client-visible yet"
+    end
+
+    local root = inventory:FindFirstChild("Inventory")
         and inventory.Inventory:FindFirstChild("Inventory")
 
     local rodFrame = root and root:FindFirstChild("RodFrame")
@@ -4091,15 +5691,16 @@ local function findInventoryRod()
 
     if itemName and itemName:IsA("TextLabel") then
         local name = normalize(itemName.Text):gsub("^%[", ""):gsub("%]$", "")
-
-        return {
-            Name = name,
-            Source = "FishInventory",
-            EquipButton = equip,
-        }
+        if name ~= "" then
+            return {
+                Name = name,
+                Source = "FishInventory",
+                EquipButton = equip,
+            }, "Rod found in FishInventory"
+        end
     end
 
-    return nil
+    return nil, "No rod in FishInventory rod frame"
 end
 
 function FishingService.FindRod()
@@ -4111,7 +5712,19 @@ function FishingService.FindRod()
     end
 
     Runtime.FishingRodCacheAt = now
-    Runtime.FishingRodCache = findHotbarRod() or findInventoryRod()
+
+    local hotbarRod, hotbarReason = findHotbarRod()
+    if hotbarRod then
+        Runtime.FishingRodCache = hotbarRod
+        Runtime.FishingRodReason = hotbarReason
+        return hotbarRod
+    end
+
+    local inventoryRod, inventoryReason = findInventoryRod()
+    Runtime.FishingRodCache = inventoryRod
+    Runtime.FishingRodReason = inventoryRod
+        and inventoryReason
+        or (tostring(hotbarReason) .. " | " .. tostring(inventoryReason))
     return Runtime.FishingRodCache
 end
 
@@ -4231,7 +5844,7 @@ function FishingService.ResolveSpot()
     elseif Config.FishingSpotMode == "Anchor Town Pond" then
         local water = largestAnchorTownWater()
         return water and shorePosition(water) or nil,
-            water and "Detected Anchor Town water edge" or "Anchor Town water not found"
+            water and "Detected Anchor Town water edge" or "Anchor Town water is not client-visible yet"
     end
 
     return nil, "Unknown spot mode"
@@ -4312,7 +5925,10 @@ function FishingService.HandleShake()
     if moved or now - Runtime.FishingLastShakeClick >= 0.12 then
         Runtime.FishingLastShakePosition = position
         Runtime.FishingLastShakeClick = now
-        clickButton(button, false)
+        if not clickVisibleButton(button) then
+            setFishingState("SHAKE_INPUT_FAILED", "SHAKE button visible but click input failed")
+            return true
+        end
     end
 
     setFishingState("SHAKE", "Clicking SHAKE QTE")
@@ -4332,7 +5948,10 @@ function FishingService.HandleSpamClick()
     local now = os.clock()
     if now - Runtime.FishingLastSpamClick >= 0.065 then
         Runtime.FishingLastSpamClick = now
-        clickButton(button, false)
+        if not clickVisibleButton(button) then
+            setFishingState("SPAM_INPUT_FAILED", "CLICK QTE visible but click input failed")
+            return true
+        end
     end
 
     setFishingState("SPAM_CLICK", "Handling CLICK QTE")
@@ -4369,13 +5988,19 @@ function FishingService.HandleTimedRelease()
     local fill = math.clamp(amount.Size.Y.Scale, 0, 1)
 
     if fill < Config.FishingReleaseThreshold then
-        setFishingMouseHeld(true)
+        if not setFishingMouseHeld(true) then
+            setFishingState("TIMED_RELEASE_INPUT_FAILED", "Unable to hold fishing input")
+            return true
+        end
         setFishingState(
             "TIMED_RELEASE",
             string.format("Holding %.0f%%", fill * 100)
         )
     else
-        setFishingMouseHeld(false)
+        if not setFishingMouseHeld(false) then
+            setFishingState("TIMED_RELEASE_INPUT_FAILED", "Unable to release fishing input")
+            return true
+        end
         Runtime.FishingTimedReleaseDone = true
         setFishingState(
             "TIMED_RELEASE",
@@ -4426,7 +6051,10 @@ function FishingService.HandleReel()
     -- travels right or left. This avoids hard-coding the input direction.
     if Config.FishingAutoCalibrate and not Runtime.FishingReelCalibrated then
         local before = moveCenter
-        setFishingMouseHeld(true)
+        if not setFishingMouseHeld(true) then
+            setFishingState("REEL_INPUT_FAILED", "Unable to calibrate fishing hold input")
+            return true
+        end
         task.wait(0.075)
 
         local after = move.AbsolutePosition.X + move.AbsoluteSize.X / 2
@@ -4471,7 +6099,10 @@ function FishingService.HandleReel()
 
     local holdDirection = Runtime.FishingHoldDirection or 1
     local shouldHold = wantedDirection == holdDirection
-    setFishingMouseHeld(shouldHold)
+    if not setFishingMouseHeld(shouldHold) then
+        setFishingState("REEL_INPUT_FAILED", "Unable to control reel input")
+        return true
+    end
     releaseFishingKey()
 
     Runtime.FishingHadReel = true
@@ -4492,9 +6123,14 @@ function FishingService.EquipRod(rod)
         return false
     end
 
+    local now = os.clock()
     if Runtime.FishingEquippedRod == rod.Name
-        and os.clock() - (Runtime.FishingEquippedAt or 0) < 120 then
-        return true
+        and now - (Runtime.FishingEquippedAt or 0) < 12 then
+
+        if rod.Source ~= "Hotbar"
+            or HotbarService.LastPressedTitle == rod.Name then
+            return true
+        end
     end
 
     local ok = false
@@ -4526,6 +6162,7 @@ function FishingService.GetConditions()
             or Runtime.ProgressLifeSkill == "Fishing",
         Rod = rod and rod.Name or "None",
         RodSource = rod and rod.Source or "None",
+        RodReason = Runtime.FishingRodReason,
         Bait = bait and bait.Name or "None",
         BaitAmount = bait and bait.Amount or 0,
         BaitRequired = Config.FishingRequireBait,
@@ -4550,8 +6187,11 @@ function FishingService.GetConditions()
 end
 
 function FishingService.Reset(reason)
+    if MotionController.IsOwnedBy("Fishing") then
+        MotionController.Release("Fishing", true)
+    end
     releaseFishingKey()
-    setFishingMouseHeld(false)
+    setFishingMouseHeld(false, true)
     Runtime.FishingHadReel = false
     Runtime.FishingTimedReleaseDone = false
     Runtime.FishingLastShakePosition = nil
@@ -4602,7 +6242,7 @@ function FishingService.Step()
 
     local rod = FishingService.FindRod()
     if not rod then
-        setFishingState("WAIT_ROD", "Rod is not visible in Hotbar/FishInventory yet")
+        setFishingState("WAIT_ROD", tostring(Runtime.FishingRodReason or "Rod UI is not ready yet"))
         Runtime.FishingRodCache = nil
         Runtime.FishingRodCacheAt = 0
         return 1.2
@@ -4687,17 +6327,22 @@ function FishingService.Step()
     end
 
     task.wait(Config.FishingEquipSettle)
-    mouseClickCenter()
+    local castOk = mouseClickCenter()
+    if not castOk then
+        Runtime.FishingEquippedRod = nil
+        Runtime.FishingEquippedAt = 0
+        setFishingState("CAST_FAILED", "Cast input was not accepted by the executor")
+        return 0.8
+    end
 
     Runtime.FishingLastCast = os.clock()
-    setFishingState("WAIT_QTE", "Cast once; waiting for SHAKE/QTE")
+    setFishingState("WAIT_QTE", "Cast sent; waiting for SHAKE/QTE")
 
     return 0.20
 end
 
 -- ============================================================
--- Mining service
--- Real ore models + verified hold/release QTE
+-- Mining
 -- ============================================================
 
 MiningQTEService = {}
@@ -4718,12 +6363,10 @@ local function setMiningState(state, reason)
     Runtime.ProgressDetail = reason or Runtime.ProgressDetail
 end
 
-local function miningMouse(held, ore)
-    if Runtime.MiningMouseHeld == held then
-        return
+local function miningMouse(held, ore, force)
+    if Runtime.MiningMouseHeld == held and not (force and held == false) then
+        return true
     end
-
-    Runtime.MiningMouseHeld = held
 
     local point = ore and screenPointOf(ore)
     local camera = Workspace.CurrentCamera
@@ -4731,7 +6374,15 @@ local function miningMouse(held, ore)
     local x = point and point.X or viewport.X / 2
     local y = point and point.Y or viewport.Y / 2
 
-    mouseButtonAt(x, y, held)
+    local ok = mouseButtonAt(x, y, held)
+    if not held then
+        ok = Compat.ReleaseMouse(x, y) or ok
+    end
+
+    if ok then
+        Runtime.MiningMouseHeld = held
+    end
+    return ok
 end
 
 local function oreName(model)
@@ -4814,14 +6465,15 @@ end
 
 function MiningQTEService.RefreshOreIndex(force)
     local now = os.clock()
-    if not force and now - (Runtime.MiningLastIndexRefresh or 0) < 1.5 then
-        return
+    if not force and now - (Runtime.MiningLastIndexRefresh or 0) < 3.0 then
+        return false
     end
     Runtime.MiningLastIndexRefresh = now
+    Runtime.MiningIndexRefreshes = (Runtime.MiningIndexRefreshes or 0) + 1
 
     local islands = Workspace:FindFirstChild("Islands")
     if not islands then
-        return
+        return false
     end
 
     for _, object in ipairs(islands:GetDescendants()) do
@@ -4833,6 +6485,7 @@ function MiningQTEService.RefreshOreIndex(force)
             Runtime.Ores[object] = true
         end
     end
+    return true
 end
 
 function MiningQTEService.FindOre()
@@ -4882,15 +6535,19 @@ function MiningQTEService.FindOre()
 end
 
 local function findPickaxe()
+    if not findHotbar() then
+        return nil, "Hotbar UI is not client-visible yet"
+    end
+
     HotbarService.Refresh()
 
     for _, data in pairs(HotbarService.Slots) do
         if lower(data.Title):find("pickaxe", 1, true) then
-            return data
+            return data, "Pickaxe found"
         end
     end
 
-    return nil
+    return nil, "No pickaxe in the live hotbar"
 end
 
 local function findMiningQTE()
@@ -4950,12 +6607,18 @@ function MiningQTEService.HandleQTE(ore)
         and amountTop <= (criticalBottom + tolerance)
 
     if inside and not Runtime.MiningReleaseDone then
-        miningMouse(false, ore)
+        if not miningMouse(false, ore) then
+            setMiningState("QTE_INPUT_FAILED", "Critical zone reached but M1 release failed")
+            return true
+        end
         Runtime.MiningReleaseDone = true
         Runtime.MiningLastQTE = os.clock()
         setMiningState("RELEASE", string.format("Released on %s critical zone", oreName(ore)))
     elseif not Runtime.MiningReleaseDone then
-        miningMouse(true, ore)
+        if not miningMouse(true, ore) then
+            setMiningState("QTE_INPUT_FAILED", "Unable to hold M1 for mining charge")
+            return true
+        end
         setMiningState("CHARGE", string.format("Charging %s", oreName(ore)))
     end
 
@@ -4963,7 +6626,10 @@ function MiningQTEService.HandleQTE(ore)
 end
 
 function MiningQTEService.Reset(reason)
-    miningMouse(false, Runtime.MiningTarget)
+    if MotionController.IsOwnedBy("Mining") then
+        MotionController.Release("Mining", true)
+    end
+    miningMouse(false, Runtime.MiningTarget, true)
     Runtime.MiningTarget = nil
     Runtime.MiningReleaseDone = false
     Runtime.MiningEquippedSlot = nil
@@ -5015,6 +6681,11 @@ function MiningQTEService.Step()
         return 0.8
     end
 
+    if Runtime.IndexRefreshBusy then
+        setMiningState("INDEX_REFRESH", "Runtime index is rebuilding")
+        return 0.6
+    end
+
     if not PlayerState.IsReady() then
         MiningQTEService.Reset("Player not ready")
         return 0.8
@@ -5035,12 +6706,13 @@ function MiningQTEService.Step()
         if Runtime.MiningNoOreSince == 0 then
             Runtime.MiningNoOreSince = os.clock()
         end
-        MiningQTEService.RefreshOreIndex(true)
+        MiningQTEService.RefreshOreIndex(false)
         setMiningState(
             "WAIT_STREAM",
             "No live matching ore in the currently streamed islands"
         )
-        return Config.MiningNoOreRetry
+        local waited = os.clock() - Runtime.MiningNoOreSince
+        return math.min(4.0, Config.MiningNoOreRetry + waited * 0.08)
     end
 
     Runtime.MiningNoOreSince = 0
@@ -5062,19 +6734,29 @@ function MiningQTEService.Step()
 
     MotionController.Release("Mining", true)
 
-    local pickaxe = findPickaxe()
+    local pickaxe, pickaxeReason = findPickaxe()
 
     if not pickaxe then
         miningMouse(false, ore)
         setMiningState(
-            "MISSING_PICKAXE",
-            "No Pickaxe detected in live hotbar"
+            pickaxeReason == "Hotbar UI is not client-visible yet"
+                and "WAIT_HOTBAR"
+                or "MISSING_PICKAXE",
+            tostring(pickaxeReason)
         )
         return 0.8
     end
 
-    if Runtime.MiningEquippedSlot ~= pickaxe.Slot then
-        HotbarService.Press(pickaxe)
+    if Runtime.MiningEquippedSlot ~= pickaxe.Slot
+        or HotbarService.LastPressedSlot ~= pickaxe.Slot then
+
+        local equipped = HotbarService.Press(pickaxe)
+        if not equipped then
+            Runtime.MiningEquippedSlot = nil
+            setMiningState("EQUIP_FAILED", "Pickaxe input failed")
+            return 0.8
+        end
+
         Runtime.MiningEquippedSlot = pickaxe.Slot
         Runtime.MiningEquipAt = os.clock()
 
@@ -5111,7 +6793,10 @@ function MiningQTEService.Step()
             "Holding M1 on " .. wanted
         )
         Runtime.MiningStateSince = os.clock()
-        miningMouse(true, ore)
+        if not miningMouse(true, ore) then
+            setMiningState("M1_INPUT_FAILED", "Unable to start mining M1 hold")
+            return 0.8
+        end
 
     elseif elapsed >= Config.MiningHoldTimeout then
         miningMouse(false, ore)
@@ -5312,7 +6997,7 @@ function WorldUtilityService.GoToPrompt(name)
     local prompt = WorldUtilityService.FindPromptByName(name)
 
     if not prompt then
-        notify("World Utility", "Prompt not found: " .. tostring(name), 4)
+        notify("World Utility", "Prompt is not client-visible yet: " .. tostring(name), 4)
         return
     end
 
@@ -5572,8 +7257,7 @@ function WorldTargetService.Find(name)
 end
 
 -- ============================================================
--- Auto Farm v12
--- Single progression owner + smooth farm movement
+-- Auto Farm
 -- ============================================================
 
 AutoFarmController = {}
@@ -5622,11 +7306,21 @@ function FarmMovement.Ensure()
     return nil
 end
 
-function FarmMovement.Stop(removePlatform, clearHold)
+local FARM_MOTION_OWNERS = {
+    Dialogue = true,
+    Quest = true,
+    Combat = true,
+    Loot = true,
+    Legacy = true,
+}
+
+function FarmMovement.Stop(removePlatform, clearHold, forceAll)
     local owner = Runtime.Motion.Owner
-    if owner then
+    if owner and (forceAll == true or FARM_MOTION_OWNERS[owner]) then
         MotionController.Release(owner, true)
+        return true
     end
+    return false
 end
 
 function FarmMovement.Go(rootGoal, holdAtEnd, kind, facePosition)
@@ -5830,6 +7524,7 @@ local function stepQuestNpc(questName, preferredNpc, finalState)
         )
 
     if not npc then
+        QuestDirectService.SetContext(nil, nil)
         FarmMovement.Stop(true, true)
 
         local now = os.clock()
@@ -5856,6 +7551,7 @@ local function stepQuestNpc(questName, preferredNpc, finalState)
     end
 
     Runtime.CurrentTarget = npc
+    QuestDirectService.SetContext(questName, npc)
 
     local prompt =
         InteractionService.FindPromptNear(
@@ -6207,12 +7903,25 @@ local function stepDefeatTask(wanted)
     if not fixedAnchor then
         MotionController.Release("Combat", true)
     end
-    CombatService.AttackStep()
+
+    local attacked, attackReason = CombatService.AttackStep()
+    if not attacked then
+        local state = attackReason == "disabled"
+            and "AUTO_M1_DISABLED"
+            or attackReason == "input-failed"
+                and "COMBAT_INPUT_FAILED"
+                or "COMBAT_COOLDOWN"
+        farmSetState(
+            state,
+            target.Name .. " • " .. tostring(attackReason) .. " • " .. string.format("%.1f", distance)
+        )
+        return
+    end
 
     farmSetState(
         "FARM_COMBAT",
         target.Name
-            .. " • M1 • "
+            .. " • M1 sent • "
             .. string.format("%.1f", distance)
     )
 end
@@ -6389,7 +8098,7 @@ local function stepEquipOrUseTask(taskData)
         farmSetState(
             "ITEM_WAIT",
             taskData.Target
-                .. " not found in hotbar"
+                .. " is not visible in the live hotbar"
         )
         return
     end
@@ -6486,6 +8195,8 @@ local function routeLifeSkill(kind, detail)
 end
 
 function AutoFarmController.Step()
+    QuestDirectService.Poll()
+
     if not Config.AutoProgress then
         Runtime.ProgressLifeSkill = nil
 
@@ -6498,6 +8209,11 @@ function AutoFarmController.Step()
             "Auto Farm disabled"
         )
 
+        return
+    end
+
+    if Runtime.IndexRefreshBusy then
+        farmSetState("INDEX_REFRESH", "Runtime index is rebuilding")
         return
     end
 
@@ -6632,6 +8348,21 @@ function AutoFarmController.Step()
         and plan.Recommended
         and Config.AutoAcceptRecommended then
 
+        local directStarted, directReason =
+            QuestDirectService.TryAccept(plan.Recommended)
+
+        if directStarted or directReason == "pending" then
+            FarmMovement.Stop(false, true)
+            farmSetState(
+                "QUEST_DIRECT",
+                plan.Recommended.Name .. " • " .. tostring(directReason)
+            )
+            return
+        end
+
+        -- No verified direct contract yet: use the normal NPC path. This path
+        -- also teaches the passive hook; once a real quest-state-changing call
+        -- is observed, later compatible quests can skip NPC interaction.
         stepQuestNpc(
             plan.Recommended.Name,
             nil,
@@ -6780,6 +8511,12 @@ function ESPService.Clear(object)
             highlight:Destroy()
         end)
         ESPService.Map[object] = nil
+    end
+end
+
+function ESPService.ClearAll()
+    for object in pairs(ESPService.Map) do
+        ESPService.Clear(object)
     end
 end
 
@@ -6989,6 +8726,190 @@ end
 -- Server tools
 -- ============================================================
 
+ServerInfoService = {}
+
+local function bossDisplayName(model)
+    return normalize(
+        model and (
+            model:GetAttribute("NPCName")
+            or model:GetAttribute("NPCType")
+            or stripRuntimeSuffix(model.Name)
+        ) or "Unknown Boss"
+    )
+end
+
+function ServerInfoService.GetLiveBosses()
+    local rows = {}
+    local seen = {}
+
+    for model in pairs(Runtime.Entities) do
+        if model and model.Parent and TargetService.IsBoss(model) then
+            local name = bossDisplayName(model)
+            local hum = model:FindFirstChildOfClass("Humanoid")
+            local hp = hum and string.format("%.0f/%.0f HP", hum.Health, hum.MaxHealth) or "HP ?"
+            local target = normalize(model:GetAttribute("Target") or "")
+            local line = name .. " • " .. hp
+            if target ~= "" then
+                line ..= " • target " .. target
+            end
+            table.insert(rows, line)
+            seen[lower(name)] = true
+        end
+    end
+
+    table.sort(rows)
+    return rows, seen
+end
+
+function ServerInfoService.GetBossSpawnRows()
+    local liveRows, live = ServerInfoService.GetLiveBosses()
+    local rows = {}
+    local root = mobZoneRoot()
+    local seen = {}
+
+    if root then
+        for _, object in ipairs(root:GetDescendants()) do
+            if object:IsA("BasePart") then
+                local respawn = tonumber(object:GetAttribute("RespawnTime"))
+                local timerFlag = object:GetAttribute("DisplayRespawnTimer") == true
+                    or object:GetAttribute("RespawnTimer") == true
+
+                if timerFlag and respawn and respawn >= 60 then
+                    local name = normalize(object:GetAttribute("Mob") or object.Name)
+                    if name ~= "" and not seen[lower(name)] then
+                        seen[lower(name)] = true
+                        local spawned = object:GetAttribute("Spawned") == true
+                        local active = object:GetAttribute("Active") ~= false
+                        local state = live[lower(name)] and "LIVE"
+                            or (spawned and active and "SPAWNED")
+                            or "WAITING"
+                        local zone = normalize(object:GetAttribute("Zone") or "Unknown zone")
+                        local extra = respawn and (" • respawn " .. tostring(math.floor(respawn)) .. "s") or ""
+                        table.insert(rows, string.format("%s • %s • %s%s", name, state, zone, extra))
+                    end
+                end
+            end
+        end
+    end
+
+    -- Live bosses without a respawn-marked MobZone still belong in the report.
+    for _, line in ipairs(liveRows) do
+        local key = lower(line:match("^(.-)%s+•") or line)
+        if not seen[key] then
+            table.insert(rows, line .. " • live entity")
+        end
+    end
+
+    table.sort(rows)
+    return rows
+end
+
+local function worldEventGuiState()
+    local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    local gui = playerGui and playerGui:FindFirstChild("WorldEvent")
+    local frame = gui and gui:FindFirstChild("Frame")
+    if not gui or not frame or not gui.Enabled then
+        return nil
+    end
+
+    local rows = {}
+    for _, name in ipairs({"Header", "Title", "Subheader", "Countdown", "Resistance"}) do
+        local object = frame:FindFirstChild(name, true)
+        if object and (object:IsA("TextLabel") or object:IsA("TextButton")) then
+            local visible = true
+            pcall(function() visible = object.Visible end)
+            local text = normalize(object.Text)
+            if visible and text ~= "" then
+                table.insert(rows, text)
+            end
+        end
+    end
+
+    return #rows > 0 and rows or nil
+end
+
+function ServerInfoService.GetEventRows()
+    local rows = {}
+
+    local weather = normalize(Workspace:GetAttribute("WeatherUniversal") or "Unknown")
+    local dayNight = normalize(Workspace:GetAttribute("DayNight") or "Unknown")
+    local moon = Workspace:GetAttribute("MoonPhase")
+    table.insert(rows, "Weather: " .. weather)
+    table.insert(rows, "Time: " .. dayNight)
+    if moon ~= nil then
+        table.insert(rows, "Moon phase: " .. tostring(moon))
+    end
+
+    local guiRows = worldEventGuiState()
+    if guiRows then
+        table.insert(rows, "World Event: ACTIVE")
+        for _, text in ipairs(guiRows) do
+            table.insert(rows, "  " .. text)
+        end
+    else
+        table.insert(rows, "World Event UI: no active header detected")
+    end
+
+    local important = Workspace:FindFirstChild("AA IMPORTANT")
+    local raids = important and important:FindFirstChild("Raids")
+    if raids then
+        for _, raid in ipairs(raids:GetChildren()) do
+            local active = false
+            local wanted = lower(raid.Name)
+            for model in pairs(Runtime.Entities) do
+                if model and model.Parent and TargetService.IsAliveNPC(model) then
+                    local blob = lower(table.concat({
+                        model.Name,
+                        tostring(model:GetAttribute("NPCName") or ""),
+                        tostring(model:GetAttribute("NPCType") or ""),
+                        tostring(model:GetAttribute("Party") or ""),
+                        tostring(model:GetAttribute("DefaultParty") or ""),
+                    }, " "))
+                    if blob:find(wanted, 1, true) then
+                        active = true
+                        break
+                    end
+                end
+            end
+            table.insert(rows, "Raid " .. raid.Name .. ": " .. (active and "ACTIVE" or "configured / not observed"))
+        end
+    end
+
+    return rows
+end
+
+function ServerInfoService.GetBossReport()
+    local rows = ServerInfoService.GetBossSpawnRows()
+    if #rows == 0 then
+        return "No boss/respawn markers are client-visible in this server state."
+    end
+    return table.concat(rows, "\n")
+end
+
+function ServerInfoService.GetEventReport()
+    return table.concat(ServerInfoService.GetEventRows(), "\n")
+end
+
+function ServerInfoService.GetOverview()
+    local live = ServerInfoService.GetLiveBosses()
+    local eventGui = worldEventGuiState()
+    return table.concat({
+        ServerToolsService and ServerToolsService.GetInfo and ServerToolsService.GetInfo() or "Server tools loading",
+        "",
+        "Live bosses: " .. tostring(#live),
+        "World event header: " .. tostring(eventGui ~= nil),
+        "Auto Stats: " .. tostring(Config.AutoStats) .. " • " .. tostring(Runtime.StatsSpendStatus),
+    }, "\n")
+end
+
+function ServerInfoService.BossKey()
+    return ServerInfoService.GetBossReport()
+end
+
+function ServerInfoService.EventKey()
+    return ServerInfoService.GetEventReport()
+end
+
 ServerToolsService = {}
 
 local function requestJson(url)
@@ -7190,6 +9111,33 @@ end
 
 MovementService = {}
 
+local SpeedBackup = setmetatable({}, {__mode = "k"})
+local JumpBackup = setmetatable({}, {__mode = "k"})
+
+function MovementService.RestoreSpeed()
+    local hum = humanoid()
+    local value = hum and SpeedBackup[hum]
+    if hum and value ~= nil then
+        pcall(function()
+            hum.WalkSpeed = value
+        end)
+        SpeedBackup[hum] = nil
+    end
+end
+
+function MovementService.RestoreJump()
+    local hum = humanoid()
+    local backup = hum and JumpBackup[hum]
+    if hum and backup then
+        pcall(function()
+            hum.UseJumpPower = backup.UseJumpPower
+            hum.JumpPower = backup.JumpPower
+            hum.JumpHeight = backup.JumpHeight
+        end)
+        JumpBackup[hum] = nil
+    end
+end
+
 local function restoreCollision()
     for part, canCollide in pairs(
         Runtime.CharacterCollisionBackup
@@ -7233,16 +9181,30 @@ function MovementService.Step()
     end
 
     if Config.SpeedOverride then
+        if SpeedBackup[hum] == nil then
+            SpeedBackup[hum] = hum.WalkSpeed
+        end
         pcall(function()
             hum.WalkSpeed = Config.WalkSpeed
         end)
+    elseif SpeedBackup[hum] ~= nil then
+        MovementService.RestoreSpeed()
     end
 
     if Config.JumpOverride then
+        if JumpBackup[hum] == nil then
+            JumpBackup[hum] = {
+                UseJumpPower = hum.UseJumpPower,
+                JumpPower = hum.JumpPower,
+                JumpHeight = hum.JumpHeight,
+            }
+        end
         pcall(function()
             hum.UseJumpPower = true
             hum.JumpPower = Config.JumpPower
         end)
+    elseif JumpBackup[hum] ~= nil then
+        MovementService.RestoreJump()
     end
 
     local transportNoclip =
@@ -7404,6 +9366,32 @@ end)
 
 task.spawn(function()
     while Core.Running do
+        if Config.InfoBossNotify then
+            local key = ServerInfoService.BossKey()
+            if Runtime.InfoLastBossKey == nil then
+                Runtime.InfoLastBossKey = key
+            elseif key ~= Runtime.InfoLastBossKey then
+                Runtime.InfoLastBossKey = key
+                notify("Boss Update", ServerInfoService.GetBossReport(), 10)
+            end
+        end
+
+        if Config.InfoEventNotify then
+            local key = ServerInfoService.EventKey()
+            if Runtime.InfoLastEventKey == nil then
+                Runtime.InfoLastEventKey = key
+            elseif key ~= Runtime.InfoLastEventKey then
+                Runtime.InfoLastEventKey = key
+                notify("World Event Update", ServerInfoService.GetEventReport(), 10)
+            end
+        end
+
+        task.wait(math.max(1.0, tonumber(Config.InfoPollInterval) or 2.0))
+    end
+end)
+
+task.spawn(function()
+    while Core.Running do
         local active =
             Config.CurrentTargetESP
             or Config.PlayerESP
@@ -7413,6 +9401,8 @@ task.spawn(function()
 
         if active then
             safeWorker("ESP", ESPService.Step)
+        elseif next(ESPService.Map) ~= nil then
+            safeWorker("ESP", ESPService.ClearAll)
         end
 
         task.wait(active and 0.9 or 1.8)
@@ -7502,7 +9492,7 @@ function NPCNavigator.GoTo(displayOrName)
     if not npc then
         notify(
             "NPC Navigation",
-            "NPC not found: " .. tostring(displayOrName),
+            "NPC is not client-visible yet: " .. tostring(displayOrName),
             4
         )
         return false
@@ -7635,9 +9625,14 @@ function IslandService.FindLanding(name)
 end
 
 function IslandService.Teleport(name)
+    if not name or name == "" or name == "Islands unavailable" then
+        notify("Island", "Island list is not client-visible yet", 4)
+        return false
+    end
+
     local landing = IslandService.FindLanding(name)
     if not landing or not rootPart() then
-        notify("Island", "No landing point: " .. tostring(name), 4)
+        notify("Island", "Landing point is not client-visible yet: " .. tostring(name), 4)
         return false
     end
 
@@ -7713,11 +9708,12 @@ local function detectedSystems()
         "151 Quest modules + live RecommendedQuest",
         "DialogueNPC QuestName / QuestNode mapping",
         "Entities / Combat / BossCombat",
-        "Fluent UI direct API / Nexomia compatibility",
-        "Heartbeat moving platform transport",
+        "Native Roblox UI / no external UI dependency",
+        "Single-owner Tween/Heartbeat motion controller",
         "Fixed MobZone gather + live entity-state filtering",
         "Custom 0-9 Hotbar + Cooldown/EXP",
-        "Auto Stats via Radar stat buttons",
+        "Auto Stats via Radar + verified physical fallback",
+        "Live boss / world event server info",
         "Skill EXP / hotbar cooldown detection",
         "Fishing: SHAKE / CLICK / Timed Release / Reel",
         "Mining Critical Zone QTE",
@@ -7725,7 +9721,6 @@ local function detectedSystems()
         "Fruit / FruitLevel",
         "Bounty / Faction / Crew",
         "Pickup / Chest / Fruit Chest / World Boss Chest",
-        "Treasure / DigSpots",
         "Logbook Claim",
         "Block = F",
     }, "\n")
@@ -7738,7 +9733,6 @@ local function workerHealth()
         "Detail: " .. tostring(Runtime.ProgressDetail),
         "Fishing: " .. tostring(Runtime.FishingState),
         "Mining: " .. tostring(Runtime.MiningState),
-        "Treasure: " .. tostring(Runtime.TreasureState),
         "",
     }
 
@@ -7746,7 +9740,6 @@ local function workerHealth()
         "Progress",
         "Fishing",
         "Mining",
-        "Treasure",
         "Prompts",
         "Stats",
         "Block",
@@ -7779,17 +9772,26 @@ end
 
 local function executorStatus()
     return table.concat({
-        "loadstring: " .. tostring(type(loadstring) == "function"),
-        "HTTP: " .. tostring(ExecutorCaps.Http),
+        "loadstring: not required",
+        "HTTP: " .. tostring(ExecutorCaps.Http) .. " (server tools only)",
         "request fallback: " .. tostring(ExecutorCaps.Request),
-        "VirtualInput: " .. tostring(ExecutorCaps.VirtualInput),
+        "VirtualKey: " .. tostring(ExecutorCaps.VirtualKey),
+        "VirtualMouse: " .. tostring(ExecutorCaps.VirtualMouse),
         "fireproximityprompt: " .. tostring(ExecutorCaps.FirePrompt),
         "firesignal: " .. tostring(ExecutorCaps.FireSignal),
+        "Capability failures: key=" .. tostring(CapabilityFailures.VirtualKey or 0)
+            .. " mouse=" .. tostring(CapabilityFailures.VirtualMouse or 0)
+            .. " prompt=" .. tostring(CapabilityFailures.FirePrompt or 0)
+            .. " signal=" .. tostring(CapabilityFailures.FireSignal or 0),
         "setclipboard: " .. tostring(ExecutorCaps.Clipboard),
+        "quest namecall hook: " .. tostring(Runtime.QuestDirect and Runtime.QuestDirect.Installed),
         "UNC mode: capability-based (partial support OK)",
         "WebSocket: not required",
         "getscriptclosure: not required",
         "filesystem: not required",
+        "external UI fetch: disabled",
+        "snapshot diagnostics: malformed-dialogue=" .. tostring(NoiseGuard.MalformedDialogue)
+            .. " archived-sound=" .. tostring(NoiseGuard.ArchivedSounds),
         "soft UI/event guard: enabled",
         "boot stage: " .. tostring(BOOT_STAGE),
     }, "\n")
@@ -7805,13 +9807,14 @@ local function selfTest()
         )
     end
 
-    add("Fluent", Fluent ~= nil)
+    add("Native UI", UIFramework ~= nil)
     add("Player ready", PlayerState.IsReady())
     add("Quest UI", questScrollingFrame() ~= nil)
     add("RecommendedQuest storage", questStorage() ~= nil)
     add("Entities", entitiesFolder() ~= nil)
     add("DialogueNPCs", dialogueRoot() ~= nil)
-    add("Dialogue E input", VirtualInputManager ~= nil)
+    add("Dialogue E input", ExecutorCaps.VirtualKey == true)
+    add("Screen click input", ExecutorCaps.VirtualMouse == true)
     add("World marker cache", Runtime.WorldMarkers ~= nil)
     add("Hotbar", findHotbar() ~= nil)
     add("Quest catalog", #Runtime.QuestCatalog > 0)
@@ -7819,19 +9822,18 @@ local function selfTest()
     add("Fishing UI", fishingGui() ~= nil)
     add("QTE UI", qteScreen() ~= nil)
     add("Ore cache", next(Runtime.Ores) ~= nil)
-    add("DigSpot cache", next(Runtime.DigSpots) ~= nil)
 
     return table.concat(rows, "\n")
 end
 
 
 -- ============================================================
--- Fluent UI
+-- Native Roblox UI
 -- ============================================================
 
-bootMark("ui-window")
+bootMark("ui-window-native")
 local okWindow, Window = safeCall(function()
-    return Fluent:CreateWindow({
+    return UIFramework:CreateWindow({
         Title = "SON HUB " .. VERSION,
         SubTitle = "Nexomia | hongson",
         TabWidth = 150,
@@ -7843,7 +9845,7 @@ local okWindow, Window = safeCall(function()
 end)
 
 if not okWindow or not Window then
-    error("SON HUB UI bootstrap failed at ui-window: " .. tostring(Window))
+    error("SON HUB native UI bootstrap failed at ui-window: " .. tostring(Window))
 end
 
 local function uiMethod(object, methodName, ...)
@@ -7935,15 +9937,20 @@ local Tabs = {
     Home = addTab("Home", "home"),
     Minigame = addTab("Minigame", "gamepad-2"),
     Player = addTab("Player", "user"),
+    Info = addTab("Info", "info"),
     Teleport = addTab("Teleport", "map-pin"),
     Settings = addTab("Settings", "settings"),
     Test = addTab("Test", "flask-conical"),
 }
 
+local UIOptions = {}
+
 local function bindToggle(section, id, title, defaultValue, callback)
     if not section or type(section.AddToggle) ~= "function" then
         markSoftError("UI", "AddToggle unavailable for " .. tostring(id))
-        return dummyOption(defaultValue == true)
+        local fallback = dummyOption(defaultValue == true)
+        UIOptions[id] = fallback
+        return fallback
     end
 
     local okCreate, option = safeCall(section.AddToggle, section, id, {
@@ -7953,7 +9960,9 @@ local function bindToggle(section, id, title, defaultValue, callback)
 
     if not okCreate then
         markSoftError("UI", option)
-        return dummyOption(defaultValue == true)
+        local fallback = dummyOption(defaultValue == true)
+        UIOptions[id] = fallback
+        return fallback
     end
 
     if option and type(option.OnChanged) == "function" then
@@ -7966,25 +9975,41 @@ local function bindToggle(section, id, title, defaultValue, callback)
         if not okBind then markSoftError("UI", bindErr) end
     end
 
-    return option or dummyOption(defaultValue == true)
+    option = option or dummyOption(defaultValue == true)
+    UIOptions[id] = option
+    return option
 end
 
 local function bindDropdown(section, id, title, values, defaultIndex, callback)
     if not section or type(section.AddDropdown) ~= "function" then
         markSoftError("UI", "AddDropdown unavailable for " .. tostring(id))
-        return dummyOption(values and values[defaultIndex or 1])
+        local fallback = dummyOption(values and values[defaultIndex or 1])
+        UIOptions[id] = fallback
+        return fallback
+    end
+
+    local resolvedIndex = defaultIndex or 1
+    if type(values) == "table" and Config and Config[id] ~= nil then
+        for index, value in ipairs(values) do
+            if value == Config[id] then
+                resolvedIndex = index
+                break
+            end
+        end
     end
 
     local okCreate, option = safeCall(section.AddDropdown, section, id, {
         Title = title,
         Values = values,
         Multi = false,
-        Default = defaultIndex or 1,
+        Default = resolvedIndex,
     })
 
     if not okCreate then
         markSoftError("UI", option)
-        return dummyOption(values and values[defaultIndex or 1])
+        local fallback = dummyOption(values and values[resolvedIndex])
+        UIOptions[id] = fallback
+        return fallback
     end
 
     if option and type(option.OnChanged) == "function" then
@@ -7997,13 +10022,17 @@ local function bindDropdown(section, id, title, values, defaultIndex, callback)
         if not okBind then markSoftError("UI", bindErr) end
     end
 
-    return option or dummyOption(values and values[defaultIndex or 1])
+    option = option or dummyOption(values and values[resolvedIndex])
+    UIOptions[id] = option
+    return option
 end
 
 local function bindSlider(section, id, title, minimum, maximum, defaultValue, callback)
     if not section or type(section.AddSlider) ~= "function" then
         markSoftError("UI", "AddSlider unavailable for " .. tostring(id))
-        return dummyOption(defaultValue)
+        local fallback = dummyOption(defaultValue)
+        UIOptions[id] = fallback
+        return fallback
     end
 
     local okCreate, option = safeCall(section.AddSlider, section, id, {
@@ -8022,10 +10051,14 @@ local function bindSlider(section, id, title, minimum, maximum, defaultValue, ca
 
     if not okCreate then
         markSoftError("UI", option)
-        return dummyOption(defaultValue)
+        local fallback = dummyOption(defaultValue)
+        UIOptions[id] = fallback
+        return fallback
     end
 
-    return option or dummyOption(defaultValue)
+    option = option or dummyOption(defaultValue)
+    UIOptions[id] = option
+    return option
 end
 
 local function setDropdownValues(dropdown, values)
@@ -8042,8 +10075,46 @@ end
 -- Home
 local FarmSection = addSection(Tabs.Home, "Auto Farm")
 
-bindToggle(FarmSection, "AutoFarm", "Auto Farm", Config.AutoProgress, function(value)
+local autoFarmToggle
+local autoMiningToggle
+local autoFishingToggle
+local changingPrimaryMode = false
+
+local function disableOtherPrimaryModes(keep)
+    if changingPrimaryMode then
+        return
+    end
+    changingPrimaryMode = true
+
+    -- Config is the source of truth; UI state is only a mirror. This prevents a
+    -- stale/dummy toggle from leaving two movement owners enabled at once.
+    if keep ~= "farm" then
+        Config.AutoProgress = false
+        if autoFarmToggle and autoFarmToggle.Value then
+            autoFarmToggle:SetValue(false)
+        end
+    end
+    if keep ~= "mining" then
+        Config.AutoMining = false
+        if autoMiningToggle and autoMiningToggle.Value then
+            autoMiningToggle:SetValue(false)
+        end
+    end
+    if keep ~= "fishing" then
+        Config.AutoFishing = false
+        if autoFishingToggle and autoFishingToggle.Value then
+            autoFishingToggle:SetValue(false)
+        end
+    end
+
+    changingPrimaryMode = false
+end
+
+autoFarmToggle = bindToggle(FarmSection, "AutoFarm", "Auto Farm", Config.AutoProgress, function(value)
     Config.AutoProgress = value
+    if value then
+        disableOtherPrimaryModes("farm")
+    end
     Runtime.ProgressLifeSkill = nil
     Runtime.CurrentTarget = nil
     Runtime.CurrentWantedMob = nil
@@ -8058,10 +10129,33 @@ bindToggle(FarmSection, "AutoFarm", "Auto Farm", Config.AutoProgress, function(v
         Config.AutoDialogue = true
         QuestCatalogService.Build()
     else
-        MotionController.Release(Runtime.Motion.Owner, true)
-        restoreCollision()
+        local owner = Runtime.Motion.Owner
+        if owner and owner ~= "Manual" then
+            MotionController.Release(owner, true)
+        end
+        if not Runtime.Motion.Owner then
+            restoreCollision()
+        end
     end
 end)
+
+bindToggle(FarmSection, "DirectQuest", "Direct Quest Hook", Config.DirectQuest, function(value)
+    Config.DirectQuest = value
+    if value then
+        QuestDirectService.Install()
+    else
+        Runtime.QuestDirect.Busy = false
+        Runtime.QuestDirect.Replaying = false
+        Runtime.QuestDirect.Context = nil
+    end
+end)
+
+addButton(FarmSection, {
+    Title = "Direct Quest Status",
+    Callback = function()
+        notify("Direct Quest", QuestDirectService.Status(), 9)
+    end,
+})
 
 bindDropdown(
     FarmSection,
@@ -8151,8 +10245,11 @@ addButton(HomeState, {
 -- Minigame
 local MiningSection = addSection(Tabs.Minigame, "Mining")
 
-bindToggle(MiningSection, "AutoMining", "Auto Mining", Config.AutoMining, function(value)
+autoMiningToggle = bindToggle(MiningSection, "AutoMining", "Auto Mining", Config.AutoMining, function(value)
     Config.AutoMining = value
+    if value then
+        disableOtherPrimaryModes("mining")
+    end
     MiningQTEService.Reset(value and "Enabled" or "Disabled")
     if value then
         MiningQTEService.RefreshOreIndex(true)
@@ -8186,9 +10283,13 @@ local oreDropdown = bindDropdown(
 addButton(MiningSection, {
     Title = "Refresh Ores",
     Callback = function()
-        MiningQTEService.RefreshOreIndex(true)
+        local refreshed = MiningQTEService.RefreshOreIndex(true)
         setDropdownValues(oreDropdown, MiningQTEService.GetOreOptions())
-        notify("Mining", "Ore index refreshed", 3)
+        notify(
+            "Mining",
+            refreshed and "Ore index refreshed" or "Islands/ores are not client-visible yet",
+            3
+        )
     end,
 })
 
@@ -8208,12 +10309,15 @@ addButton(MiningSection, {
 
 local FishingSection = addSection(Tabs.Minigame, "Fishing")
 
-bindToggle(FishingSection, "AutoFishing", "Auto Fishing", Config.AutoFishing, function(value)
+autoFishingToggle = bindToggle(FishingSection, "AutoFishing", "Auto Fishing", Config.AutoFishing, function(value)
     Config.AutoFishing = value
+    if value then
+        disableOtherPrimaryModes("fishing")
+    end
     FishingService.Reset(value and "Enabled" or "Disabled")
 end)
 
-bindDropdown(
+local fishingSpotDropdown = bindDropdown(
     FishingSection,
     "FishingSpotMode",
     "Fishing Spot",
@@ -8231,9 +10335,10 @@ addButton(FishingSection, {
         local root = rootPart()
         if root then
             Runtime.FishingSpotCFrame = root.CFrame
-            Config.FishingSpotMode = "Saved Position"
-            FishingService.Reset("Spot saved")
+            fishingSpotDropdown:SetValue("Saved Position")
             notify("Fishing", "Saved current position", 3)
+        else
+            notify("Fishing", "Character position is unavailable", 3)
         end
     end,
 })
@@ -8246,6 +10351,7 @@ addButton(FishingSection, {
             "Fishing",
             "State: " .. tostring(data.State)
                 .. "\nRod: " .. tostring(data.Rod) .. " [" .. tostring(data.RodSource) .. "]"
+                .. "\nRod check: " .. tostring(data.RodReason)
                 .. "\nBait: " .. tostring(data.Bait) .. " x" .. tostring(data.BaitAmount)
                 .. "\nSpot: " .. tostring(data.Spot)
                 .. "\nReady: " .. tostring(data.CanStart),
@@ -8259,6 +10365,10 @@ local StatsSection = addSection(Tabs.Player, "Auto Stats")
 
 bindToggle(StatsSection, "AutoStats", "Auto Stats", Config.AutoStats, function(value)
     Config.AutoStats = value
+    if not value then
+        Runtime.StatsSpendPending = false
+        Runtime.StatsSpendStatus = "Disabled"
+    end
 end)
 
 bindDropdown(
@@ -8282,18 +10392,23 @@ addButton(StatsSection, {
 local ESPSection = addSection(Tabs.Player, "ESP")
 bindToggle(ESPSection, "PlayerESP", "Player ESP", Config.PlayerESP, function(value)
     Config.PlayerESP = value
+    ESPService.Step()
 end)
 bindToggle(ESPSection, "MobESP", "Mob ESP", Config.MobESP, function(value)
     Config.MobESP = value
+    ESPService.Step()
 end)
 bindToggle(ESPSection, "BossESP", "Boss ESP", Config.BossESP, function(value)
     Config.BossESP = value
+    ESPService.Step()
 end)
 bindToggle(ESPSection, "TargetESP", "Current Target ESP", Config.CurrentTargetESP, function(value)
     Config.CurrentTargetESP = value
+    ESPService.Step()
 end)
 bindToggle(ESPSection, "LootESP", "Loot ESP", Config.LootESP, function(value)
     Config.LootESP = value
+    ESPService.Step()
 end)
 
 local CameraSection = addSection(Tabs.Player, "Player Camera")
@@ -8328,7 +10443,52 @@ addButton(CameraSection, {
 addButton(CameraSection, {
     Title = "Stop Spectate",
     Callback = function()
-        PlayerToolsService.StopSpectate()
+        local ok = PlayerToolsService.StopSpectate()
+        notify("Camera", ok and "Camera restored" or "Local character camera is not ready yet", 3)
+    end,
+})
+
+-- Info
+local InfoServerSection = addSection(Tabs.Info, "Live Server")
+addButton(InfoServerSection, {
+    Title = "Server Overview",
+    Callback = function()
+        notify("Server Overview", ServerInfoService.GetOverview(), 12)
+    end,
+})
+addButton(InfoServerSection, {
+    Title = "Boss Status",
+    Callback = function()
+        notify("Boss Status", ServerInfoService.GetBossReport(), 15)
+    end,
+})
+addButton(InfoServerSection, {
+    Title = "World Events",
+    Callback = function()
+        notify("World Events", ServerInfoService.GetEventReport(), 15)
+    end,
+})
+bindToggle(InfoServerSection, "InfoBossNotify", "Notify Boss Changes", Config.InfoBossNotify, function(value)
+    Config.InfoBossNotify = value
+    Runtime.InfoLastBossKey = ServerInfoService.BossKey()
+end)
+bindToggle(InfoServerSection, "InfoEventNotify", "Notify Event Changes", Config.InfoEventNotify, function(value)
+    Config.InfoEventNotify = value
+    Runtime.InfoLastEventKey = ServerInfoService.EventKey()
+end)
+
+local InfoStatsSection = addSection(Tabs.Info, "Auto Stats Health")
+addButton(InfoStatsSection, {
+    Title = "Stats Diagnostic",
+    Callback = function()
+        notify("Auto Stats", StatsService.GetSnapshot(), 12)
+    end,
+})
+addButton(InfoStatsSection, {
+    Title = "Spend One Stat Point Now",
+    Callback = function()
+        local ok = StatsService.SpendOne(true)
+        notify("Auto Stats", ok and "One-shot spend attempt started" or Runtime.StatsSpendStatus, 5)
     end,
 })
 
@@ -8404,12 +10564,18 @@ end)
 
 bindToggle(MovementSection, "SpeedOverride", "WalkSpeed Override", Config.SpeedOverride, function(value)
     Config.SpeedOverride = value
+    if not value then
+        MovementService.RestoreSpeed()
+    end
 end)
 bindSlider(MovementSection, "WalkSpeed", "WalkSpeed", 16, 100, Config.WalkSpeed, function(value)
     Config.WalkSpeed = value
 end)
 bindToggle(MovementSection, "JumpOverride", "JumpPower Override", Config.JumpOverride, function(value)
     Config.JumpOverride = value
+    if not value then
+        MovementService.RestoreJump()
+    end
 end)
 bindSlider(MovementSection, "JumpPower", "JumpPower", 50, 140, Config.JumpPower, function(value)
     Config.JumpPower = value
@@ -8446,9 +10612,17 @@ addButton(ServerSection, {
 addButton(ServerSection, {
     Title = "Server Hop",
     Callback = function()
+        if Runtime.ServerHopBusy then
+            notify("Server Hop", "A server search is already running", 3)
+            return
+        end
+        Runtime.ServerHopBusy = true
         task.spawn(function()
-            local ok, reason = ServerToolsService.Hop()
-            if not ok then
+            local callOk, ok, reason = safeCall(ServerToolsService.Hop)
+            Runtime.ServerHopBusy = false
+            if not callOk then
+                notify("Server Hop", "Search failed: " .. tostring(ok), 5)
+            elseif not ok then
                 notify("Server Hop", tostring(reason), 5)
             end
         end)
@@ -8509,13 +10683,21 @@ addButton(TestSection, {
 addButton(TestSection, {
     Title = "Refresh Index",
     Callback = function()
+        if Runtime.IndexRefreshBusy then
+            notify("Index", "Refresh is already running", 3)
+            return
+        end
+        Runtime.IndexRefreshBusy = true
         task.spawn(function()
-            RuntimeIndex.Rebuild()
-            QuestCatalogService.Build()
-            MobZoneService.Rebuild(true)
-            MiningQTEService.RefreshOreIndex(true)
-            HotbarService.Refresh()
-            notify("Index", "Refreshed", 3)
+            local ok, err = safeCall(function()
+                RuntimeIndex.Rebuild()
+                QuestCatalogService.Build()
+                MobZoneService.Rebuild(true)
+                MiningQTEService.RefreshOreIndex(true)
+                HotbarService.Refresh()
+            end)
+            Runtime.IndexRefreshBusy = false
+            notify("Index", ok and "Refreshed" or ("Refresh failed: " .. tostring(err)), 4)
         end)
     end,
 })
@@ -8524,13 +10706,63 @@ local CleanSection = addSection(Tabs.Settings, "Clean / Compatibility")
 addButton(CleanSection, {
     Title = "Clean Runtime State",
     Callback = function()
+        -- Disable runtime flags directly as the source of truth. UI SetValue is
+        -- then only synchronization; even a failed/dummy UI option cannot let a
+        -- scheduler immediately re-enable the state we just cleaned.
+        Config.AutoProgress = false
+        Config.AutoMining = false
+        Config.AutoFishing = false
+        Config.AutoStats = false
+        Config.MobHitbox = false
+        Config.PlayerESP = false
+        Config.MobESP = false
+        Config.BossESP = false
+        Config.CurrentTargetESP = false
+        Config.LootESP = false
+        Config.SpeedOverride = false
+        Config.JumpOverride = false
+        Config.InfiniteJump = false
+        Config.Noclip = false
+
+        for _, id in ipairs({
+            "AutoFarm",
+            "AutoMining",
+            "AutoFishing",
+            "AutoStats",
+            "MobHitbox",
+            "PlayerESP",
+            "MobESP",
+            "BossESP",
+            "TargetESP",
+            "LootESP",
+            "SpeedOverride",
+            "JumpOverride",
+            "InfiniteJump",
+            "Noclip",
+        }) do
+            local option = UIOptions[id]
+            if option and option.Value == true and type(option.SetValue) == "function" then
+                option:SetValue(false)
+            end
+        end
+
         HitboxService.RestoreAll()
         restoreCollision()
+        MovementService.RestoreSpeed()
+        MovementService.RestoreJump()
+        ESPService.ClearAll()
         MotionController.Release(Runtime.Motion.Owner, true)
         FishingService.Reset("Manual clean")
         MiningQTEService.Reset("Manual clean")
         Runtime.CurrentTarget = nil
         Runtime.CurrentWantedMob = nil
+        Runtime.StatsSpendPending = false
+        Runtime.QuestDirect.Busy = false
+        Runtime.QuestDirect.Replaying = false
+        Runtime.QuestDirect.Context = nil
+        HotbarService.LastPressedSlot = nil
+        HotbarService.LastPressedTitle = nil
+        HotbarService.LastPressedAt = 0
         MobGatherService.Reset("Manual clean")
         notify("Clean", "Runtime state restored", 4)
     end,
@@ -8600,10 +10832,28 @@ local function unload()
     end)
 
     pcall(function()
+        MovementService.RestoreSpeed()
+        MovementService.RestoreJump()
+    end)
+
+    pcall(function()
         HitboxService.RestoreAll()
     end)
 
+    pcall(function()
+        setBlock(false)
+        Compat.ReleaseKey(Enum.KeyCode.F)
+        local camera = Workspace.CurrentCamera
+        local viewport = camera and camera.ViewportSize or Vector2.new(800, 600)
+        Compat.ReleaseMouse(viewport.X / 2, viewport.Y / 2)
+    end)
+
     Runtime.BlockHeld = false
+    Runtime.StatsSpendPending = false
+    pcall(QuestDirectService.Uninstall)
+    HotbarService.LastPressedSlot = nil
+    HotbarService.LastPressedTitle = nil
+    HotbarService.LastPressedAt = 0
 
     for object in pairs(ESPService.Map) do
         ESPService.Clear(object)
@@ -8624,8 +10874,8 @@ local function unload()
     table.clear(Core.Instances)
 
     pcall(function()
-        if Fluent and type(Fluent.Destroy) == "function" then
-            safeCall(Fluent.Destroy, Fluent)
+        if UIFramework and type(UIFramework.Destroy) == "function" then
+            safeCall(UIFramework.Destroy, UIFramework)
         end
     end)
 
@@ -8643,8 +10893,7 @@ task.defer(function()
             .. tostring(PlayerState.GetLevel())
             .. " | Quest: "
             .. currentQuestSummary()
-            .. "\nBoot: " .. tostring(BOOT_STAGE)
-            .. "\nRun Self Test before enabling AUTO QUEST / FARM.",
+            .. "\nBoot: " .. tostring(BOOT_STAGE),
         7
     )
 end)
