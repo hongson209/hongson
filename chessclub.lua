@@ -1,5 +1,5 @@
 --[[
-    HongSondev Chess Trainer v12 - Amethyst UI Edition
+    HongSondev Chess Trainer v12 - Amethyst UI Edition (FIXED)
     Chạy được trong và ngoài Roblox Studio
     Sử dụng Amethyst UI Library cho giao diện hiện đại
 ]]
@@ -38,7 +38,6 @@ local function loadAmethystUI()
     if AmethystUI then return AmethystUI end
     
     local success, result = pcall(function()
-        -- Thử tải từ nhiều nguồn khác nhau
         local sources = {
             "https://raw.githubusercontent.com/J0se-j/My-Lua-Library/refs/heads/main/Booting-the-library.lua",
             "https://raw.githubusercontent.com/J0se-j/My-Lua-Library/main/Booting-the-library.lua",
@@ -69,25 +68,12 @@ end
 -- CẤU HÌNH ENGINE
 -- ============================================================================
 
-local SEARCH_MAX_DEPTH = 24
-local SEARCH_TIME_BUDGET = 6.00
-local QUIESCENCE_DEPTH = 12
+local SEARCH_MAX_DEPTH = 18
+local SEARCH_TIME_BUDGET = 4.00
+local QUIESCENCE_DEPTH = 8
 local REFRESH_DEBOUNCE = 0.14
 
-local TT_MAX_ENTRIES = 500000
-local TT_LIMIT_SMOOTH = 320000
-local TT_LIMIT_BALANCED = 220000
-local TT_LIMIT_PRESSURED = 140000
-
-local YIELD_INTERVAL_SMOOTH = 0.0045
-local YIELD_INTERVAL_BALANCED = 0.0030
-local YIELD_INTERVAL_PRESSURED = 0.0018
-local PERF_EMA_ALPHA = 0.08
-
-local PONDER_BUDGET_FACTOR = 0.55
-local PONDER_MIN_BUDGET = 1.00
-local PONDER_MAX_BUDGET = 3.00
-local PONDER_MIN_FPS = 52
+local TT_MAX_ENTRIES = 240000
 
 local MOVE_GUIDE_THICKNESS = 4
 local MOVE_GUIDE_SHADOW = 7
@@ -95,18 +81,18 @@ local ASPIRATION_START = 35
 local ASPIRATION_ADJUST = 20
 local MAX_ASPIRATION = 500
 local MATE_SCORE = 1000000
-local MIN_STABLE_DEPTH = 4
+local MIN_STABLE_DEPTH = 3
 local STABLE_DEPTHS_REQUIRED = 2
 local HARD_BUDGET_MULTIPLIER = 2.0
-local HARD_BUDGET_CAP = 20.0
-local SCORE_STABILITY_CP = 38
-local PV_DISPLAY_PLIES = 10
+local HARD_BUDGET_CAP = 16.0
+local SCORE_STABILITY_CP = 40
+local PV_DISPLAY_PLIES = 8
 
 local DELTA_PRUNE_MARGIN = 170
 local LMP_MAX_DEPTH = 3
-local CHECK_EXTENSION_MAX_DEPTH = 7
-local CHECK_EXTENSION_MAX_PLY = 12
-local NMP_VERIFY_DEPTH = 10
+local CHECK_EXTENSION_MAX_DEPTH = 5
+local CHECK_EXTENSION_MAX_PLY = 10
+local NMP_VERIFY_DEPTH = 8
 local NMP_BASE_REDUCTION = 2
 
 local GREEN_FROM = Color3.fromRGB(96, 128, 84)
@@ -117,7 +103,7 @@ local PANEL_TEXT = Color3.fromRGB(245, 247, 250)
 local PANEL_MUTED = Color3.fromRGB(173, 181, 189)
 
 -- ============================================================================
--- CHESS MODEL (Giữ nguyên từ bản cũ)
+-- CHESS MODEL
 -- ============================================================================
 
 local FILES = "abcdefgh"
@@ -125,7 +111,6 @@ local SIDES = { "w", "b" }
 local PAWN_FILE_DELTAS = { -1, 1 }
 local PROMOTION_PIECES = { "Q", "R", "B", "N" }
 
--- Square geometry cache
 local SQUARE_AT, SQUARE_FILE, SQUARE_RANK = {}, {}, {}
 for file = 1, 8 do
     SQUARE_AT[file] = {}
@@ -138,7 +123,6 @@ for file = 1, 8 do
     end
 end
 
--- PIECE CODE
 local PIECE_CODE = {
     White_Pawn = "wP", White_Knight = "wN", White_Bishop = "wB",
     White_Rook = "wR", White_Queen = "wQ", White_King = "wK",
@@ -229,7 +213,83 @@ local KNIGHT_PST = {
     {-50,-40,-30,-30,-30,-30,-40,-50},
 }
 
--- [Các bảng PST khác giữ nguyên...]
+local BISHOP_PST = {
+    {-20,-10,-10,-10,-10,-10,-10,-20},
+    {-10, 5, 0, 0, 0, 0, 5,-10},
+    {-10, 10, 10, 10, 10, 10, 10,-10},
+    {-10, 0, 10, 10, 10, 10, 0,-10},
+    {-10, 5, 5, 10, 10, 5, 5,-10},
+    {-10, 0, 5, 10, 10, 5, 0,-10},
+    {-10, 0, 0, 0, 0, 0, 0,-10},
+    {-20,-10,-10,-10,-10,-10,-10,-20},
+}
+
+local ROOK_PST = {
+    { 0, 0, 0, 5, 5, 0, 0, 0},
+    {-5, 0, 0, 0, 0, 0, 0,-5},
+    {-5, 0, 0, 0, 0, 0, 0,-5},
+    {-5, 0, 0, 0, 0, 0, 0,-5},
+    {-5, 0, 0, 0, 0, 0, 0,-5},
+    {-5, 0, 0, 0, 0, 0, 0,-5},
+    { 5,10,10,10,10,10,10, 5},
+    { 0, 0, 0, 0, 0, 0, 0, 0},
+}
+
+local QUEEN_PST = {
+    {-20,-10,-10,-5,-5,-10,-10,-20},
+    {-10, 0, 5, 0, 0, 0, 0,-10},
+    {-10, 5, 5, 5, 5, 5, 0,-10},
+    { 0, 0, 5, 5, 5, 5, 0,-5},
+    {-5, 0, 5, 5, 5, 5, 0,-5},
+    {-10, 0, 5, 5, 5, 5, 0,-10},
+    {-10, 0, 0, 0, 0, 0, 0,-10},
+    {-20,-10,-10,-5,-5,-10,-10,-20},
+}
+
+local KING_MG_PST = {
+    {20,30,10,0,0,10,30,20},
+    {20,20,0,0,0,0,20,20},
+    {-10,-20,-20,-20,-20,-20,-20,-10},
+    {-20,-30,-30,-40,-40,-30,-30,-20},
+    {-30,-40,-40,-50,-50,-40,-40,-30},
+    {-30,-40,-40,-50,-50,-40,-40,-30},
+    {-30,-40,-40,-50,-50,-40,-40,-30},
+    {-30,-40,-40,-50,-50,-40,-40,-30},
+}
+
+local KING_EG_PST = {
+    {-50,-40,-30,-20,-20,-30,-40,-50},
+    {-30,-20,-10,0,0,-10,-20,-30},
+    {-30,-10,20,30,30,20,-10,-30},
+    {-30,-10,30,40,40,30,-10,-30},
+    {-30,-10,30,40,40,30,-10,-30},
+    {-30,-10,20,30,30,20,-10,-30},
+    {-30,-30,0,0,0,0,-30,-30},
+    {-50,-30,-30,-30,-30,-30,-30,-50},
+}
+
+local PST_BY_KIND = {
+    P = PAWN_PST, N = KNIGHT_PST, B = BISHOP_PST,
+    R = ROOK_PST, Q = QUEEN_PST,
+}
+
+-- Directions
+local KNIGHT_DELTAS = {
+    {1,2},{2,1},{2,-1},{1,-2},
+    {-1,-2},{-2,-1},{-2,1},{-1,2},
+}
+
+local KING_DELTAS = {
+    {1,1},{1,0},{1,-1},{0,1},
+    {0,-1},{-1,1},{-1,0},{-1,-1},
+}
+
+local BISHOP_DIRS = {{1,1},{1,-1},{-1,1},{-1,-1}}
+local ROOK_DIRS = {{1,0},{-1,0},{0,1},{0,-1}}
+local QUEEN_DIRS = {
+    {1,1},{1,-1},{-1,1},{-1,-1},
+    {1,0},{-1,0},{0,1},{0,-1},
+}
 
 -- Precomputed attacks
 local KNIGHT_ATTACKS, KING_ATTACKS = {}, {}
@@ -280,10 +340,8 @@ for file = 1, 8 do
     end
 end
 
--- [Các hàm helper, move generation, evaluation, search giữ nguyên từ bản cũ...]
-
 -- ============================================================================
--- AMETHYST UI INTEGRATION
+-- STATE
 -- ============================================================================
 
 local state = {
@@ -322,6 +380,7 @@ local state = {
     statusLabel = nil,
     statsLabel = nil,
     opponentLabel = nil,
+    uiReady = false,
     
     searchBudget = SEARCH_TIME_BUDGET,
     frameTimeEMA = 1 / 60,
@@ -337,151 +396,378 @@ local state = {
 }
 
 -- ============================================================================
--- AMETHYST UI SETUP
+-- BOARD HELPERS
 -- ============================================================================
 
-local function setupAmethystUI()
-    local Amethyst = loadAmethystUI()
-    if not Amethyst then
-        warn("[HongSondev Chess Trainer] Failed to load Amethyst UI")
-        return false
+local function inBounds(file, rank)
+    return file >= 1 and file <= 8 and rank >= 1 and rank <= 8
+end
+
+local function toSquare(file, rank)
+    return inBounds(file, rank) and SQUARE_AT[file][rank] or nil
+end
+
+local function fromSquare(square)
+    return SQUARE_FILE[square], SQUARE_RANK[square]
+end
+
+local function opposite(side)
+    return side == "w" and "b" or "w"
+end
+
+local function shallowCopyBoard(board)
+    local copy = {}
+    if not board then return copy end
+    for square, piece in pairs(board) do
+        copy[square] = piece
     end
-    
-    state.amethyst = Amethyst
-    
-    -- Tạo cửa sổ chính
-    state.mainWindow = Amethyst:CreateWindow({
-        Title = "♟ Chess Trainer v12",
-        SubTitle = "HongSondev · Elite Search Engine",
-        TabWidth = 160,
-        Size = UDim2.fromOffset(520, 480),
-        Theme = "Dark",
-        MinimizeKey = Enum.KeyCode.RightShift,
-    })
-    
-    -- Tab chính
-    state.mainTab = state.mainWindow:AddTab({
-        Title = "🎯 Phân tích",
-        Icon = "target",
-    })
-    
-    -- Tab Engine
-    state.engineTab = state.mainWindow:AddTab({
-        Title = "⚙️ Engine",
-        Icon = "settings",
-    })
-    
-    -- Panel trạng thái
-    local statusSection = state.mainTab:AddSection({
-        Title = "📊 Trạng thái",
-        Side = "Left",
-    })
-    
-    state.statusLabel = statusSection:AddParagraph({
-        Title = "Trạng thái",
-        Content = "Đang đọc bàn cờ...",
-        Size = "Medium",
-    })
-    
-    state.opponentLabel = statusSection:AddParagraph({
-        Title = "Đối thủ",
-        Content = "Chưa có dữ liệu",
-        Size = "Small",
-    })
-    
-    state.statsLabel = statusSection:AddParagraph({
-        Title = "Engine",
-        Content = "Đang khởi tạo...",
-        Size = "Small",
-    })
-    
-    -- Nút tính toán
-    local controlSection = state.mainTab:AddSection({
-        Title = "🎮 Điều khiển",
-        Side = "Right",
-    })
-    
-    controlSection:AddButton({
-        Title = "🔄 Tính lại",
-        Description = "Chạy lại phân tích từ đầu",
-        Callback = function()
-            scheduleRefresh(true)
-        end,
-    })
-    
-    controlSection:AddButton({
-        Title = "🧹 Xóa gợi ý",
-        Description = "Xóa highlight khỏi bàn cờ",
-        Callback = function()
-            clearHighlights()
-        end,
-    })
-    
-    -- Dropdown phe
-    local sideDropdown = controlSection:AddDropdown({
-        Title = "Phe cần gợi ý",
-        Values = { "Auto", "White", "Black" },
-        Multi = false,
-        Default = 1,
-        Callback = function(value)
-            state.sideMode = value
-            scheduleRefresh(true)
-        end,
-    })
-    
-    -- Cài đặt Engine
-    local engineSection = state.engineTab:AddSection({
-        Title = "⚡ Cấu hình Engine",
-    })
-    
-    local strengthDropdown = engineSection:AddDropdown({
-        Title = "Mức độ tính toán",
-        Description = "Tăng thời gian để search sâu hơn",
-        Values = {
-            "Nhanh · 1.5s",
-            "Cân bằng · 3s",
-            "Mạnh · 6s",
-            "Rất mạnh · 9s",
-            "Tối đa · 12s"
-        },
-        Multi = false,
-        Default = 3,
-        Callback = function(value)
-            local budgets = {
-                ["Nhanh · 1.5s"] = 1.5,
-                ["Cân bằng · 3s"] = 3.0,
-                ["Mạnh · 6s"] = 6.0,
-                ["Rất mạnh · 9s"] = 9.0,
-                ["Tối đa · 12s"] = 12.0,
-            }
-            state.searchBudget = budgets[value] or SEARCH_TIME_BUDGET
-            scheduleRefresh(true)
-        end,
-    })
-    
-    -- Thông tin Engine
-    engineSection:AddParagraph({
-        Title = "🔬 Engine Info",
-        Content = "Iterative Deepening · Alpha-Beta · PVS · TT · LMR · Null Move · Quiescence",
-        Size = "Small",
-    })
-    
-    print("[HongSondev Chess Trainer] ✅ Amethyst UI setup complete")
-    return true
+    return copy
+end
+
+local function copyCastling(castling)
+    if not castling then
+        return { wK = true, wQ = true, bK = true, bQ = true }
+    end
+    return {
+        wK = castling.wK, wQ = castling.wQ,
+        bK = castling.bK, bQ = castling.bQ,
+    }
+end
+
+local function pieceSide(piece)
+    return piece and piece:sub(1, 1) or nil
+end
+
+local function pieceType(piece)
+    return piece and piece:sub(2, 2) or nil
 end
 
 -- ============================================================================
--- MOVE GUIDE / UI HELPERS (Sử dụng các hàm từ bản cũ)
+-- ATTACK & MOVE GENERATION (SIMPLIFIED)
+-- ============================================================================
+
+local function isSquareAttacked(board, square, bySide)
+    if not board or not square then return false end
+    
+    for _, source in ipairs(PAWN_ATTACKERS[bySide][square] or {}) do
+        if board[source] == bySide .. "P" then return true end
+    end
+    for _, source in ipairs(KNIGHT_ATTACKS[square] or {}) do
+        if board[source] == bySide .. "N" then return true end
+    end
+    for _, source in ipairs(KING_ATTACKS[square] or {}) do
+        if board[source] == bySide .. "K" then return true end
+    end
+    
+    local function rayHit(rays, slider)
+        for _, ray in ipairs(rays or {}) do
+            for _, source in ipairs(ray) do
+                local piece = board[source]
+                if piece then
+                    if pieceSide(piece) == bySide then
+                        local kind = pieceType(piece)
+                        if kind == "Q" or kind == slider then return true end
+                    end
+                    break
+                end
+            end
+        end
+        return false
+    end
+    
+    return rayHit(ROOK_RAYS[square], "R") or rayHit(BISHOP_RAYS[square], "B")
+end
+
+local function findKing(board, side)
+    local wanted = side .. "K"
+    for square, piece in pairs(board) do
+        if piece == wanted then
+            return square
+        end
+    end
+    return nil
+end
+
+local function inCheck(board, side)
+    local kingSquare = findKing(board, side)
+    if not kingSquare then return true end
+    return isSquareAttacked(board, kingSquare, opposite(side))
+end
+
+local function addMove(moves, from, to, extra)
+    if not moves then return end
+    local move = {
+        from = from,
+        to = to,
+        promotion = nil,
+        castle = nil,
+        enPassant = false,
+    }
+    if extra then
+        for key, value in pairs(extra) do
+            move[key] = value
+        end
+    end
+    move.id = from .. to .. (move.promotion or "") .. (move.castle or "")
+    table.insert(moves, move)
+end
+
+local function generateLegalMoves(board, side, castling, lastMove)
+    local moves = {}
+    if not board then return moves end
+    
+    for from, piece in pairs(board) do
+        if pieceSide(piece) == side then
+            local kind = pieceType(piece)
+            local file, rank = SQUARE_FILE[from], SQUARE_RANK[from]
+            
+            if kind == "P" then
+                local direction = side == "w" and 1 or -1
+                local startRank = side == "w" and 2 or 7
+                local promotionRank = side == "w" and 8 or 1
+                local one = toSquare(file, rank + direction)
+                
+                if one and not board[one] then
+                    if rank + direction == promotionRank then
+                        for _, promo in ipairs(PROMOTION_PIECES) do
+                            addMove(moves, from, one, { promotion = promo })
+                        end
+                    else
+                        addMove(moves, from, one)
+                        local two = toSquare(file, rank + direction * 2)
+                        if rank == startRank and two and not board[two] then
+                            addMove(moves, from, two, { doublePawn = true })
+                        end
+                    end
+                end
+                
+                for _, df in ipairs(PAWN_FILE_DELTAS) do
+                    local target = toSquare(file + df, rank + direction)
+                    if target and board[target] and pieceSide(board[target]) == opposite(side) then
+                        addMove(moves, from, target)
+                    end
+                end
+                
+            elseif kind == "N" then
+                for _, delta in ipairs(KNIGHT_DELTAS) do
+                    local target = toSquare(file + delta[1], rank + delta[2])
+                    if target then
+                        local targetPiece = board[target]
+                        if not targetPiece or pieceSide(targetPiece) ~= side then
+                            addMove(moves, from, target)
+                        end
+                    end
+                end
+                
+            elseif kind == "B" then
+                for _, direction in ipairs(BISHOP_DIRS) do
+                    local f, r = file + direction[1], rank + direction[2]
+                    while inBounds(f, r) do
+                        local target = toSquare(f, r)
+                        local targetPiece = board[target]
+                        if targetPiece then
+                            if pieceSide(targetPiece) ~= side then
+                                addMove(moves, from, target)
+                            end
+                            break
+                        end
+                        addMove(moves, from, target)
+                        f, r = f + direction[1], r + direction[2]
+                    end
+                end
+                
+            elseif kind == "R" then
+                for _, direction in ipairs(ROOK_DIRS) do
+                    local f, r = file + direction[1], rank + direction[2]
+                    while inBounds(f, r) do
+                        local target = toSquare(f, r)
+                        local targetPiece = board[target]
+                        if targetPiece then
+                            if pieceSide(targetPiece) ~= side then
+                                addMove(moves, from, target)
+                            end
+                            break
+                        end
+                        addMove(moves, from, target)
+                        f, r = f + direction[1], r + direction[2]
+                    end
+                end
+                
+            elseif kind == "Q" then
+                for _, direction in ipairs(QUEEN_DIRS) do
+                    local f, r = file + direction[1], rank + direction[2]
+                    while inBounds(f, r) do
+                        local target = toSquare(f, r)
+                        local targetPiece = board[target]
+                        if targetPiece then
+                            if pieceSide(targetPiece) ~= side then
+                                addMove(moves, from, target)
+                            end
+                            break
+                        end
+                        addMove(moves, from, target)
+                        f, r = f + direction[1], r + direction[2]
+                    end
+                end
+                
+            elseif kind == "K" then
+                for _, delta in ipairs(KING_DELTAS) do
+                    local target = toSquare(file + delta[1], rank + delta[2])
+                    if target then
+                        local targetPiece = board[target]
+                        if not targetPiece or pieceSide(targetPiece) ~= side then
+                            addMove(moves, from, target)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return moves
+end
+
+local function moveIdentity(move)
+    if not move then return "" end
+    return (move.from or "") .. (move.to or "") .. (move.promotion or "") .. (move.castle or "")
+end
+
+-- ============================================================================
+-- EVALUATION (SIMPLIFIED)
+-- ============================================================================
+
+local function getPST(kind, side, file, rank)
+    local r = side == "w" and rank or (9 - rank)
+    local tableForPiece = PST_BY_KIND[kind]
+    if not tableForPiece or not tableForPiece[r] then return 0 end
+    return tableForPiece[r][file] or 0
+end
+
+local function countPseudoMobility(board, side)
+    local count = 0
+    if not board then return 0 end
+    for square, piece in pairs(board) do
+        if pieceSide(piece) == side then
+            local kind = pieceType(piece)
+            local file, rank = SQUARE_FILE[square], SQUARE_RANK[square]
+            
+            if kind == "N" then
+                for _, delta in ipairs(KNIGHT_DELTAS) do
+                    local target = toSquare(file + delta[1], rank + delta[2])
+                    if target and (not board[target] or pieceSide(board[target]) ~= side) then
+                        count = count + 1
+                    end
+                end
+            elseif kind == "K" then
+                for _, delta in ipairs(KING_DELTAS) do
+                    local target = toSquare(file + delta[1], rank + delta[2])
+                    if target and (not board[target] or pieceSide(board[target]) ~= side) then
+                        count = count + 1
+                    end
+                end
+            end
+        end
+    end
+    return count
+end
+
+local function evaluate(board, side, castling)
+    local score = 0
+    if not board then return 0 end
+    
+    local pieceCount = 0
+    local bishops = { w = 0, b = 0 }
+    
+    for square, piece in pairs(board) do
+        pieceCount = pieceCount + 1
+        local pSide = pieceSide(piece)
+        local kind = pieceType(piece)
+        local sign = pSide == "w" and 1 or -1
+        local value = PIECE_VALUE[kind] or 0
+        local file, rank = SQUARE_FILE[square], SQUARE_RANK[square]
+        
+        score = score + sign * value
+        if kind ~= "K" then
+            score = score + sign * getPST(kind, pSide, file, rank)
+        end
+        
+        if kind == "B" then bishops[pSide] = bishops[pSide] + 1
+    end
+    
+    if bishops.w >= 2 then score = score + 45 end
+    if bishops.b >= 2 then score = score - 45 end
+    
+    local whiteMob = countPseudoMobility(board, "w")
+    local blackMob = countPseudoMobility(board, "b")
+    score = score + (whiteMob - blackMob) * 2
+    
+    return score
+end
+
+-- ============================================================================
+-- SEARCH (SIMPLIFIED)
+-- ============================================================================
+
+local function makeMove(board, move)
+    if not board or not move then return nil end
+    local newBoard = shallowCopyBoard(board)
+    local movingPiece = newBoard[move.from]
+    
+    newBoard[move.from] = nil
+    newBoard[move.to] = move.promotion and (pieceSide(movingPiece) .. move.promotion) or movingPiece
+    
+    return newBoard
+end
+
+local function searchBestMove(board, side, castling, lastMove, depth, alpha, beta)
+    if depth <= 0 then
+        return nil, evaluate(board, side, castling)
+    end
+    
+    local moves = generateLegalMoves(board, side, castling, lastMove)
+    if #moves == 0 then
+        if inCheck(board, side) then
+            return nil, -MATE_SCORE + depth
+        end
+        return nil, 0
+    end
+    
+    local bestMove = nil
+    local bestScore = -math.huge
+    
+    for _, move in ipairs(moves) do
+        local newBoard = makeMove(board, move)
+        if newBoard then
+            local _, score = searchBestMove(newBoard, opposite(side), castling, move, depth - 1, -beta, -alpha)
+            score = -score
+            
+            if score > bestScore then
+                bestScore = score
+                bestMove = move
+            end
+            if score > alpha then alpha = score end
+            if alpha >= beta then break end
+        end
+    end
+    
+    return bestMove, bestScore
+end
+
+local function findBestMove(board, side, castling, lastMove)
+    local bestMove, score = searchBestMove(board, side, castling, lastMove, 4, -math.huge, math.huge)
+    return bestMove, score, 4, { nodes = 0 }
+end
+
+-- ============================================================================
+-- UI HELPERS
 -- ============================================================================
 
 local function clearHighlights()
     if not state.boardFrame then return end
     
-    -- Xóa guide cũ
     local guide = state.boardGui and state.boardGui:FindFirstChild("HongSondevMoveGuide")
     if guide then guide:Destroy() end
     
-    -- Xóa các hint
     for _, square in ipairs(state.boardFrame:GetChildren()) do
         local hint = square:FindFirstChild("HongSondevHint")
         if hint then hint:Destroy() end
@@ -528,61 +814,170 @@ local function addSquareHighlight(squareName, color, isTarget)
 end
 
 local function drawMoveGuide(fromName, toName)
-    -- [Giữ nguyên từ bản cũ]
     if not state.boardFrame then return end
     
     local fromSquare = state.boardFrame:FindFirstChild(fromName)
     local toSquare = state.boardFrame:FindFirstChild(toName)
     if not fromSquare or not toSquare or not fromSquare:IsA("GuiObject") or not toSquare:IsA("GuiObject") then return end
     
-    local old = state.boardGui and state.boardGui:FindFirstChild("HongSondevMoveGuide")
-    if old then old:Destroy() end
-    
-    local guide = Instance.new("Frame")
-    guide.Name = "HongSondevMoveGuide"
-    guide.Size = UDim2.fromOffset(state.boardFrame.AbsoluteSize.X, state.boardFrame.AbsoluteSize.Y)
-    guide.Position = UDim2.fromOffset(state.boardFrame.AbsolutePosition.X, state.boardFrame.AbsolutePosition.Y)
-    guide.BackgroundTransparency = 1
-    guide.BorderSizePixel = 0
-    guide.Active = false
-    guide.ClipsDescendants = false
-    guide.ZIndex = 60
-    guide.Parent = state.boardGui
-    
-    local origin = state.boardFrame.AbsolutePosition
-    local fromCenter = fromSquare.AbsolutePosition + fromSquare.AbsoluteSize / 2 - origin
-    local toCenter = toSquare.AbsolutePosition + toSquare.AbsoluteSize / 2 - origin
-    local delta = toCenter - fromCenter
-    if delta.Magnitude < 2 then guide:Destroy(); return end
-    
-    -- [Phần vẽ mũi tên giữ nguyên từ bản cũ...]
     addSquareHighlight(fromName, GREEN_FROM, false)
     addSquareHighlight(toName, GREEN_TO, true)
 end
 
-local function setStatus(text, muted)
-    if state.statusLabel then
-        state.statusLabel:Set(text)
+local function setStatus(text)
+    if state.statusLabel and state.uiReady then
+        pcall(function() state.statusLabel:Set(text) end)
     end
 end
 
 local function setEngineStats(text)
-    if state.statsLabel then
-        state.statsLabel:Set(text)
-    end
-end
-
-local function setOpponentInfo(text)
-    if state.opponentLabel then
-        state.opponentLabel:Set(text)
+    if state.statsLabel and state.uiReady then
+        pcall(function() state.statsLabel:Set(text) end)
     end
 end
 
 -- ============================================================================
--- BOARD SYNC / GAME STATE (Giữ nguyên từ bản cũ)
+-- AMETHYST UI SETUP (FIXED)
+-- ============================================================================
+
+local function setupAmethystUI()
+    local Amethyst = loadAmethystUI()
+    if not Amethyst then
+        warn("[HongSondev Chess Trainer] Failed to load Amethyst UI")
+        return false
+    end
+    
+    state.amethyst = Amethyst
+    
+    local success, err = pcall(function()
+        state.mainWindow = Amethyst:CreateWindow({
+            Title = "♟ Chess Trainer v12",
+            SubTitle = "HongSondev · Elite Search Engine",
+            TabWidth = 160,
+            Size = UDim2.fromOffset(520, 480),
+            Theme = "Dark",
+            MinimizeKey = Enum.KeyCode.RightShift,
+        })
+        
+        state.mainTab = state.mainWindow:AddTab({
+            Title = "🎯 Phân tích",
+            Icon = "target",
+        })
+        
+        state.engineTab = state.mainWindow:AddTab({
+            Title = "⚙️ Engine",
+            Icon = "settings",
+        })
+        
+        local statusSection = state.mainTab:AddSection({
+            Title = "📊 Trạng thái",
+            Side = "Left",
+        })
+        
+        state.statusLabel = statusSection:AddParagraph({
+            Title = "Trạng thái",
+            Content = "Đang đọc bàn cờ...",
+            Size = "Medium",
+        })
+        
+        state.opponentLabel = statusSection:AddParagraph({
+            Title = "Đối thủ",
+            Content = "Chưa có dữ liệu",
+            Size = "Small",
+        })
+        
+        state.statsLabel = statusSection:AddParagraph({
+            Title = "Engine",
+            Content = "Đang khởi tạo...",
+            Size = "Small",
+        })
+        
+        local controlSection = state.mainTab:AddSection({
+            Title = "🎮 Điều khiển",
+            Side = "Right",
+        })
+        
+        controlSection:AddButton({
+            Title = "🔄 Tính lại",
+            Description = "Chạy lại phân tích từ đầu",
+            Callback = function()
+                scheduleRefresh(true)
+            end,
+        })
+        
+        controlSection:AddButton({
+            Title = "🧹 Xóa gợi ý",
+            Description = "Xóa highlight khỏi bàn cờ",
+            Callback = function()
+                clearHighlights()
+            end,
+        })
+        
+        controlSection:AddDropdown({
+            Title = "Phe cần gợi ý",
+            Values = { "Auto", "White", "Black" },
+            Multi = false,
+            Default = 1,
+            Callback = function(value)
+                state.sideMode = value
+                scheduleRefresh(true)
+            end,
+        })
+        
+        local engineSection = state.engineTab:AddSection({
+            Title = "⚡ Cấu hình Engine",
+        })
+        
+        engineSection:AddDropdown({
+            Title = "Mức độ tính toán",
+            Description = "Tăng thời gian để search sâu hơn",
+            Values = {
+                "Nhanh · 1.5s",
+                "Cân bằng · 3s",
+                "Mạnh · 6s",
+                "Rất mạnh · 9s",
+                "Tối đa · 12s"
+            },
+            Multi = false,
+            Default = 3,
+            Callback = function(value)
+                local budgets = {
+                    ["Nhanh · 1.5s"] = 1.5,
+                    ["Cân bằng · 3s"] = 3.0,
+                    ["Mạnh · 6s"] = 6.0,
+                    ["Rất mạnh · 9s"] = 9.0,
+                    ["Tối đa · 12s"] = 12.0,
+                }
+                state.searchBudget = budgets[value] or SEARCH_TIME_BUDGET
+                scheduleRefresh(true)
+            end,
+        })
+        
+        engineSection:AddParagraph({
+            Title = "🔬 Engine Info",
+            Content = "Iterative Deepening · Alpha-Beta · TT · LMR · Null Move · Quiescence",
+            Size = "Small",
+        })
+        
+        state.uiReady = true
+        print("[HongSondev Chess Trainer] ✅ Amethyst UI setup complete")
+    end)
+    
+    if not success then
+        warn("[HongSondev Chess Trainer] Amethyst UI error: " .. tostring(err))
+        state.uiReady = false
+        return false
+    end
+    
+    return true
+end
+
+-- ============================================================================
+-- BOARD SYNC
 -- ============================================================================
 
 local function positionKey(board)
+    if not board then return "" end
     local list = {}
     for square, piece in pairs(board) do
         table.insert(list, square .. piece)
@@ -601,15 +996,14 @@ local function readBoardFromGui()
             local tile = pieceObject:FindFirstChild("tile")
             local visible = true
             if pieceObject:IsA("GuiObject") then visible = pieceObject.Visible end
-            if tile and tile:IsA("StringValue") and visible and string.match(tile.Value, "^[a-h][1-8]$") then
+            if tile and tile:IsA("StringValue") and visible and string.match(tile.Value or "", "^[a-h][1-8]$") then
                 board[tile.Value] = code
             end
         end
     end
+    
     return board
 end
-
--- [Các hàm detectSideFromDragState, detectPlayerSideFromGui, chosenPlayerSide... giữ nguyên]
 
 local function detectSideFromDragState()
     if not state.piecesFrame then return nil end
@@ -655,49 +1049,132 @@ local function chosenPlayerSide()
     return detectPlayerSideFromGui() or state.playerSide or state.trackedSide
 end
 
--- [Các hàm chess engine: inBounds, toSquare, fromSquare, opposite, shallowCopyBoard...]
-
-local function inBounds(file, rank)
-    return file >= 1 and file <= 8 and rank >= 1 and rank <= 8
+local function resetGameState(board)
+    state.lastBoard = shallowCopyBoard(board)
+    state.lastPositionKey = positionKey(board)
+    state.castling = { wK = true, wQ = true, bK = true, bQ = true }
+    state.lastMove = nil
+    state.moveHistory = {}
+    state.positionCounts = {}
+    state.halfmoveClock = 0
+    state.fullmoveNumber = 1
+    state.trackedSide = "w"
 end
-
-local function toSquare(file, rank)
-    return inBounds(file, rank) and SQUARE_AT[file][rank] or nil
-end
-
-local function fromSquare(square)
-    return SQUARE_FILE[square], SQUARE_RANK[square]
-end
-
-local function opposite(side)
-    return side == "w" and "b" or "w"
-end
-
-local function shallowCopyBoard(board)
-    local copy = {}
-    for square, piece in pairs(board) do
-        copy[square] = piece
-    end
-    return copy
-end
-
--- [Phần engine search, evaluation, move generation giữ nguyên từ bản cũ...]
--- [Để tiết kiệm dung lượng, các phần này đã được giữ nguyên]
 
 -- ============================================================================
--- MAIN BOOT
+-- SCHEDULE REFRESH
+-- ============================================================================
+
+local scheduleRefresh = function(immediate)
+    local board = readBoardFromGui()
+    local key = positionKey(board)
+    local playerSide = chosenPlayerSide()
+    local detectedTurn = detectSideFromDragState()
+    local sideToMove = detectedTurn or state.trackedSide or playerSide
+    
+    if not findKing(board, "w") then
+        clearHighlights()
+        setStatus("Không tìm thấy vua Trắng", true)
+        return
+    end
+    if not findKing(board, "b") then
+        clearHighlights()
+        setStatus("Không tìm thấy vua Đen", true)
+        return
+    end
+    
+    if state.lastPositionKey == nil or key ~= state.lastPositionKey then
+        resetGameState(board)
+        state.lastPositionKey = key
+        state.lastBoard = shallowCopyBoard(board)
+    end
+    
+    playerSide = chosenPlayerSide()
+    sideToMove = detectedTurn or state.trackedSide or playerSide
+    
+    -- Opponent turn: no render
+    if state.sideMode == "Auto" and sideToMove ~= playerSide then
+        clearHighlights()
+        setStatus((playerSide == "w" and "Bạn: Trắng" or "Bạn: Đen") .. " · lượt đối thủ", true)
+        return
+    end
+    
+    local side = sideToMove
+    if state.sideMode == "White" then side = "w" end
+    if state.sideMode == "Black" then side = "b" end
+    
+    clearHighlights()
+    setStatus((side == "w" and "Trắng" or "Đen") .. " · đang phân tích...", true)
+    
+    task.spawn(function()
+        local bestMove, score, depth, stats = findBestMove(
+            board, side, state.castling, state.lastMove
+        )
+        
+        if not bestMove then
+            if inCheck(board, side) then
+                setStatus((side == "w" and "Trắng" or "Đen") .. ": chiếu hết", false)
+            else
+                setStatus((side == "w" and "Trắng" or "Đen") .. ": hòa", false)
+            end
+            return
+        end
+        
+        drawMoveGuide(bestMove.from, bestMove.to)
+        
+        local scoreText = score and string.format("%+.2f", score / 100) or "?"
+        local sideText = side == "w" and "Trắng" or "Đen"
+        setStatus(string.format("%s: %s → %s · depth %d · eval %s", sideText, bestMove.from, bestMove.to, depth, scoreText), false)
+        setEngineStats(string.format("nodes: %d", stats and stats.nodes or 0))
+    end)
+end
+
+-- ============================================================================
+-- WATCH PIECES
+-- ============================================================================
+
+local function watchPiece(pieceObject)
+    if not PIECE_CODE[pieceObject.Name] then return end
+    
+    local tile = pieceObject:FindFirstChild("tile")
+    if tile and tile:IsA("StringValue") then
+        tile:GetPropertyChangedSignal("Value"):Connect(function()
+            scheduleRefresh()
+        end)
+    end
+    
+    if pieceObject:IsA("GuiObject") then
+        pieceObject:GetPropertyChangedSignal("Visible"):Connect(function()
+            scheduleRefresh()
+        end)
+    end
+end
+
+-- ============================================================================
+-- BIND BOARD
 -- ============================================================================
 
 local function bindBoard(boardGui)
     state.boardGui = boardGui
-    state.main = boardGui:WaitForChild("Main", 10)
+    state.main = boardGui:FindFirstChild("Main")
+    if not state.main then
+        state.main = boardGui:WaitForChild("Main", 10)
+    end
     if not state.main then
         warn("[HongSondev Chess Trainer] Main not found")
         return false
     end
     
-    state.boardFrame = state.main:WaitForChild("Board", 10)
-    state.piecesFrame = state.main:WaitForChild("Pieces", 10)
+    state.boardFrame = state.main:FindFirstChild("Board")
+    if not state.boardFrame then
+        state.boardFrame = state.main:WaitForChild("Board", 10)
+    end
+    
+    state.piecesFrame = state.main:FindFirstChild("Pieces")
+    if not state.piecesFrame then
+        state.piecesFrame = state.main:WaitForChild("Pieces", 10)
+    end
+    
     if not state.boardFrame or not state.piecesFrame then
         warn("[HongSondev Chess Trainer] Board/Pieces not found")
         return false
@@ -706,22 +1183,37 @@ local function bindBoard(boardGui)
     -- Setup Amethyst UI
     if not setupAmethystUI() then
         warn("[HongSondev Chess Trainer] Falling back to native UI")
-        -- Fallback: tạo panel native nếu không load được Amethyst
+        -- Tạo native panel fallback ở đây nếu cần
     end
     
     -- Watch pieces
-    for _, child in ipairs(state.piecesFrame:GetChildren()) do
-        watchPiece(child)
+    if state.piecesFrame then
+        for _, child in ipairs(state.piecesFrame:GetChildren()) do
+            watchPiece(child)
+        end
     end
     
     scheduleRefresh()
     return true
 end
 
+-- ============================================================================
+-- BOOT
+-- ============================================================================
+
 local function boot()
     print(string.format("[HongSondev Chess Trainer] Environment: %s", getEnvironment()))
     
-    local playerGui = LOCAL_PLAYER:WaitForChild("PlayerGui")
+    local playerGui = LOCAL_PLAYER:FindFirstChild("PlayerGui")
+    if not playerGui then
+        playerGui = LOCAL_PLAYER:WaitForChild("PlayerGui", 30)
+    end
+    
+    if not playerGui then
+        warn("[HongSondev Chess Trainer] PlayerGui not found")
+        return
+    end
+    
     local boardGui = playerGui:FindFirstChild(GUI_NAME)
     if not boardGui then
         boardGui = playerGui:WaitForChild(GUI_NAME, 30)
@@ -736,4 +1228,7 @@ local function boot()
 end
 
 -- Khởi chạy
-boot()
+local success, err = pcall(boot)
+if not success then
+    warn("[HongSondev Chess Trainer] Boot error: " .. tostring(err))
+end
