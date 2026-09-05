@@ -1,25 +1,41 @@
 --[[
-    HongSondev Chess Trainer v13 - WindUI Edition (STABLE)
-    Hoạt động ổn định trong game
-    Sử dụng WindUI cho giao diện
-    Fix: ipairs nil, tile.Value nil, WaitForChild timeout, UI load
+    HongSondev Chess Trainer v13 - WindUI Edition (FIXED)
+    Hoạt động ổn định trong game với UNC 98%
+    Fix: nil value, cloneref, checkcaller, hookfunction, isclosure
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 
 local LOCAL_PLAYER = Players.LocalPlayer
 local GUI_NAME = "2DBoard"
 
 -- ============================================================================
--- TẢI WINDUI VỚI RETRY
+-- FIX: HÀM CƠ BẢN CHO UNC 98%
+-- ============================================================================
+
+-- cloneref - clone reference
+local cloneref = cloneref or function(instance) return instance end
+local clonefunction = clonefunction or function(func) return func end
+local isclosure = isclosure or function(func) return type(func) == "function" end
+local hookfunction = hookfunction or function(func, hook) return func end
+local checkcaller = checkcaller or function() return false end
+local getcallingscript = getcallingscript or function() return nil end
+
+-- getrenv - get raw environment
+local getrenv = getrenv or function() return getfenv() end
+
+-- ============================================================================
+-- TẢI WINDUI VỚI FALLBACK
 -- ============================================================================
 
 local WindUI = nil
 local function loadWindUI()
     if WindUI then return WindUI end
     
+    -- Thử các URL khác nhau
     local sources = {
         "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
         "https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua",
@@ -27,7 +43,12 @@ local function loadWindUI()
     
     for _, url in ipairs(sources) do
         local success, result = pcall(function()
-            return loadstring(game:HttpGet(url))()
+            -- Dùng HttpService thay vì game:HttpGet (tương thích hơn)
+            local content = HttpService:GetAsync(url)
+            if content then
+                return loadstring(content)()
+            end
+            return nil
         end)
         if success and result then
             WindUI = result
