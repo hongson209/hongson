@@ -1,5845 +1,3142 @@
---!nocheck
 --[[
-	SonHUB — Universal Grandmaster Chess Coach (Ultimate Stealth & Precision Edition)
-	Compatible with:
-	1. Chess Club (PlaceId: 139394516128799)
-	2. CHESS! / CookieChess (PlaceId: 6222531507)
-	3. RoChess! (PlaceId: 139717576471404)
-	
-	Features:
-	- Theme: SonLibrary default Red accent Color3.fromRGB(246, 92, 82).
-	- Single-Line Clean Rows: Removed redundant 2nd line descriptions for compact, elegant UI.
-	- Forced Depth: Enforces exact Depth level (Default: 18) for Free API with Premium Key unlocking.
-	- Advanced Anti-Cheat Shield: newcclosure __namecall, Kick intercept, telemetry neutralization.
-	- Full Support: Online Matchmaking, Play with Friends, Solo / Bots, and Analysis across all supported chess games.
-	- Zero Console Spam & Zero Detection: Ultra stealth, cached FEN lookups, natural humanized delays.
+	SonHub Advanced Virtual Machine (SonVM v4.2 Stealth Protection)
+	Multi-layer Bytecode Virtualization, Control-Flow Flattening & Anti-Tamper Engine
+	Zero Console Output â¢ Pure Native Luau Execution
 ]]
 
--- Zero console trace & stealth suppression
-local print = function(...) end
-local warn = function(...) end
+local _ENV = (getfenv and getfenv()) or _G
+local _pcall = pcall
+local _type = type
+local _string = string
+local _table = table
+local _math = math
+local _loadstring = loadstring or (load and load)
+local _char = _string.char
+local _byte = _string.byte
 
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
-
-----------------------------------------------------------------------
--- ADVANCED STEALTH ANTI-CHEAT & TELEMETRY SHIELD
--- Bypasses common Roblox Anti-Cheats (Adonis, HD, Game-specific AC, Kick hooks)
-----------------------------------------------------------------------
-
-local antiCheatHookInstalled = false
-local oldNamecall = nil
-
-local function installAntiCheatShield()
-	if antiCheatHookInstalled then return end
-	antiCheatHookInstalled = true
-
-	-- 1. Stealth Neutralization of Chess Club Focus Loss telemetry
-	pcall(function()
-		local gc = getconnections or (syn and syn.getconnections) or (getgenv and getgenv().getconnections)
-		if type(gc) == "function" then
-			for _, conn in ipairs(gc(UserInputService.WindowFocusReleased)) do
-				pcall(function() conn:Disable() end)
-			end
-		end
-	end)
-
-	-- 2. Hook __namecall and __index: Block telemetry, anticheat reports, and LostFocus calls
-	pcall(function()
-		if type(hookmetamethod) ~= "function" then return end
-		local newc = (typeof(newcclosure) == "function" and newcclosure) or function(f) return f end
-		local checkc = (typeof(checkcaller) == "function" and checkcaller) or function() return false end
-
-		-- Explicit Whitelist patterns for legitimate gameplay remotes
-		local function isWhitelisted(name: string): boolean
-			if name:find("submitmove", 1, true)
-				or name:find("movepiece", 1, true)
-				or name:find("startsologame", 1, true)
-				or name:find("startgame", 1, true)
-				or name:find("endgame", 1, true)
-				or name:find("acceptchallenge", 1, true)
-				or name:find("createchallenge", 1, true)
-				or name:find("rematch", 1, true)
-				or name:find("offerdraw", 1, true)
-				or name:find("acceptdraw", 1, true)
-				or name:find("resign", 1, true)
-				or name:find("joinquickque", 1, true)
-				or name:find("removefromqueue", 1, true)
-				or name:find("joinqueue", 1, true)
-				or name:find("cancelqueue", 1, true)
-				or name:find("action", 1, true)
-				or name:find("request", 1, true)
-				or name:find("event", 1, true) then
-				return true
-			end
-			return false
-		end
-
-		-- Targeted Anti-Cheat, Telemetry, and Alt-Tab detection patterns
-		local blockedTerms = {
-			"lostfocus", "reportclienterror", "client_error", "anticheat", "anti_cheat", "telemetry",
-			"analytics", "exploitdetected", "cheatdetected", "securitycheck", "integritycheck",
-			"honeypot", "watchdog", "suspiciousplayer", "mod_kick", "mod_ratedban", "mod_fullban"
-		}
-
-		local function isBlocked(name: string): boolean
-			for _, term in ipairs(blockedTerms) do
-				if name:find(term, 1, true) then
-					return true
-				end
-			end
-			return false
-		end
-
-		oldNamecall = hookmetamethod(game, "__namecall", newc(function(self, ...)
-			if not checkc() then
-				local method = getnamecallmethod()
-				if (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
-					local n = self.Name:lower()
-					if isBlocked(n) and not isWhitelisted(n) then
-						if method == "InvokeServer" then
-							return true
-						end
-						return nil
-					end
-				end
-			end
-			return oldNamecall(self, ...)
-		end))
-
-		local oldIndex = nil
-		oldIndex = hookmetamethod(game, "__index", newc(function(self, key)
-			if not checkc() and typeof(self) == "Instance" and (key == "FireServer" or key == "InvokeServer") then
-				local n = self.Name:lower()
-				if isBlocked(n) and not isWhitelisted(n) then
-					return newc(function()
-						return (key == "InvokeServer") and true or nil
-					end)
-				end
-			end
-			return oldIndex(self, key)
-		end))
-	end)
-end
-
-installAntiCheatShield()
-
--- Lifecycle & session management
-local _genv = (getgenv and getgenv()) or _G
-local currentGen = tick()
-_genv._SONHUB_GEN = currentGen
-
-if _genv._SONHUB_CLEANUP then
-	pcall(_genv._SONHUB_CLEANUP)
-end
-
-local function isAlive(): boolean
-	return _genv._SONHUB_GEN == currentGen
-end
-
--- Clean previous UI instances
-pcall(function()
-	local targets = {}
-	local geth = (getgenv and getgenv().gethui) or (typeof(gethui) == "function" and gethui)
-	if type(geth) == "function" then
-		pcall(function() table.insert(targets, geth()) end)
-	end
-	pcall(function() table.insert(targets, game:GetService("CoreGui")) end)
-	pcall(function()
-		local rgui = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
-		if rgui then table.insert(targets, rgui) end
-	end)
-	pcall(function()
-		local lp = game:GetService("Players").LocalPlayer
-		if lp and lp:FindFirstChild("PlayerGui") then
-			table.insert(targets, lp.PlayerGui)
-		end
-	end)
-	for _, parent in ipairs(targets) do
-		pcall(function()
-			for _, c in ipairs(parent:GetChildren()) do
-				local n = c.Name:lower()
-				if n:find("windui") or n:find("sonhub") or n:find("sonlibrary") or n:find("pastacomplete") or n:find("pastanotification") then
-					pcall(function() c:Destroy() end)
-				end
-			end
-		end)
-	end
-end)
-
-----------------------------------------------------------------------
--- CONFIGURATION & PERSISTENCE
-----------------------------------------------------------------------
-
-local CFG = {
-	Language = "en",
-	AutoFarm = false,
-	SpoofGameReview = true,          -- 100% English
-	EngineMode = "Auto Free (Stockfish 18 NNUE)",
-	LocalDepth = 8,           -- Pure Luau SonEngine local search depth (4..12)
-	LocalTimeLimitMs = 1200,  -- Local calculation time budget per move (ms)
-	AntiDraw = true,          -- Auto avoid Stalemate & 3-Fold Repetition
-	AllowLocalFallbackInAuto = true, -- Fallback to SonEngine if network drops
-	AutoPlay = false,
-	PlayLegit = false,
-	HumanLegitAccuracy = false, -- Default false (player turns on when desired) (Blends best, good & safe moves without losing)
-	LegitTargetAccuracy = "Grandmaster (82-88%)", -- Options: "Master (75-82%)", "Grandmaster (82-88%)", "Super GM (88-94%)",
-	Visuals = true,
-	Watermark = true,
-	ToggleKey = Enum.KeyCode.K,
-	FastDelay = 0.25,
-	LegitBaseDelay = 2.5,
-	Depth = 18,               -- Maximum depth for Chess-API.com (Stockfish 18 NNUE @ 2750 ELO)
-	AutoPromoteQueen = true,  -- Auto promote pawns to Queen on rank 8/1
-	OverrideSkins = false,    -- Default FALSE so player's own inventory skin is NEVER overwritten
-	CookieSkin = "Default (Inventory)",
-	ClubSkin3D = "Default (Inventory)",
-	ClubSkin2D = "Default (Inventory)",
-	RoChessBoardTheme = "Default (Inventory)",
-	RoChessPieceSet = "Default (Inventory)",
-}
-
--- Workspace isolated config directory for SonHub v3.1
-local CONFIG_FOLDER = "SonHub_v3.1"
-local CONFIG_FILE = "SonHub_v3.1/ChessSettings.json"
-local FALLBACK_CONFIG_FILE = "SonHub_v3.1_ChessSettings.json"
-
-local function ensureConfigDir()
-	local isfolderFn = isfolder or (getgenv and getgenv().isfolder)
-	local makefolderFn = makefolder or (getgenv and getgenv().makefolder)
-	if type(isfolderFn) == "function" and type(makefolderFn) == "function" then
-		pcall(function()
-			if not isfolderFn(CONFIG_FOLDER) then
-				makefolderFn(CONFIG_FOLDER)
-			end
-		end)
-	end
-end
-
-local function loadSettings()
-	local readfileFn = readfile or (getgenv and getgenv().readfile)
-	local isfileFn = isfile or (getgenv and getgenv().isfile)
-	if type(isfileFn) == "function" and type(readfileFn) == "function" then
-		local targetPath = nil
-		pcall(function()
-			if isfileFn(CONFIG_FILE) then
-				targetPath = CONFIG_FILE
-			elseif isfileFn(FALLBACK_CONFIG_FILE) then
-				targetPath = FALLBACK_CONFIG_FILE
-			end
-		end)
-
-		if targetPath then
-			local okRead, content = pcall(function() return readfileFn(targetPath) end)
-			if okRead and type(content) == "string" and #content > 5 then
-				local okDecode, saved = pcall(function() return HttpService:JSONDecode(content) end)
-				if okDecode and type(saved) == "table" then
-					if type(saved.EngineMode) == "string" then
-						CFG.EngineMode = saved.EngineMode
-					end
-					if type(saved.LocalDepth) == "number" then
-						CFG.LocalDepth = math.clamp(math.floor(saved.LocalDepth), 4, 12)
-					end
-					if type(saved.LocalTimeLimitMs) == "number" then
-						CFG.LocalTimeLimitMs = math.clamp(saved.LocalTimeLimitMs, 300, 5000)
-					end
-					if type(saved.AntiDraw) == "boolean" then
-						CFG.AntiDraw = saved.AntiDraw
-					end
-					if type(saved.LegitBaseDelay) == "number" then
-						CFG.LegitBaseDelay = math.clamp(saved.LegitBaseDelay, 1.0, 6.0)
-					end
-					if type(saved.HumanLegitAccuracy) == "boolean" then
-						CFG.HumanLegitAccuracy = saved.HumanLegitAccuracy
-					end
-					if type(saved.AutoFarm) == "boolean" then
-						CFG.AutoFarm = saved.AutoFarm
-					end
-					if type(saved.SpoofGameReview) == "boolean" then
-						CFG.SpoofGameReview = saved.SpoofGameReview
-					end
-					if type(saved.LegitTargetAccuracy) == "string" then
-						CFG.LegitTargetAccuracy = saved.LegitTargetAccuracy
-					end
-					if type(saved.Depth) == "number" then
-						CFG.Depth = math.clamp(math.floor(saved.Depth), 16, 18)
-					end
-					if type(saved.AutoPromoteQueen) == "boolean" then
-						CFG.AutoPromoteQueen = saved.AutoPromoteQueen
-					end
-					if type(saved.Visuals) == "boolean" then
-						CFG.Visuals = saved.Visuals
-					end
-					if type(saved.Watermark) == "boolean" then
-						CFG.Watermark = saved.Watermark
-					end
-					if type(saved.OverrideSkins) == "boolean" then
-						CFG.OverrideSkins = saved.OverrideSkins
-					end
-					if type(saved.CookieSkin) == "string" then
-						CFG.CookieSkin = saved.CookieSkin
-					end
-					if type(saved.ClubSkin3D) == "string" then
-						CFG.ClubSkin3D = saved.ClubSkin3D
-					end
-					if type(saved.ClubSkin2D) == "string" then
-						CFG.ClubSkin2D = saved.ClubSkin2D
-					end
-					if type(saved.RoChessBoardTheme) == "string" then
-						CFG.RoChessBoardTheme = saved.RoChessBoardTheme
-					end
-					if type(saved.RoChessPieceSet) == "string" then
-						CFG.RoChessPieceSet = saved.RoChessPieceSet
-					end
-				end
-			end
-		end
-	end
-end
-
-local function saveSettings()
-	local writefileFn = writefile or (getgenv and getgenv().writefile)
-	if type(writefileFn) == "function" then
-		ensureConfigDir()
-		pcall(function()
-			local payload = HttpService:JSONEncode({
-				Language = "en",
-				EngineMode = CFG.EngineMode,
-				LocalDepth = CFG.LocalDepth,
-				LocalTimeLimitMs = CFG.LocalTimeLimitMs,
-				AntiDraw = CFG.AntiDraw,
-				AllowLocalFallbackInAuto = true,
-				HumanLegitAccuracy = CFG.HumanLegitAccuracy,
-				LegitTargetAccuracy = CFG.LegitTargetAccuracy,
-				LegitBaseDelay = CFG.LegitBaseDelay,
-				Depth = CFG.Depth,
-				AutoPromoteQueen = CFG.AutoPromoteQueen,
-				Visuals = CFG.Visuals,
-				Watermark = CFG.Watermark,
-				OverrideSkins = CFG.OverrideSkins,
-				CookieSkin = CFG.CookieSkin,
-				ClubSkin3D = CFG.ClubSkin3D,
-				ClubSkin2D = CFG.ClubSkin2D,
-				RoChessBoardTheme = CFG.RoChessBoardTheme,
-				RoChessPieceSet = CFG.RoChessPieceSet,
-			})
-			local ok = pcall(function() writefileFn(CONFIG_FILE, payload) end)
-			if not ok then
-				pcall(function() writefileFn(FALLBACK_CONFIG_FILE, payload) end)
-			end
-		end)
-	end
-end
-
-loadSettings()
-
-----------------------------------------------------------------------
--- UTILITIES & NETWORKING
-----------------------------------------------------------------------
-
-local function tryRequire(inst: Instance?): any
-	if not inst then return nil end
-	local ok, m = pcall(require, inst :: any)
-	return ok and m or nil
-end
-
-local function gethuiSafe(): Instance
-	local geth = (getgenv and getgenv().gethui) or (typeof(gethui) == "function" and gethui)
-	if type(geth) == "function" then
-		local ok, h = pcall(geth)
-		if ok and h then return h end
-	end
-	local okCore, cGui = pcall(function() return game:GetService("CoreGui") end)
-	if okCore and cGui then return cGui end
-	return LocalPlayer:WaitForChild("PlayerGui")
-end
-
-local function makeHttpRequest(url: string, method: string?, body: string?, timeoutSec: number?, customHeaders: { [string]: string }?): string?
-	local maxWait = timeoutSec or 4.0
-	local reqFn = (syn and syn.request)
-		or (getgenv and getgenv().request)
-		or request
-		or http_request
-		or (http and http.request)
-		or (fluxus and fluxus.request)
-
-	if type(reqFn) == "function" then
-		local headers: { [string]: string } = {
-			["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-			["Accept"] = "application/json, text/plain, */*",
-		}
-		if method == "POST" then
-			headers["Content-Type"] = "application/json"
-		end
-		if customHeaders then
-			for k, v in pairs(customHeaders) do
-				headers[k] = v
-			end
-		end
-
-		local done = false
-		local result: string? = nil
-
-		task.spawn(function()
-			local ok, res = pcall(reqFn, {
-				Url = url,
-				Method = method or "GET",
-				Headers = headers,
-				Body = body,
-				Timeout = math.ceil(maxWait),
-			})
-			if not done and ok then
-				local bodyStr: string? = nil
-				local statusCode = 200
-				if type(res) == "table" then
-					statusCode = res.StatusCode or res.Status or res.status_code or 200
-					bodyStr = res.Body or res.body
-				elseif type(res) == "string" then
-					bodyStr = res
-				end
-				if type(bodyStr) == "string" and #bodyStr > 5 and (statusCode == 200 or statusCode == 201) then
-					result = bodyStr
-				end
-			end
-			done = true
-		end)
-
-		local start = tick()
-		while not done and (tick() - start < maxWait) do
-			task.wait(0.04)
-		end
-		done = true
-		return result
+return (function(...)
+	local _VM_STATE = 0x1337A1
+	local _VREG = {}
+	local _ORIG_LEN = 192017
+	local _BASE = 79
+	local _ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!#$%&*+-/<=>?@^_~"
+	local _LOOKUP = {}
+	for i = 1, #_ALPHABET do
+		_LOOKUP[_byte(_ALPHABET, i)] = i - 1
 	end
 
-	-- Fallback to game:HttpGet with strict asynchronous deadline
-	if (not method or method == "GET") and type(game.HttpGet) == "function" then
-		local doneGet = false
-		local resultGet: string? = nil
-		task.spawn(function()
-			local okGet, resGet = pcall(function() return game:HttpGet(url) end)
-			if not doneGet and okGet and type(resGet) == "string" and #resGet > 5 then
-				resultGet = resGet
-			end
-			doneGet = true
-		end)
-
-		local startGet = tick()
-		while not doneGet and (tick() - startGet < maxWait) do
-			task.wait(0.04)
-		end
-		doneGet = true
-		return resultGet
-	end
-
-	return nil
-end
-
-local function safeClickButton(btn: any)
-	if not btn then return end
-	local fs = firesignal or (syn and syn.firesignal) or (getgenv and getgenv().firesignal)
-	if type(fs) == "function" then
-		pcall(fs, btn.MouseButton1Down)
-		pcall(fs, btn.MouseButton1Up)
-		pcall(fs, btn.MouseButton1Click)
-		pcall(fs, btn.Activated)
-		return
-	end
-	local gc = getconnections or (syn and syn.getconnections) or (getgenv and getgenv().getconnections)
-	if type(gc) == "function" then
-		for _, evName in ipairs({ "MouseButton1Down", "MouseButton1Up", "MouseButton1Click", "Activated" }) do
-			local ev = btn[evName]
-			if ev then
-				local ok, conns = pcall(gc, ev)
-				if ok and type(conns) == "table" then
-					for _, conn in ipairs(conns) do
-						if conn.Function then pcall(conn.Function) end
-						if conn.Fire then pcall(conn.Fire, conn) end
-					end
-				end
-			end
-		end
-	end
-end
-
-
-
-----------------------------------------------------------------------
--- CHESS COORDINATES & FEN ENGINE HELPERS
-----------------------------------------------------------------------
-
-local function sqToCoord(sq: string): (number, number)
-	local fileChar = sq:sub(1, 1):lower()
-	local rankNum = tonumber(sq:sub(2, 2)) or 1
-	local col = string.byte(fileChar) - 96
-	local x = 9 - col
-	local y = rankNum
-	return x, y
-end
-
-local function coordToSq(x: number, y: number): string
-	local col = 9 - x
-	local fileChar = string.char(col + 96)
-	return ("%s%d"):format(fileChar, y)
-end
-
-local function isPawnPromotion(fen: string, uci: string): boolean
-	if not uci or #uci < 4 then return false end
-	local toSq = uci:sub(3, 4)
-	local toRank = tonumber(toSq:sub(2, 2))
-	if toRank ~= 1 and toRank ~= 8 then return false end
-	if #uci >= 5 and uci:sub(5, 5):match("[qrbnQRBN]") then return true end
-
-	local fromSq = uci:sub(1, 2)
-	local fromCol = string.byte(fromSq:sub(1, 1):lower()) - 96
-	local fromRank = tonumber(fromSq:sub(2, 2)) or 1
-	local parts = {}
-	for w in fen:gmatch("%S+") do table.insert(parts, w) end
-	local board = parts[1] or ""
-	local ranks = {}
-	for r in board:gmatch("[^/]+") do table.insert(ranks, r) end
-	local targetRow = ranks[9 - fromRank]
-	if not targetRow then return false end
-
-	local c = 0
-	for i = 1, #targetRow do
-		local ch = targetRow:sub(i, i)
-		local num = tonumber(ch)
-		if num then
-			c += num
-		else
-			c += 1
-			if c == fromCol then
-				return ch:lower() == "p"
-			end
-		end
-	end
-	return false
-end
-
-local function pieceNameToChar(name: string): string
-	local s = name:lower()
-	if s:find("knight", 1, true) or s:find("horse", 1, true) then
-		return "n"
-	elseif s:find("king", 1, true) then
-		return "k"
-	elseif s:find("queen", 1, true) then
-		return "q"
-	elseif s:find("bishop", 1, true) then
-		return "b"
-	elseif s:find("rook", 1, true) or s:find("castle", 1, true) then
-		return "r"
-	elseif s:find("pawn", 1, true) then
-		return "p"
-	end
-	if s:match("%f[%a]k%f[%A]") then return "k" end
-	if s:match("%f[%a]q%f[%A]") then return "q" end
-	if s:match("%f[%a]r%f[%A]") then return "r" end
-	if s:match("%f[%a]b%f[%A]") then return "b" end
-	if s:match("%f[%a]n%f[%A]") then return "n" end
-	return "p"
-end
-
-local function isMe(val: any): boolean
-	if not val then return false end
-	if typeof(val) == "Instance" then
-		if val == LocalPlayer or val == LocalPlayer.Character then return true end
-		if val:IsA("Player") and val.UserId == LocalPlayer.UserId then return true end
-	end
-	if type(val) == "string" then
-		local s = val:lower()
-		if s == LocalPlayer.Name:lower() or s == LocalPlayer.DisplayName:lower() or s == tostring(LocalPlayer.UserId) then return true end
-	end
-	if type(val) == "table" then
-		if val.UserId == LocalPlayer.UserId then return true end
-		if type(val.Name) == "string" and (val.Name:lower() == LocalPlayer.Name:lower() or val.Name:lower() == LocalPlayer.DisplayName:lower()) then return true end
-		if type(val.DisplayName) == "string" and val.DisplayName:lower() == LocalPlayer.DisplayName:lower() then return true end
-	end
-	return false
-end
-
-local function normalizeFenForEngine(fen: string, gameInfo: any?): string
-	if type(fen) ~= "string" or #fen < 8 then return fen end
-	local parts = {}
-	for w in fen:gmatch("%S+") do table.insert(parts, w) end
-	if #parts == 0 then return fen end
-
-	local placement = parts[1]
-	local turn = parts[2]
-	-- Always preserve engine canonical turn if valid ("w" or "b") to prevent calculating for opponent
-	if not turn or (turn ~= "w" and turn ~= "b") then
-		if gameInfo and gameInfo.WhiteToPlay ~= nil then
-			turn = gameInfo.WhiteToPlay and "w" or "b"
-		else
-			turn = "w"
-		end
-	end
-
-	local castling = parts[3] or "-"
-
-	-- Mathematically rigorous castling verification: Ensure castling is only set if Kings and Rooks are in starting positions
-	local ranks = {}
-	for r in placement:gmatch("[^/]+") do table.insert(ranks, r) end
-	if #ranks == 8 then
-		local rank8 = ranks[1] -- Black rank 8
-		local rank1 = ranks[8] -- White rank 1
-
-		local validCastling = ""
-		if castling:find("K") and rank1:find("K") and rank1:find("R") then
-			validCastling ..= "K"
-		end
-		if castling:find("Q") and rank1:find("K") and rank1:find("R") then
-			validCastling ..= "Q"
-		end
-		if castling:find("k") and rank8:find("k") and rank8:find("r") then
-			validCastling ..= "k"
-		end
-		if castling:find("q") and rank8:find("q") and rank8:find("r") then
-			validCastling ..= "q"
-		end
-		castling = if #validCastling > 0 then validCastling else "-"
-	else
-		castling = "-"
-	end
-
-	-- Safe En Passant: Must be on rank 3 or 6, else default to '-'
-	local ep = parts[4] or "-"
-	if ep ~= "-" and not ep:match("^[a-h][36]$") then
-		ep = "-"
-	end
-
-	local halfmove = parts[5] or "0"
-	local fullmove = parts[6] or (gameInfo and tostring(math.max(1, math.ceil((gameInfo.Round or 1) / 2)))) or "1"
-	return ("%s %s %s %s %s %s"):format(placement, turn, castling, ep, halfmove, fullmove)
-end
-
-----------------------------------------------------------------------
--- GAME ADAPTERS (CHESS CLUB & CHESS! 3D)
-----------------------------------------------------------------------
-
-local function getChessClubGame(): any?
-	local pScripts = LocalPlayer:FindFirstChild("PlayerScripts")
-	local proxy = tryRequire(pScripts and pScripts:FindFirstChild("Services") and pScripts.Services:FindFirstChild("ChessProxyService"))
-	if not proxy then return nil end
-
-	local g = proxy.ChessGame
-	if g and g.Active ~= false and type(g.FEN) == "string" and #g.FEN > 10 then
-		return g
-	end
-
-	local spec = proxy.Spectation
-	if spec and spec.Active ~= false and type(spec.FEN) == "string" and #spec.FEN > 10 then
-		return spec
-	end
-
-	return nil
-end
-
-local cachedCookieMc = nil
-local cachedCookieSc = nil
-
-local function getCookieMatch(): (any?, any?)
-	local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-	if not cachedCookieMc then
-		local client = pgui and pgui:FindFirstChild("Client")
-		cachedCookieMc = client and tryRequire(client:FindFirstChild("MatchClient"))
-	end
-	if not cachedCookieSc or not cachedCookieSc.board then
-		local gStatus = pgui and pgui:FindFirstChild("GameStatus")
-		local scMod = gStatus and gStatus:FindFirstChild("StatusClient")
-		if scMod then
-			cachedCookieSc = tryRequire(scMod)
-		end
-	end
-
-	local mc = cachedCookieMc
-	local sc = cachedCookieSc
-	local activeMc = mc or (sc and sc.client and sc.client.matchClient) or (sc and sc.client) or (sc and sc.matchClient)
-
-	if mc and mc.currentMatch and (mc.currentMatch.boardExists == true or mc.currentMatch.tiles ~= nil or mc.currentMatch.pieces ~= nil) then
-		if mc.currentMatch.gameEnded == true then return nil, (activeMc or mc) end
-		return mc.currentMatch, (activeMc or mc)
-	end
-
-	if sc and sc.board and (sc.board.boardExists == true or sc.board.tiles ~= nil or sc.board.pieces ~= nil) then
-		if sc.board.gameEnded == true then return nil, (activeMc or mc) end
-		return sc.board, (activeMc or mc)
-	end
-
-	if sc and sc.currentMatch and (sc.currentMatch.boardExists == true or sc.currentMatch.tiles ~= nil) then
-		if sc.currentMatch.gameEnded == true then return nil, (activeMc or mc) end
-		return sc.currentMatch, (activeMc or mc)
-	end
-
-	return nil, (activeMc or mc)
-end
-
-local function getCookieCastling(m: any): string
-	local castling = ""
-	pcall(function()
-		-- White King at {4, 1}
-		local wk = m:getPiece({ 4, 1 })
-		if wk and (wk.Name == "King" or wk.name == "King") and wk.team == true and wk.unmoved == true then
-			local rK = m:getPiece({ 1, 1 })
-			if rK and (rK.Name == "Rook" or rK.name == "Rook") and rK.team == true and rK.unmoved == true then
-				castling ..= "K"
-			end
-			local rQ = m:getPiece({ 8, 1 })
-			if rQ and (rQ.Name == "Rook" or rQ.name == "Rook") and rQ.team == true and rQ.unmoved == true then
-				castling ..= "Q"
-			end
-		end
-
-		-- Black King at {4, 8}
-		local bk = m:getPiece({ 4, 8 })
-		if bk and (bk.Name == "King" or bk.name == "King") and bk.team == false and bk.unmoved == true then
-			local rK = m:getPiece({ 1, 8 })
-			if rK and (rK.Name == "Rook" or rK.name == "Rook") and rK.team == false and rK.unmoved == true then
-				castling ..= "k"
-			end
-			local rQ = m:getPiece({ 8, 8 })
-			if rQ and (rQ.Name == "Rook" or rQ.name == "Rook") and rQ.team == false and rQ.unmoved == true then
-				castling ..= "q"
-			end
-		end
-	end)
-	return if #castling > 0 then castling else "-"
-end
-
-local function safeBuildCookieFEN(m: any): string?
-	local ok, fen = pcall(function()
-		local rows = {}
-		local whiteKing = 0
-		local blackKing = 0
-
-		for rank = 8, 1, -1 do
-			local emptyCount = 0
-			local rowStr = ""
-			for fileIdx = 8, 1, -1 do
-				local piece = m:getPiece({ fileIdx, rank })
-				if not piece or (piece.alive == false) or (piece.captured == true) or not piece.position then
-					emptyCount += 1
-				else
-					if emptyCount > 0 then
-						rowStr ..= tostring(emptyCount)
-						emptyCount = 0
-					end
-					local ch = pieceNameToChar(tostring(piece.Name or piece.name or ""))
-					local isWhite = (piece.team == true)
-					if ch == "k" then
-						if isWhite then whiteKing += 1 else blackKing += 1 end
-					end
-					rowStr ..= (isWhite and ch:upper() or ch:lower())
-				end
-			end
-			if emptyCount > 0 then
-				rowStr ..= tostring(emptyCount)
-			end
-			table.insert(rows, rowStr)
-		end
-
-		if whiteKing ~= 1 or blackKing ~= 1 then return nil end
-
-		local placement = table.concat(rows, "/")
-		local activeTurn = if m.activeTeam then "w" else "b"
-		local castling = getCookieCastling(m)
-		local roundNum = math.max(1, math.ceil((m.round or 1) / 2))
-		return placement .. " " .. activeTurn .. " " .. castling .. " - 0 " .. tostring(roundNum)
-	end)
-
-	if ok and type(fen) == "string" and #fen > 10 then
-		return fen
-	end
-	return nil
-end
-
-local function getCookieFEN(m: any): string?
-	local fen = safeBuildCookieFEN(m)
-	if fen then return fen end
-
-	local ok, rawFen = pcall(function() return m:createFENLine() end)
-	if ok and type(rawFen) == "string" and #rawFen > 10 and not rawFen:match("^8/8/8/8/8/8/8/8") and rawFen:find("k") and rawFen:find("K") then
-		local parts = {}
-		for w in rawFen:gmatch("%S+") do table.insert(parts, w) end
-		if #parts >= 2 then
-			local castling = getCookieCastling(m)
-			local roundNum = tostring(math.max(1, math.ceil((m.round or 1) / 2)))
-			return string.format("%s %s %s - 0 %s", parts[1], parts[2] or (m.activeTeam and "w" or "b"), castling, roundNum)
-		end
-	end
-	return nil
-end
-
-local cachedRoChessApp = nil
-
-local function getRoChessGame(): any?
-	if not cachedRoChessApp then
-		local rs = game:GetService("ReplicatedStorage")
-		local cClient = rs:FindFirstChild("ChessClient")
-		local appMod = cClient and cClient:FindFirstChild("App")
-		if appMod then
-			cachedRoChessApp = tryRequire(appMod)
-		end
-	end
-
-	local app = cachedRoChessApp
-	if not app then return nil end
-
-	local s = app.session
-	if not s or s.over == true or not s.engine then
-		return nil
-	end
-
-	-- Install Game Review Spoof hook if not yet installed
-	if not _G._sonHubReviewHooked then
-		_G._sonHubReviewHooked = true
-		pcall(function()
-			local rs = game:GetService("ReplicatedStorage")
-			local cClient = rs:FindFirstChild("ChessClient")
-			local reviewMod = cClient and cClient:FindFirstChild("Review")
-			if reviewMod then
-				local rev = tryRequire(reviewMod)
-				if rev and type(rev.compute) == "function" then
-					local origCompute = rev.compute
-					rev.compute = function(session, evals)
-						local res = origCompute(session, evals)
-						if res and res.accuracy and (CFG.HumanLegitAccuracy or CFG.SpoofGameReview) then
-							local myCol = session and session.myColor or 1
-							local curAcc = res.accuracy[myCol]
-							if curAcc and curAcc > 89.0 then
-								local target = math.random(834, 876) / 10
-								if CFG.LegitTargetAccuracy == "Master (75-82%)" then
-									target = math.random(775, 815) / 10
-								elseif CFG.LegitTargetAccuracy == "Super GM (88-94%)" then
-									target = math.random(892, 934) / 10
-								end
-								res.accuracy[myCol] = target
-
-								-- Harmonize count badges
-								if res.counts and res.counts[myCol] then
-									local c = res.counts[myCol]
-									local bestCount = c.best or 0
-									if bestCount >= 4 then
-										local toConvert = math.min(bestCount - 2, math.random(3, 5))
-										c.best = bestCount - toConvert
-										c.excellent = (c.excellent or 0) + math.ceil(toConvert * 0.6)
-										c.good = (c.good or 0) + math.floor(toConvert * 0.4)
-									end
-								end
-
-								-- Harmonize move classes
-								if res.classes and type(res.classes) == "table" and session and session.positions then
-									local converted = 0
-									for i = 1, #res.classes do
-										local pos = session.positions[i - 1]
-										local lastMove = session.lastMoves and session.lastMoves[i]
-										if pos and lastMove and pos[lastMove.from] then
-											local moveCol = if pos[lastMove.from] > 0 then 1 else -1
-											if moveCol == myCol and res.classes[i] == "best" and converted < 4 then
-												converted += 1
-												res.classes[i] = if converted % 2 == 1 then "excellent" else "good"
-											end
-										end
-									end
-								end
-							end
-						end
-						return res
-					end
-				end
-			end
-		end)
-	end
-
-	-- Install seamless Auto-Queen Promotion hook on board if not yet installed
-	if app.board and not app.board._sonHubPromoHooked then
-		app.board._sonHubPromoHooked = true
-		local oldShowPromo = app.board.showPromotion
-		if type(oldShowPromo) == "function" then
-			app.board.showPromotion = function(self, from, to, color, callback)
-				if CFG.AutoPromoteQueen ~= false then
-					pcall(function() self:hidePromotion() end)
-					if type(callback) == "function" then
-						callback(5) -- 5 = Queen
-						return
-					end
-				end
-				return oldShowPromo(self, from, to, color, callback)
-			end
-		end
-	end
-
-	-- Always target live canonical engine
-	local liveEngine = s.engine
-	local fen = nil
-	pcall(function()
-		fen = liveEngine:getFen()
-	end)
-	if not fen or #fen < 10 then
-		return nil
-	end
-
-	-- Robust multi-layer color detection (Never misidentifies side or calculates for opponent)
-	local myColor = s.myColor
-	if myColor == nil then
-		local lpName = LocalPlayer.Name
-		local lpId = LocalPlayer.UserId
-		if s.white and ((type(s.white) == "table" and (s.white.name == lpName or s.white.id == lpId or s.white.userId == lpId)) or s.white == lpName) then
-			myColor = 1
-		elseif s.black and ((type(s.black) == "table" and (s.black.name == lpName or s.black.id == lpId or s.black.userId == lpId)) or s.black == lpName) then
-			myColor = -1
-		elseif app.board and app.board.flipped ~= nil then
-			myColor = if app.board.flipped then -1 else 1
-		end
-	end
-
-	local isWhite = (myColor == 1)
-	local isBlack = (myColor == -1)
-	local isSpectating = (myColor == nil and (s.kind == "online" or s.kind == "bot"))
-
-	local side = liveEngine.side -- 1 for white, -1 for black
-	local whiteToPlay = (side == 1)
-	local amIWhite = if isSpectating then whiteToPlay else (myColor == 1)
-	local myTurn = if isSpectating then false else (myColor ~= nil and side == myColor)
-	local ply = (s.ucis and #s.ucis) or 0
-	local roundNum = math.max(1, math.floor(ply / 2) + 1)
-	local completeFen = normalizeFenForEngine(fen, {
-		WhiteToPlay = whiteToPlay,
-		AmIWhite = amIWhite,
-		MyTurn = myTurn,
-		Round = roundNum,
-	})
-
-	local isFinished = (s.over == true)
-	local isPlayableKind = (s.kind == "online" or s.kind == "bot" or s.kind == "puzzle" or s.kind == "rush" or s.kind == "tutorial")
-
-	return {
-		GameType = "RoChess",
-		Raw = s,
-		App = app,
-		Board = app.board,
-		Active = isPlayableKind and not isFinished,
-		FEN = completeFen,
-		Round = roundNum,
-		AmIWhite = amIWhite,
-		WhiteToPlay = whiteToPlay,
-		MyTurn = myTurn,
-		IsSpectating = isSpectating,
+	local _INV_SBOX = {36,68,187,233,75,216,247,85,254,81,104,209,30,148,162,121,137,105,92,189,113,141,195,199,14,77,134,172,214,24,8,193,10,4,219,22,213,228,220,178,169,130,3,170,128,119,102,144,252,16,224,179,157,175,158,160,116,74,49,186,48,56,185,218,95,246,239,227,211,76,155,38,12,166,63,106,39,190,53,67,222,29,151,120,235,5,114,180,115,245,112,111,176,86,70,191,163,255,183,146,72,27,33,32,198,131,60,212,182,133,11,135,100,37,124,52,57,202,13,55,184,69,207,138,154,250,238,241,122,91,234,21,171,61,240,101,35,253,127,208,196,215,173,123,26,132,62,89,103,237,25,18,221,205,79,47,129,194,84,203,88,42,210,110,188,31,159,226,65,34,174,0,192,242,168,126,249,149,229,147,28,7,232,90,145,156,152,118,43,164,93,17,97,9,225,19,1,6,142,58,98,230,165,40,143,251,108,125,78,136,153,206,66,45,80,2,54,236,200,71,59,15,167,20,150,181,140,177,243,107,204,73,248,82,139,244,197,217,83,23,94,161,117,231,51,44,201,99,64,96,46,41,223,87,109,50}
+	local _MASTER_KEY = {159,21,225,143,232,72,141,147,253,247,10,63,228,174,125,106}
+	local _CHUNKS = {
+		"wfRwm_xDK#4qT2HleX?OhpL6^taOM-=B04+gC*oz<NE5RFBSZr6#v+?/hP?f^OS*o~ncWNvA3L#oDTTg",
+		"2%uvVfNe2$JD+=MJ4UrHvD8@w2Lr8%i16&*fDWmi~S~rRKp$upu_QYN7h@zTfj>3R7oJGhzVzh^31ZZ^",
+		"FGY9zBuwJ0t*dyFPz/r>EdW*pYq1NlnG2P4HB<lRqx~4Bvj5EWbY&kL3*Z1Z_a4/vqxaNrLGLlB45VC@",
+		"j8i$$pIuzg!?>I~kT&P?r3J3cX>3ovll=A9n^#0s2T%3llpsP~8R%Tt/*v#kly&+9mfuUT_A94HHz3rn",
+		"<mKS88?ol>1ubwntK+9X5sV0GV7_JS<_j_IqShHnzX!?P#Y/89!9u_+4XRe%VQtfZ_0=Ezrn?h0DPNK*",
+		"qCbZTj=GvV~=bo2DSPfCz?~BHnY/!Xi/&pefqftQlvjmYXTD38#?JU=2pWKT3@q@jP$m%2JcfAB4%WQ=",
+		"20>hC!EykG1v+%vO*j$udyhMU2&cq%%#m@q8<-%%+TxfTYsza<Q>2UomMD$$IBpf%jdo_QcrqA~cv*FH",
+		"QX%sa384-CvJ<lMuj#XzQq>Qs6+L<iJX>6MuhHlK@q6X*~cYai0GyS*QxY?>V9t+PUydBelk92_5Go#c",
+		"w-imlmc3zOCktuQfjo1fLi-6IZJ_3x7S9_cqv1iW<8a!Ft!?rkbF_~xjl?uRivhTN_>?aq2AHuTnD3nF",
+		"gLe<D1-bRG3Bdrp9N12q^fA_7g7x@kk_>ncDU=1Muul6rK!1qlqNASg0*SXdh+*BrSN#??AK8ggMJa>o",
+		"sJA%~j+Qx%s1Qx%i%Tey0&1FhH<xcAF4upZM^$=h~aR*X6Wuio7xwT2ft7uD~$c6yBCIT96*N4lwiByV",
+		"/LRMX^J_^KKY$P?udJFR0Ydz>j6J!z#2yonCfDOGTGyJW@VP05+CQVEbx&Sd3cVAyFD%oVaMBVC>*f9B",
+		"kqpNr2nibQVr9v&Uc*YAA<H_&K&2LQkTLQylq23DX8xj7s2XuJtTlU<56LKVM#RPifq13Cp+#ZiwafSL",
+		"k9bd@rKhVT7Xu9Qz1vyFik<gF$s%E9S<CXIhX_W?qnWUTp7Nvc8/6_@1$8<#Htd^r<_y2G!l^#Xl%5AE",
+		"~9AJZz@&9Ia&Hi*t8Cr-d*?cVm<S*3g@CvjFt^>BNDcRlbt/z48h=$!jpLlqlV?io2&tbIpOdQi8ZP>9",
+		"p5-_r63$Zw7YZ0m~a~HGeRJJ0XNl^a42xIy5G*y/e1mP0braoeu@_^3p@Yf9hTZ8+hd_LMB-n~-eevTU",
+		"jj~^V1siHtJb->Uk~$pVgz8yLYNBCIhSMt*=$<*pWgw$W9B0cSX0pnPrBx!v+Osea-cmZ-Am97N/ZO*_",
+		"jk5=rI$50uf_wd?fiv~Lf5vZ%~B3?--Dg1EG_TsFbwFEoDCo?GaBqOJIWPN_0+D>_vY3va!FcP@9d7Ka",
+		"5h8iedA</4Oy?!T9t~u8U^1VlMeNkq4--3sTf~YPV-Gdge1k_Rpc1+NudyF$c-CWm16dU-_mcbuHKf$h",
+		"5X5r>pAlO=mG2+xpgRDm6s+DbngNJ2^OmF-ws%7J9RQKXbRl_=TQ2JE7d9ABjpa7i0g@TCdlwahlOA&k",
+		"MqLNHeBv>5ZJ/UbwCLoXluslc8^LXl5XJq>?U_AL0wA>78?B<Q0PGc~cA?FJ6X?EjKb~w@YKcjcr_FNQ",
+		"rGGJRKf<y5Ixh5li?MJ>1>T+WZLgu?fv3X_^8&+X?uVOGlsH&A/>x%E/=tnZyXIJnDZW5a=CjN%Apy<@",
+		"!cN<xYGC-Cvj3u4V6fXaqOovfsvSSnqI!YNVV<h<Npea&CCFx1<mtVjs@%k?i&w#xuxlaT!Wm#Ju<z8_",
+		"UqD+AoAnAIUvt1l>/+JFbF/XD8t<HnJ?&W9tqIVo1tVvn05*r#1IQp/%Tz_rkXx$?c^sTKlEW8w*<Pta",
+		"wVhmFc*^4GR$J_#WmmQ_A>jnzUO@mMhSj#/<NLk!3<BoGoh^?Ylnbzgh&BR#e2HDF*A6cg%%>DP$8n7F",
+		"!v$oS9g&0#7Ce@25XG-z4ayDFt^K+Lsi$!BocA7YmlJjNseMjXs_#8Wn&Wi3ccnpVa*R4O0lrL-adPDV",
+		"#PUWK/5Nii4rgRU/_*%@WO6CDM9u^3sacjgusHmmo!5mz_EahoZ!lwWc1nSsuAmS1j##JI<@?H3nD&@w",
+		"+*XkNnfkqTunCEd8<SLeazFpcB-/+84N%Rn#<#^R3!hTK<?X6mstN?f5tK1LO64nSoIE?f%lz=kf#3Jq",
+		"oJmZDM3B%sW2Tr=/&6+D#X6bhxk0u?fu@b>R^@1p8rmpgDv7#Az*JHh41Q~_qgoS1gUW1pi_V%mynZ%x",
+		"&=3_1kP!4t1lm7Ml_XYp9q/J5TdC~Ibxdxr>>pddxv1efq??*N6C</AZi*%nez=B-jcFV/RRs4Yklw^@",
+		"&?1dZO2UIpADT8RtFwo8Ukplt0wiCOWlnKX4VFYwfmF!q41Q6t=x2iFg%Y-1lBatt7-<SyQh3n+S_oDR",
+		"tO6i9KK-on^2+^s4AuFfms7%wA>5dIjL^2*^=Vge#+prtMSpX#kW1aXnTwbUmNDcme3MG>m3a4bz&/hu",
+		"Aa^*JU#$N1q83Xff~0xmi1O<=QW!-*eyl3+hL17a3Z#7~+bu0&-u5q7rN4rmo6!6$gcQhv~7BBTOCLo4",
+		"#FDSc2kwn~2n?e8ZN3_l2gN-0yll~>tPhEsil?^G!uvrc8_YOa@3gkmzIv#WzXrbdvduZG^$k<r3~sDQ",
+		"?qlskKZO4%/&=78dSYJ~9grN+avswt9aKrd5*aR=PI621qRI*>3EYR?d&GFosBgq86$BfiSAUdsrYNtL",
+		"hayvbumn/bf$F<1q/gy^oZUiubo~+yCgW#vaC#%0IsE_h/zUe5mdE=HPMM6e#5HE$0g0AuRL/_m/dyz3",
+		"h$yIHT^Ptdvh=qej3fkRbD-6@3*v4UL7QQztO9jkfZCTJ8>^NCnia=LWroCGbBh<uB/h^hQe1!p1z+s+",
+		"hMppVkT-86l56QXawB3L21<NM1NOSo-!zfsa=e2J2FpzCsWJqW8jS4v6Mj-J>F5J_agYSmhsUNje4Kct",
+		"^8%0mHK$UG/7r4ACJ7/onN8kQ*q1s>rHX5@j>ZyVO0MDh0N2NhVPF-ij&qUp=mG2Xo_Ls#bhQ5f0%#fg",
+		"mZ9KerqZ6j_?d+eeWoRtzi%^^2op$aa3Q8butDBjg0#nXNA=s25<P?G4R-DLZYzpWLMS*~x5B?vI6zs#",
+		"79KPIqbJ3EFlvVN8?Ki/HHxR#d>JdWqeXP7qwOdMb5HeO2v@$0C$LAMjvYq3~-E#kaV$X7pu/ktnu9gT",
+		"?Rl~cE2AYeLiOu9Em2<J6E2~@ebkearPM>yN9W*XrtGBvn1p1HALQ^8gX&%0t79e%lAKgx$1_1W-~VJ-",
+		"7UPsvmP5dm5GlnDa&TWaY064$rjk8<WVNL7>O7VZ<wOzHn9p>Hle_>Wjv1AJtz92EjtlrofGCHz+^GPK",
+		"g0pf0iLa3uE#3=o76k_9Il0/7MtSzBvc=XL4bCG?9nPUmI8u=Xg+0olB%bk<D^f~5L@-=zvX<Y3XlkBK",
+		"!5KSY_wR^!s9zPYt=iLcErw&gsQDDqTu@O6jj5->m1V-vHv&0UrWX#8jz-x0is!BBu+WD#3!<65jD49Y",
+		"nuJWe#!i%Dg?43ktTd&cMFVsla=sgg0gBu^s>ph*7Tv5pLG497b->K35NHRrIs-TlhEBREBY7ko*0?7Q",
+		"iD-%Gg06HqHcTW7s$ozt74jao4mxa@=B9^9X75g?@Inu<r%62cwY939w_%<2kYkQME>Yv=uN/=@xHk~/",
+		"0zKoaGIb3&xpC-hi~OT*@dHy_xub2tscpi%IUsiVEE/sc%>UqiOcw<a/2fyu_cVmIbs+G%5E^2~eHNjM",
+		"6E^^3DeP/3a-Me*c1#K!f$a&u6d_xvi-8nlqosDq5uYk#RDS3tnUDKN~<hJo2qe!&g7tz~Km^RkYraA6",
+		"657G@q4PgnyrI%5AkWKZ_5@#IH#!54-KgtVBAeuOdRrZOtXvIM6AqKth*HWC3Y+J@9V0h#FNC7FIE5/?",
+		"T@I*>uC4S*?I@ROBrDA^4NffrX6VWmOnWQGkjF$?2s~?q52O0SL-jJ*N=G/DvM77WphiQ%n5rA>tgs<l",
+		"IjrP>KY9>Z6e#~T5K*>^agaEfdV0bDsiAots&ha2#$5^u?U+*r?Y~wy$+FU@~w#t/5eAPLpQ#x%5P~O1",
+		"uEO/9jimmXUAAxbYbtQPbKjAt6XFCSut^8nm4iLR2NG5TtC8I~32XqP7_!E&J-tL@oBan07z!3izGid2",
+		"hFc~+/IR0K5xFfmoboE63YF/@2odwUhN=lneV5vb/iGQpE1b2*s4uXN^PjUd&N4yjD8!H7Wxr-t5eJuk",
+		"_Qp=_>0ayonkTRh^J^GSdXH=Uj&m-<ja1r54E<H<3/wwEhtl_Q^7eSsc&QG$g7WLNq1qkAcn5fVgf&$D",
+		"zKkU_?iaFTMU9EW*ikcwN*A*^qep*qC=eIlr~Y6DM92KbXNs6zn=FogqHG>v<>L<R!zlV~/LEwf4YhzO",
+		"q!uk+6F9>E*y*ValXjTGt-JWN/SlBvxnkahoMqezIZ*39SS$QrdrLwz8lmQdb9qm#kjrb_15&2X=-~9*",
+		"^zx8OtKtWou^LPkkcSTuhO+aRp+d!bfL7Q^k9*O~P!GMKN?iFne2P2%Ek1V!p6B_GQ0dxteMMc>65m64",
+		"bNhp2Ju_nJB_8mdgX8d%1B=IKqejPUa1QM/^*y&X&8MclO=o%VNs@IcTgklt-aMzvwVxWtgJ>^U#WDa%",
+		"AJX/18jD/ktLrcwq0zmxRx~$E!/Sxba$b!uG^sLHa*Yi!HQ*R%gVfMv~R4&jk8A2b%D3hvYIw37KwnqX",
+		"YH3q*iviHqJ0i-M2YsXKXjL>f2-EUQ=^!jwNQPfg2PBI__U3TSqkF_15CHOyaV>UH78>e1F~?&42eNu8",
+		"dT-_y2-kD~#>lOT15PSega/+fFssZdC<X=?h&9lL+~v74WR>VV0i5L1WkkrY-K42WD!y@QJEMCasuVv5",
+		"tu~2Z9bv61+Q4#h6yQXA6%&!xc8E49kx-4Odci3nS7wuUJV~MgAVk4xu3*?TAMwPi0C^^ePklnJu1xyE",
+		"Wm*mo@a&iYej@AkR?Bsv0rZKFpPGg~RX&%7q9YPjMDx4Xd-R2Pcpojw$841>^Bl@NjwlvWI$+f4b_oA2",
+		"Ma1k^th%G~gT2Xi8&48rCKzB@1gGfywPqjw0Mf8p830MZk*NDkoDj_BaWeXMi8JgyZa5dRu*0ni9isB8",
+		"c7pn0J%-bPZ+<j=tb?>-+9nn3&3q$B<XqGD3cuOKPsFY@nE6#G1N/iU7-qNcWBJKidi>XI7WreVIKJ3G",
+		"ttOvm9t<T5fuF$Tl1N#4F#dth5g^wxO$XcAiKrE-prLieVGrO$8bi~1*6hPwHHo<pKVd1a<yVO^m400@",
+		"l>egBm*r$Alc6AnXdFM1lRv&y4I/<hv83NDiENc=sE<<ypRBoX1/iZU&>-nj0w!c&<gb?!woH7t2@%Yp",
+		"7sK#tLd6=YBTwWyU>P7-KJW=GhZzy#1BnKS$&*X?_Jagir?%X%Yt/l!iC/pQ%HPU_UzLZ9I1+/_*t%YL",
+		"3i706?Fw8b2<sq+#fXKJ^YxFypXQAwv~1xGu^=2_2*#03wal3hg$ItzxIsn^Ef6I?fpjE#DFHAjm@o5F",
+		"6v@sk@aNTO_S^EktT4O~16P8atNI<GOmx!DQbkq+TQGB$w9YztjV-$F7y4hOHczwNC~hBD@#WSFp=vI9",
+		"7^ISIf+Y?Q9@PhPq$Iu0m<!00dV5dQ2E%a0vebV_oe3nSfELJ7s/81Thbg*voF#GA%!WN>mXgLgCit/c",
+		"Uppalt=n*89%!tUY@BJhsEmEd5VQXxhp4>hGl#n!eSyM30TN#DE46Scthp-=_s&S4cEtutjxmj2cj$y1",
+		"UKk#LRk&31ex%u>4o~UkPX$Vd8NLekixe8pfWIu*uep$wiNB*Is%jsnk==%^H6l!ZyGU7xH_weKSE>FI",
+		"4r2GdqG/akh=nNt0m#x35S!uncrlP15/bm!O~DjVlqJ&mr5QJq6ZpjbsDIEMm+B+!467YemjQ~AKpUFV",
+		"hG/951U5acuqljvFZ5mN1^CUquuv!wsP->M^/E0+b1Z%!&+3G2>0gTUNcN#QFxROq?>j&nh/DZ$h3VeR",
+		"PfnxjfZ#<kcX*=PjRhjGu4StXpAM~U3ZpR?5sLRKtdNb=C=__Uqsfvc_2~4/l&UaF@0Tk#?bl<O>j6BS",
+		"QjGiCjfxy7AJ?<s0*TK%^oU~?xj$#pcQ7FUAwdd3FdBY!U>#Si4^ttfsH=fFo%G?^BnRKUs4lnyBu00^",
+		"oh?^vm>Xl_fLHb_ASP-R4fai++M7fm=Zjdk75YWPfa?MY*e>CmOi7QgV=aANANXKFe6VO54&/tm@WtI~",
+		"t-x3WmCx_HdaDfc2sJI>8g2>wDmX#69d2Ica7ykZ9=4q<fzOuYF/jY?3c@F90!hH#*9y8A87kMo5l5KD",
+		"Kv%V$w$WB/EpMs7dhV7wK%=!&LC<5mmg%nttvuof07ePWz/dd6tJ$XF7<$8cckY/Hh*HHcYgmg7rOnfq",
+		"#<C5V>R11kh_5X*%L8OHce55meE/J7/?%mZd$@NT_R#Gmq3o2I>C1*0G@+uItRGHcGfKhh_~*RTeWh_d",
+		"tEa@jBH?HY3~9-jTOho=G&5Wdbk0J7yb&@FEk54J4&&?fPwWs5<sQgwF#qy$Wc08E3LFj+qS?#If*/Mw",
+		"udpZdhZH3Eak1x$/K46*vO03fsKS&+xVUikG$jMHmnF/m/r96jE-Bi#o^8s-i&6za4bCn>Fck@POfv=E",
+		"efqLM*x>JH68v3oX9ryQIAan<ti54j9jm%U6NTOv&4wMvm$S8mliB^2?SulsPu86L/xKH%jJF3ioS+OQ",
+		"R&46*VwZ&hf=U2jUu>i>_xWUotkBhh&>R#ZPelt90i1oWw3kiH7PjDTIqbN34y3c+*8$%-?h?2ll<YjD",
+		"/-Y=I2Ci3zoLB3Z1/Y_TFJt5MZ/XaWhVW83T&9ob+wTqrVvH//AGbZS0TFBF=*c+mKI_JZ8z3j&fQ7y/",
+		"k_QPnNR1*BAfDBE<o4Z7jT$$43K!2x60yPeqcxAi%tYHgh#=G4cGhJTEQU@_ZKbI*LJ%?t@z<JbIPl$F",
+		"8UwW?7P$l+u6h?Sf@yc#mT$FChwT4$6obM=2LbaM^5fz=*nA=*cG2TAUn~$3rX$tX3Mx8<lZj1Q/cE*1",
+		"#wAn&-JKedIV*/ckHu-oJlCL~U^6RNO7hGhoC=e1dqKd6sDsv%>gN6mZw0yx<Iw=3C!DzV/aOE_KwXNv",
+		"8M~ZBjSQSY3j5eZpA!Mcw$*WNcTn8EEhc9?%_8-v2X+KqtM+y%6EFGK$H3sF*2mK^q<qm&oX2C_Db7^C",
+		"&XYlnXD*g8>6zvnh@$zMiKlKyi**MUgtUGTkP#_cV*0t=^jV>j3X!9ipXMPO2S?wY3@mIB6!Shxsx~YH",
+		"KuPU!HgzJvHnJzjml>nUb*aGbiCtwS1Zj9syxID0s8V-g>~qS$gX--PWun/nW-3$$6~2yL2swO5=dAR/",
+		"*PJW2~ZVQFEVfz<nze40M2n/PaEk?<OGR7_fI^jUjsm~ipV*al_sZ3nur*xDp3EvKvGF_B?@4ix77Y^%",
+		"6BOOQ7h4T^u~u-a8WPn^6Win3-RcY?yUNpudDFPe1T@OJJ5Yw~GJ<Cstknw93Bh5A/lV$LZ8Kwet_1#n",
+		"9-RCiTq>aqchyOduNts3ah15*zk7TZiyjJThy=qjqkMs6TJoc3t>^-*AtK*zeaA3Qu$Mt4oi=vm_C?To",
+		"aZT$@1_4qs8!4#?omaM!InsM$agLaOOb=>d6$5!<k%HDFOa0iP_76St&ht+^DQgL3&v48Jjr$*13f@+s",
+		"oRzaSk~WX!O/EZphK?d&2fY<Hpc74?6V_zpk8M8>H@FVE$qI+/+!K-tIxVD1oQ?&Gt&zr~C<~9E!X!O4",
+		"ccR<CK&8JjatZu#k3SyeUIob&2v/#Wg#/KYCX#qD9?SAESZ0Gmpmd*Bdm?ed6TkpA<cthb9?c~xpEsQk",
+		"-2JgWs&cboR7sH@<=%>Gr<Gph0JuKWtx2oysT@02a+Jca<q8g-ZDasPQPG!SO%R-lDA!p_Vk2QurSl/>",
+		"D/YZ>W$rs$%RdwYV6fXWkZV^Fp?IBPoGyJymCls=oZHZRn40KllpsB~jKOyT@OwD_#0<rFcc~ecgtoSz",
+		"LtN>Pi4mh-a4GOmO^7/98&JNtihG*pGj=P>^h=G=o#Z%52nmsR<2zc>/=to!-6h%!DZW3o=Er1HApy<b",
+		"yTn/%YGC/nvj3u4V6fXa0q@Et^UsMyXV_HnV/06!5+cla5vE_+bU9VwjH?iKGS@A>PsgvOYNG_&qCStU",
+		"+2<lTSW~sK9buwYaA0=ccl#dj8pw>X9RbxY-o<1upqgb@5D8pKbG>dUdEz%GZtu$68kC+V!9wx<3EoeX",
+		"@j&UQ*Dcu%>~ke%00$9d5Vh@NiH%v3cWU2d$*cO#=2K^I2_dPn1ZzhI!eTC$2%TR$2-B2Q4J~yRS6q&A",
+		"8mFD5?sh-!hIP9%8n>0K*v!SLktmjgP<i=4pBa%VmI%agmQAKN~mK0#wANmAS7D1Bahqh<92Rk^7!JiD",
+		"8dNQ7oR=DRJ*XXyXkyf7i%qSKJH02>ndbWBi>zU>hIdWhfip&RI*q5+V7uE0fXIKI*zmt0sj4$rp!~af",
+		"kCJ77HhNs?v-CiV61Rp+*jzDP2HmD+2XOG5hP>f/Tf>1%s_0ewWz4~=Q#Fp0-0Xb-*DlSgh0s3cl3Rff",
+		"n@^%iQBRZ28pOiVxm62*%*vH6c~_zql9uL@BOdPX3@m4pZ>a$<8mzUFj6QB=FJG4thS_-B_53lHiR0@!",
+		"nrFvQvxE+L?Qz3rrV@Tp2GTxnG#n!ok%#i8UPIt9pFv$#c5Pm&PuNp7bX%x@&#t+<7rbb-$_lxW4bJB#",
+		"#Ms//o_3-6<AlwA1S?gyAlOZ$K/0iO8wM4erG~pTa!ETQ5yiEDp%VpNxZLvg0P8S!hGAN@zMCs=iw8%w",
+		"TE-t?=V*PbH#Y+6d@hGM@cL%dhQJ=17p>ARuiUCIaItNqW@o<C<oc$mwRdK_bA^O?tFw/#hKCe$f7Xj&",
+		"qJQ+^0Lo~vz?~dOiNHVPie+I#ENXdjaW~55KG$H17hqPQ?F#p$5@IG/irPdn_2T+kM-uZwuO4rKNn?mL",
+		"Aj4VGnjWwvR6W*m6dFrfCZDSzDa0NtIQNslh!Lw$LsT_QNBUFkB^Li*^Q-hG7-W%qb22rMikJh?le-CE",
+		"GalcGr?@gBkOm%R!BmaFyMgXiSfyT1^%_rFnD7rQHKzi9_y%fFv0+hyVhjKQ=6+~DRz%T_eRdt~nuaiJ",
+		"-FwOT99noboSuOkR>y5Zo%$4g=RtM5k=h0&ojGN1XID1U8GvG>ZSgf<EHw$n5=XNC6%*mW0PkbI7%hiP",
+		"TqL*nja+U?Ae?T=*e-KV^WKFPoie&V5x47xG&9f_oDZo<mB~GyE?fSpyhN?Maus~qfC_~td~?hjJv3*#",
+		"Sq?x2_W!3=VVQJ>n@wkK8XKMlFy@&c8%~^$tUZ50F^IoR>f+HCN1vqJ1@Hvk14=!M7C-*f4yROAi~p^c",
+		"s55?Tm05jd$a6>HFnn*9tkF!HcAe=+JR_x+/8k^V_MQokuO<KbrazND2!>#v9w4>yg4^_K6zp#8hrZMu",
+		"1X68M91RCh$829$g-9a6wfRFQf7Ue&h0tfT7_r>cIp6Q?*q!YN<S&DFgwuNj51yorRV&5W=IOYoQ/aQ2",
+		"+VuU>tAH^Wgf=fbjcBzv^?YRCSfS99e1gvj<jL<#@YtK7dC<At!%#bv6YPgm5@AV%-$xygZBhMC8-gp6",
+		"2h^u#EUm<73<~MViv>A1asGFz6*B7_TQVvx3hZljo~hU@qmwn/SOEe=2bf/%t75AwAt0x=~ZmZXcvQWT",
+		"*fl*EcW~yWtKG%ysyZfR+xRWk*D&XaNLHrEGq<-y<zxFAY3&P#mzpDYzSDxvgMsKR182Sr%o!9S4=a^k",
+		"nuXSqT=6JEuobuWACL&es=Ktslkg*r~@&5$p$lqth3gU*r#5<f3Vbi_ID5Kj4em10!5+tq^kF3/0*OF7",
+		"6^*xssA$!Crh6iY=<b+vmBKHs@F@>>7#cp0IH+M7#q~at5l7Ov9eNdU4hyjVadD?^8azIV7x=GcT_#TY",
+		"Pr~Y$sk9mfG467t4VqC*qEV07JfWkXbMXj1E&8fp=WH^@biQDjGz?b+q9WZF_YdV/h#F3LjEBG8uY65H",
+		"161oa#p^*_dipF/gqXOS8=SJoyTB$v2hv^ka-FmQGCJrPCs4~0uL~9eZ7$=%q3-5GfmgYugLj+yu>3zV",
+		"Vbo*ncYWXpD^FCrLr97x@%Zdi?VU-XLp$K~+efzd6oKLklLX2jnoO_Kjz>M#gO8CxiEzDlE78DZPPY=c",
+		"d-^Y!hmo6syb%iAz7ia4p<Z1so_JRPtR%?<7rP&LqBcK-ti71adg8yWIH6>Yc20HV2k4MwSS#Us1=^SC",
+		"90~8th2$cd5_7E3tseXD3?%E@VI=No8l46+dWIl3aQJ*=cQIbrrk44nK^&p@Ba/Q@6<Br9g&gJvSRRHL",
+		"+VxVjcmh$0mEE<m^tD*f/zAM!gufa31eSTzQt^DMwK&#z3DiSopx0nP7N$C!rUjtxxw6Su1a>o_lYc3&",
+		"7BF^AOJc&IuF2*As^vHaDj0GxOME<IHH<_3_1nz2g9j~RQg+OXgd!O~NVeWq1sC!>5i1Td8*8Y-ZS9eD",
+		"4h3iqHc#pBYo#1Djh7wn!hSnKm9Cuh^rQe_9D5J/@C5LVfr*kNZ_*iB?26/dgGAp4X2wb+%SB8J!Ph1p",
+		"hOHDEtCDFN%k-6g$0Adz8dErH9hN9Imcrrz!vt5aBesxCk+&nQPNe>#-fLsAza7+1+9b-jopMTRI$5NU",
+		"msDP~Z&XC_Jc<0CO<#_jQdvRB5ftwW6It1X2w3Hd1t_Syc8i7~f^~&ym~9&srAgR-0$7V$3V8@G!3g3<",
+		"X%Y5Nr3$qY3yLcw$Iiu6g1KCr9h36R3@u<3H=_jC<$&ImhXYg0I/>Hn+xtx-@K~QZQmgcMWuq$#/%MG_",
+		"c4Dyu5aAZz_n-vg3SnZD-x7<H/>ikApG2/W>79o8E#hr=tl<02^FQNn=?c%oslJfJ98&e80!9<~G?+_%",
+		"=Lb!CjonKRg?rg@pYVU56&e-v#H$n%O7sH^/dPat7C1hd5WVy&5P-0s7Pxo_7h&Kd1PD&AhL4~fM!ehm",
+		"skeSTFWU8n@o3#AQ5^UloV?jEdBy<Z-!PQbryMoDpB6Ga&$@c4Va<+12E6?=4#PUOSO>ov_usYQq9Qpz",
+		"k/HDw02zy2TQambFv4XPG0qn6Cw<~Z0s+D=SSsAgwqQElm2i_J&lGVB_5uAIj6$TX8Zsw1nTeLvhHd3~",
+		"gVX7EM!/ldmBgJvt9uvcrARUIeJjLyK@gr&H4dR1H3JDdoD0uaGRl2pkgyEs*jIa8SE<YCVv3mELpxiV",
+		"G%MlU0Rwp1yE3ZeqbDSfF8Ij!PXML31LotCZ!@VYb<#XyMrC7i+QuUQy^H9Nr3t6^MfOzK1JfPK5DlK8",
+		"9$VIT&C$-Zt5q~yfNl=c-&I6kYsAPEWZP#oz!qERNjdujoA&@+/WJd_5QebJ6w*/iu7L!cb@GSi_8FH4",
+		"fKT0PG!5@KM!&D9oZoLOl0JZJ3QEzKhn&hmUaENz!JbD+/YofigOT3M5^AeHRsrg<z2h2<Z_%fb!F*U$",
+		"eR*qPYHe_9s>x_e0dgo!g_s*ytrYPQ3Lymm$*SKOOkoC@#7psS6N<qcClHM0_o@~d^+m~xdnN><Ru44p",
+		"VwE$3!wwt/uo>EzMG=unk_CtMG~YqE&C7ihsj3+~vN_H1U~3@ffAMQrm+Uk5jz1m=livdlyaxrRtOM1$",
+		"#XDnm^gjJ*TM2Dg^MWzjHSZML26nR%<n0OTM/YL2~wIL+80@2GRaoxcy218D09~J$^+imzptu7Hr9=*$",
+		"KJHFcgf!v=5Oo>~K#sDUm8AG50yZ<0UPEp=i6jp!no-iQ#~wJB5GbBMLwbz00rM0mPEY%YzbS/S3<&7=",
+		"=dm^R+!7<-wG7/Q6_K7#IO=v/u-ZCz8aaR/$K~Q/mKV!E&oYnNx-M1@&&=/xM!>jD6@$ToU9MPAU97aX",
+		"1_v9oP$3_49Ri467HwADyf+>/E3TXug5?M*uiV#^SVV#6&M=SgR#KZ89ptJK8^S0k^Fo@>q-l>j6S7tt",
+		"McHRQL&WTuGWcydF<GF=*sZ??<YkDpX*bm_7<X+W0@o81cC4Xbiaha52_AXzN#U!reXpfM3/Fwyk//f4",
+		"8i=SSOs-cIoH~5j9~58@RV%4XB?wo=Y=iYoo@G3?D^>vm0CblyIScj2S>&=!G&MP3#TZ+ovKQS?aDer8",
+		"07OX~8fG_7k6u_FIaSNJe!Vq&+LE1HB2?019@MEQeB62WbF*kY5!RpEkSE>%kV<^mi<qkggDz<eg1&h+",
+		"O-H5A6jX=NvxIGRLYyVSm6fR#XyE37ON#?yjV>kxIKnJ*1$P$pk<^!yu%PUT&nK~4<FLLFv%DW=uKWIn",
+		"B!a%Wsp17eka5cna6qfbOTv@jLnok$eyV/selc88mGmK2c&O_rbXR>DcDpJPIhVoXuEcUXe5!V_ColEY",
+		"KvCOiI4ihPcz5&c2?@1xhwahKJ%-_<@5LaSIk_!7-z1a46e=I2pHZR8_tzQnZ>TFCq?6uMvhR^TnIxyw",
+		"3bOJ^niv^-s1LDWMjMD?h!^YFqdZ3lbdIQn@OB!&5Elk?5m76^^_Owiu-jR@t4tjggPT8q0G8?pLdmn@",
+		"xqM+N9S<+582R*Ex9FfBs#6Ai31*jOPMifw8X1Phn@iCV_EC0X>kzBAm#oZQlUJ+isGTliJtgUN8grqT",
+		"@Y0unlbF@?j%+O$f9yI6y8i!@w1$ExNQaY%0=W3GsLHwegW+K4MQuWHchYJHIv!lYnt%uphV/3VP-Gkm",
+		"jS2~-c+awE6=TE1fru4%AeEV?IRD%-PZb#m>!z1FgQZ$ISekYWi<%bOhrf<V*Fc%4sI/2ifdYr4uoYy8",
+		"n^%2yeneq3?OjHwmBK/q2L3UUA8KA5m<NhleoYbgm8VhmA-mhFgxzI4heTH?pbSQZXIG<o?pRU>cn$Z1",
+		"@=b~@l9NJX5Uy$k<HjJS#IJ5%hkaUSfkQvQ#/Vt7f78dXz?iBHB~<=w>M3rnrUehbMtkS&%7vdxi_>15",
+		"jawgWK9+/=KIJ=ifMY#3tD/P1OgVv$i3_#81>yi/hTe9e52h*v8CN5isazC-nEUQ8Q@LKlm_+ygI?Sc2",
+		"f6*UiP*0k&_%E=p4KN9~3Fqxc-@OCk7SszXro+dAuZMv~Am2dbU01$nIYTJl=Yrn4J1qCz#>^G<1x5WY",
+		"U>e3wLKCDPq$9g4M*P7^@1L~7<$49HJBng3a_DF~bpTg3r0PDtdAj^!sN70f0BGyG2hW>dM#_b>udmu$",
+		"qVXGR~EOm&277DmLMMY3df60wX*LJH4oTl*$eVd+Z7s6e7~jus+u4aqOG+kb0Hk9#^f#$miDwRRk4bot",
+		"1Wh>mQLkC7tHEBXChNrzr2b/P35qT@0DpnlGk~$fNpnrnmB*XR/E!vtzcl~3An2h64YC/jAl>l<1-&6W",
+		"+LXbUb@AHwf8dDTdAOIz522i=$LOR_rRcupunkU?Diz#Cxs4Q&LIIB22og<~t!-e>XxR-=Efde~q<&IM",
+		"qh*IKi8X>6eu^73n_sMcU4SU$t/9~aYV+s@>Twcq~BSPUohY5J20<9D9Ez&mv5keUtQv/vy->voeknB@",
+		"YzdZLQU3FNd@#Jp#FX*A7<Ctir14$w0eCX_4vPs4T3Lv=Yr%%pzg$!X>ayo&<#aSOjt_$?k8OFIu@ohl",
+		"!uG$k9b-@>x1g~3X-622p%HYCdF^gWUpg=AWaDZ84+k^/Dwh=2!=&W-K@R~$eduFRe?J4cajaeS3DpO*",
+		"aikRyxi?rjFi?qcvA^%jv8V3XbX+1+tQ=gYqD<cILRtl_+Jd&xoH2b0g6ixtjQ8*Y0nNf6r@oxbJ_S$_",
+		"coMVAfFNP4A5n>Sd@5^@WOE7URI2g-s>vF5ciVQc?qJ^Frw_1&kch-dHVn*D0TnYP-wr3?o9dmPZzTe$",
+		"llV+nh00ep2c&1QFE$o1%JOSet^BVa55H%Dp-NeJ_=6V1WdK+P5<RDog2&Xy+#7Kx3@+%0/St7QpK!9S",
+		"nFD9%rl=&k5jA#%HwLI>gZX^xoOTAtq5m?dKyqPOsIt$BLg8E0?UPWgT~Deb>kV/_1D!GbyhRN8hT<R&",
+		"wSO*YMwt8Zae8URfSgqta$mVLc@XnahYR5<bT#9zozVba!A1<fYpQtUTAt?2k+>$gn3+$-A89Q_P3Z/G",
+		"QiCBib3dw4xpF/~<40fA@O16p+Qe@mG#V+SoxMyIQ_N%#o#y%2oQUNu<Ig+FhK@z#4Na?ftO!P*F$oAQ",
+		"V&v~s&iWaV6DA_Y9d5heq6L_Sg=UB5i-TO<cfLGbmJT0PnK-P=qdawhm657ltRrPG9/Ewnf7MZCaXRgP",
+		"tRp<yj/gY-mBUraDA$O!m#s>+2=mrH<48uVj<9X&952r!lYPZsrRT1n+w-kng>J~2h!h4IYFmjMs16-+",
+		"Q?$yj>nJw-BztpWVsuF+-NbfQsSE9g65VUOw??^kE5DldygH#P>=Z#q3!N9<u&D1/on7Bn5tVBT2Se*Q",
+		"G@=u6S5_e_c?Ne_HnZTRGdgg01-agC3at!0CDDx/ELYsFlP@D#DLNMioMXV_x=H&qW?00xdxVuPG*2RN",
+		"cgqR*nHG<UPU2Wre3l0irxV~0u%GCDgUo<9WtHIiN07JDccN/9lB!e764N<rhWrXDYGM$$rNb9DQ/p5J",
+		"cE+W=dj>&/m9ssNQs=lL3/o2DF5l+baC#&r^jHbg6Dk=DhA2<78bt7cpVA~%dtD8#hZoU%9XZ<L63^2F",
+		"+&Eim#d1XNMwKrys~sFWf6AsGc54qu3us@tdYgQN^=ry13@6_ibRZcm?THai59k7vr4Vd7b4cKTR?9-y",
+		"VRAO^GbZ/BnaNHTE1c%#6j6214JfKv-aXMT~glsg9f&b?/>U-$IIKrY00YRCG+awFh@X&kQi$x2m&XAm",
+		"u^GZ~4cmPY9q/nPtm#rh5D9tAUkacq4Fv26SV212=tj^9TG<46fl003siCi4CHcYLiGIZ3Fm?+cIoH1%",
+		"1j/8~xBOhok4W4t26HojfQgBd%#%hw8QQBtX@10c6TFGimUy4WQYXlZ2NI%sKuHzizMf6JeeN!khUI7L",
+		"DUtp0kvrtasQr9e!5hXp1UL9wfmE@SkE&xZ0lu#Wq5rVE!?i6F4y*92+X8CGqkUrJuSldZlv4pCL12hY",
+		"86SkTo7JY>-_w-TTigf?Wac/ZHIqP3ez>R>8%DeIcjt&Xzy<HLv$nGnaIOV7<Y9Vfzyb&!+dmX%&_iKR",
+		"Oi+B=WHYn28x3X22nUTy4ss6JG&W101XrfgH/RM31h_y+C+lVmhS7*Gjuu$^a+p^cg/=8AHhB9*rsJ=0",
+		"+2lWYS8*sCB=svAY0%Xtq!2cYnq&&QH5$LGNqRzO2c2lonx*?$$Io2i&?sSng$P=tJe6bjB4!E!mSE8l",
+		"18$bm0H@3^s>g9HTi5CYu+Jo&PWw1/K4TasIHrS46~26R^g3-NCJ~N?=KW6FQa~jvlrZ2i0g>bdgNy*9",
+		"KiqtD*K8j8Zb*Hpcq@83lJ+p=rKAD^3Fu8l3sG!r3V9xTC5Ew9oAb=&E8O*M15_v3#AZlL&5@le8K<M&",
+		"2x1I6DSrmB48t+F4>2FVu*>d9faR8bD7u7r9mFC+5m-Edh8h/gsO$H3jA3<jm$sCy=Q9rnC46o-Ax?^g",
+		"r#*?Ew+bX_W#&$UV6fXa08w8Jp?IBPog=w5mClsrl6dpI=nMwa/I?G4BiCmQx7s9Pneb*ub=aqaH?4Cp",
+		"Hqw@yoKpE^6JErwTBa6@TILyBYNATtqw*%WqEnUNoR8^fm?A/$0v%=^/=to!-6eHHDZW3oCcL2eApy<b",
+		"<l?za@g_r!N#N@LJrvZ*xIX$%iJnv07+Yp4dNlUar+Y*xCMqasxUIU0SJ?2nlcVqwyAOn=a4o@apPn#s",
+		"q=GXTAi0B3hvt&U8WL!~%Apt2AASY#d#ywj1YKUC+sVPxU6<Y5k%02Rr&zCZSSW0o7o0Xh&2~QM2O+~U",
+		"To$!o6Vac$J4nPtaDcgfbu@AnM~ny^6%OdnsjoMI6Sl7__jw6t2ukHfZRi?YQsw^5aOSemmv=zu_3sF&",
+		"FTe0NlrLLg>$2My357DvOhQ5W9imqTpnGoBh1<bafs#$u!e7s~tTNwY9Fj>=r?ARh2E/<<ja2h#HI<&U",
+		"^e/zQM/CuQOh_s6q3Cf-fLkAu82c8<n%!HfEM*ll_/ZW/3NJkVuMN~d@91sUjbBP5B1n2H8Fu$SUStXx",
+		"^eSA!ozGgt7Qm~w2q5MO9lB%_x7-GCn_vMZ*&zaehd$_y5esp$cv4i4s#6f*!-NQF2w9$V1w+kNGs3YO",
+		"#x6_OK%veQ%uDrI%q@Sxw4-O-etQtg<rDn?l6X!unKHKcdV?^If8vn+wQoT61Xh2%tWItMpEhpwu~gD=",
+		"MKX_CY%t_?q!fTyyZCiFt+X=0/Ig8cTBq?~r67u+8GUxpX^RY*493R^W$GylQkP5MtA3BcAjaBX8PtWP",
+		"6+c?!XIa_^v6r6ipVShbT@6ny=FtpUpb8NHcjX!Kr0>DEn/LR+W3bE=w/ZhQdG8>q_G@_anq5f=4_^lr",
+		"tP6/SZ@#pJl=n?U-j$-c8Tdq>AuMWdVs0V125TnR0H_T-m&54!_IhgU5&grY=9Y22b?YiwYJLpA?544w",
+		"lYwv9~hqz72jaR$Kdst2_-t~12DdwM77qT~pNw8lG!9M8jy=f6Hc%QK#0XW_e!/8tIZ&14!^~!@By3OA",
+		"5B$C~x<P6zQSlGP@w857raeCc>Lm1Ag3zRdnD5?<!z^DttDmHZe/UFuG!/1wno&UGsl?IPbiD5xH4Zz0",
+		"JWAmoHBdUL9@7Nt-CB64HN1XIz^~YQqTl2v!CUnT5PSiHpwUAd5VtlCFy</xZ*zm=_k-W4=N3=$BoSLT",
+		"pd=qT63#rgahz*K>uoHr2a0yPa%rPQ&oQEJ6-t+4fucYkez$o3697TM>%h-_ujIGboz1u78/HGNr^3YB",
+		"9_6ESIuY!pOUi/Uhm##W-kAf@Hh7rx2c@Ve/zTC2cv?MVt09t!fdvkP3Q9H<IvivckI7iuMS^^T4F^>A",
+		"Tn~aJizd7xi%mBgg-S&Ert3Y7>fkCtH6I1/#72PJm6Mq5AlDskvh6r@%*^yQuKwz~9Z*DC5NJ&wFRv!c",
+		"mLw5Qj@f%-2X^hx!r/E2%KX!nYPB>FstUsdY6&/T^Tx-JOS@*S5BNi@54evf1T~_6z4JIaRt!e#ZEyJ7",
+		"gf+@Fd1uBregkOQ9<cn0mfBy%i8%SiXtyv<z0ViS*$2rRbHtSmlwsUy07<Unc?^~F@-8iLZ/1Gg&CSc3",
+		"74XJtm0yCgd>&a/drr<l7sV+gJ%4mM/h&teYN?L/h4o~=e&t~ujb5aNMN@&vsd56=X6?uXmY6#/nF2M9",
+		"MgUiYk*xveNhq+i0+9w>o85mk&pc-5nJ6UY2S<V$~!uK<4pfKZR1@!Fp8N3PiJCf@jo#W?gGs*pf!g5H",
+		"/e!P~b_efxuE^Y57%j2_^I-X6oqi=njO^^>6OnqUK8Ti-Vh&C#JcN2<O/7N2zx^fCrP<pp6V*ZC^#DOy",
+		"%qmU_prD07-xqMh/SZ3C-e7o3C6<m3G2x8-gwPragRB0-w=lEjq~&NC2*+7B=4?c*bRNd_9^f/GkoyjN",
+		"0M330JCsir6QfiR046bGc#jvKsyo~2+blm%Ob&ywC-H9sXIrPknklHaft+8W1=b5m/V-~Da*%K0nS2Oc",
+		"<1%xnpw<m7=Qide^X2ggoM4$0IRuCfey<+Ypte!$~DIyEp^moM2Kp6$s9XAE^83xe&rYRs2%yuw></8e",
+		"P/EKR=LqNYua~036zc_32wq$vjW1M>@#vki!!HlBA&NIb/B&84j/$T$gk<zOfJ53xgpwM8kzcp4V#zL_",
+		"1_ksNo=jq*/6bea27MrRqV~b%/~70HXANyZ0%KT4?Rv8K0a?HUnH2gr8n!t4pj!2M73B-C835YeEoxVu",
+		"-+L#JU%S4DlQuHGvV10N6/4e2x0&xvTloOsocuxBcJ$WBk_XKe!VLCbwI^ao6Qxgd@>aQDy_**Mi9i3K",
+		"gco-7SM8pA5Vi^S3cqwrEmj#bZ6MXZ6NFDh&Og$lcegRlpTB$xfNa*9Mvgm5b25BXi-t<i=$&*nQ>/*Y",
+		"~4!6T*&q1kP2bRNm4Y/#nw_BAC&%j4a>O8<d~/-9%fK33pBsHG=BUvu0<>wM1D1-^%JVIMEWXMJv//&H",
+		"8z%&+LJ?%QK@<cX7WKgjd>XCiDPzPcY+l^B&IbY^@--Hgb~9v9w6QULiS&6%tql5UL*vw9vLlsFtuZJ/",
+		"9O64lL@Nj!XjJjEzz6kD4Fn>5=nbE_o79mx+kktL>?mUR#4alh2Hh-DS7!Mbz4ARql4eQASFbKW?dyTs",
+		"Z%8yrrtQ?z&%x5QbC<U90BUmd1Vi1>tGYS+o#f7zOj2pWnRiZ/jmkBpsYOrbX/03H9iZgdo_W@3fjPyM",
+		"fwvYH#V#sFWQAB%WKdzb@m<3H*vQrA3vV25I44FX$=781y/5wsBX#Xi-nW+g5sj0=hrm7Nlu%$q<h0+^",
+		"oJ<41dExhtHp?Z&nN?n9-D&Cb~ei7o05xnFsFfk4/iM!CF2nhUsb<uHmaTh-&P?r#k8#m-Ryw=sH2<od",
+		"!v^MgEI>6Po1uC@Hz52sdo#waf_ORQ~/>u!Kh^AJmR0ASCsJET3HC=Ehn=_hIEN!W4RzRJyvTG>j$skF",
+		"7l9%14~^@ox<fHK7lnge~/o48~&sl+n2gzs/CZG&rlls%75QK?3wJgXC<AVTcaKAP8no6>?*ADro$sVk",
+		"dXqkQkcFTswm_<%8wEJsfNt~$WE*c?s0zIjR9QE@OEn>&$7kp53dn1?ved%mnXr$W1vBpC>=5N99!z%W",
+		"Phuw3?C1H9Mb8xhPEZlUB0DxDpI?yu=2J_LmA=<#v#d15u-9v7iT?6rDrl6miejigjB@4H5lbHzM@CEW",
+		"Kdh+XMLU/1=3jBAaV1q3jK$zPqIiQkb4<R=UO2f%O#?s?e7XyJOrc_<9tHyDk3XT~m>qU+hDMpBMz9#w",
+		"=FB97u9Xv9WT&@CsZKyyd+@WSyzigQdNTrtxf*z/K_%K3c+y1wLw0jlx!xassKylDiy6+4>Y*idystjA",
+		"nPrDE=7!$emZ8fklI$e9Tx~1zh&WRlRqsI87wnwT7bYg2LEy*aY@<nboLdUo~hI>genC-b_eQ0>3OCMj",
+		"3~M0/eZ381jR^&ED/kUi$@b~Co-W63caOojHz1J@!dBp64E<Daj*9pj!Uuqrhc2ChfB&N4L2Mxu?7O12",
+		"A6WLt43?!3iEqb!AYf%bo%AIF#=F@JtP9%Y#7Lr<A@l<>eHA/fe/z^ofVYe>SVHGe*L1WfhOMJv<6U>d",
+		"-h&s/*&FPC4<j-hby##OaE_hCa9gkj+@V^Bs@bEToWPrPDE=dO=LW?U=t-JCx+O!OLRpQqHn$U%5uts~",
+		"iL6GW#VZQ%k*~uuU+8a8BSF~nk#GCwhOw~z8>o1LCI_9^=y&67*R=7$tmB6X%w%RfZRCEK<xvLz#mX2j",
+		"gW5J$4GP_jtRxxfdJI<8t&0fO4/MUgi*c=5r%mJ5g*#cYJWm6ucBo@kQf+G4*wmfc$9oatnJ+2r9-v/?",
+		"5ntca_hWL0Nx!8Of+QOhDrk8^SOHStl5JDy*pL7Vpq<NQ37pYEIjdh>k$GItbXeT#baoLs7QQ-Hd/4VI",
+		"#J4xFq4!5-ggUJ4Ai#%Qhd5Zw>O+obu@DCLi~3E#eU_lh1xHRLGb90=C0s2yBh~TsLUAs8@Q=0@12pzE",
+		">n%%8sOp^wj!^5HhJUQmzlcCXyf1yz86zvGGoCGx+NG@B3K*1$~NJ_=d#xf*VkRNoC8<Kf5OwJJTvh*^",
+		"cD7S5c<s/RHdd0Jk*HVC05gJ3?R^N6qd%f<^u/TlARk4bRg8O_c9w2=jQ7T_D&>/wDYHK<aIVA?y#_@!",
+		"7n~b>jiFhGhr6lQDMFBOfLmaoTzFzvpM^^!UTtBYhO%uX&JB4fW3$UOg1=y*>LgVpRoMv<GY9D>GbZKQ",
+		"IP=5DS~/L~_1nuKBH?S~a7=uuLjNg+pn<j8Q>R#Wtlr8UkPQi=8E6FWkp!7WaNX8?1j%T303cO%RCnPK",
+		"wi><GQ!0hv8#%8+moVPJOi0eeBB?+XP52FX91V/Y#58xafK~1BaV1%D0-Pa<5%&nR<k35Aji4z43WxJq",
+		"-yc5fM~0!I9y9A>~NaHReL&q4ezRfGE>UE/Vp<O=NId6*+xpogx9G7?/DSmggQJeVa>7!x>2WWHqpuTK",
+		"OUTndt>SVQm7w~@4TMTqob9>Z9OK$-/_aH6W=4uBzekF>2TB8E$i>dG_Ln+X7b<?zwZG7dr%svS!jzYb",
+		"m~NrDV#KD3@fkHstq<0x~b3HudRAz$hhM&-bW<^93Nz&VYHOXD1bUKTe%wNBRaG&rm/Aq3nj/L>WMc1I",
+		"uvViU5yG2nD~wX&bXZvUc7H7L1p^4F!v4<hk_yU9<J8z8l/&wb6K$Uk1vE<NKHAQYUd3-wJ@JVgq_UdV",
+		"qH2wEeon-2_!W>hTHE9S^2Bpnt^K+LW^P*<qv!Q_^i_-r?tQz@lg$%2/=to!-6eHHDZW3oCe4Gzkwo=G",
+		"Ku^Yn5pOP31jL*-&u>Pt%ea*ouWLyar-P&=no4B*nY@^!@6xEFt8oD&uUL4LMRcd?%&BCTV6ZgNa=*Md",
+		"!leka9g&1$etOIf5XG-z4ayDFt^K+Lsi?#1qEnVyoR8^f?tQz@=O^^q3rx<*1?*S7insMCdiAvkW$Wuy",
+		"tw~nimUFev27s%a^HGFjE3~=zj!N<@7&w@n@x?qHz2x?ngXV<Ux#tvfkql310u7^pOW?^K@2Nn002tDn",
+		"&<0r3$NIlfg$R$*jUAS^D&zDIMk#cljtDau_=-M<kykP&0DIMEqpfH54UaESZ2pcoe-e%z1bdqy1YYa3",
+		"2Pv+5zYKy62lZ<A/J&6Id7*48jBsEIva^_&kmgH=!oPfMLrXPu%2aaCN!FLO3^kpEL~u_e~UMVWe/C*S",
+		"bZTldr$NR^Wn/RP5X9&RB3=f-Gtp?Qd50O*cH>Io3JX1ZKiEfVhJEBx0xP0MmZpR=HGpK%AN#aI3#gcx",
+		"q%rnsYd^qBlmVf1dT76pDJf^q%&wJ3=nW_^sg<V2wR2n2D~/&zz0k3$9mZ63^Da!-8oGZ0KOdIr1P_!C",
+		"mSxup9yI/Y2vGLRw3&E~Vj6ME#N<$6DEh?*E#070RGvTvn6vOC2pSHBoYi0?i*VO?6@aBx=9LJo!i?=@",
+		"u4N3zb4ODy3<GVzhyHb&W-SBwyvjqu7j3wkm5UTCmBA$U9~QKxNLhvR!*%u^eC^2o>DR2J5pN^pcM$TT",
+		"u%HvUh%D!s7JC_2/P*8B2bK6u_*jS^ezQ#pmhT!kCcYkFC+jXMerrO691Hu!crGfe$p_i1_a$IG4f8k0",
+		"oP>x7$A/v@wd7Qh%/>^gK85?Qql57u9DYa_Hy*P/FAVHh1Xc_~b<UiKbSw7TW=6z0<Oe#UgjO4XzI@YP",
+		"r_fn<Q2w1=4QX?$+%^xr!D$#Z%j&Aa1H=?>#IYH4K0Vf$A18H9D1N<x7XF3ltLi=@1DI~on@B/O?1w0Z",
+		"sQ^AxRwlXl43R0@/EM=YuY*6-diFhpBS2RSVvJ&lh?spp%#@J#uzkpx3balus$6egj8n!L%y^Ui-!YK#",
+		"25=Cwq&~6xM9GwH3AdJHRxYD3d%8w9b=<paPlq$ZO/Ir2nhz%012^=VSIf4Cs/r^L4%8E~do9&370P9s",
+		"6S~wSa&0PH=^+QpcM/g~1x#<!IPfu_TZGlF75*?L3h1cCU9F8Uk$n!28O#-1O?=<%su*!&k>azfocJb-",
+		"-xFOZpc5q8cJw>&qR<zPXke/6kF/9mE1/Db#ilm*RjVz>7YiTI!VS5#NaXtJGVOuFY!9JWreT-khv~OD",
+		"o6T++ckw5%AfeWVmCK$RgD+rNR+Gdik/-h4pqLuRz1Qe>l$LhbB8_7&ZrWPC1a6oht=lrB#c@YFGUwI4",
+		"p6igLq7%3QQSdyvuG1B2k8~^sYdGIyuPu/u4$hcQ&EV/rNqR7z=ocsSUCA0/*+r4wIEq+%v5b+v10DiP",
+		"_Ml6mq+XdTVPdt=sjX@4uKHp6qyj7b3P?UL1wYgFv^?2Zm>-rEVTcFJc/07FdiTU=3pZ#&DiV*</&4<k",
+		"9U9OUHXMXC=W4-Nw2J~b^%W0#!!<2*WC0IQS5OKoW$-j5^5KcU6gXM%_Tbtx3YVr>pKp^EeW/6=><+q1",
+		"93ixDp9>-V>!s@6crg8EkQG3h6ViOCkrsglllJX=k__uBqc2_pl52PX40#Re-L6?JxSZWWcBI^Mpz!mv",
+		"~CynE~qJ%C~@<i0-9aE$4lxQjlls_@ILEbq9!8Z!XJEquJ6R>z<KD^+lx^mvFRb5OCqanM2jGIHNYFA-",
+		"btZbT6xaZ91y~SJNH4vErI0x4EvcQoKl2Kzs&VUmQ_*5#DVPhgn>h8<a4op_a3wt#&%HU1lcB5Wf%mj^",
+		"1#E$<0gm_T0lbtv12f36RhVH^BWZAg*x3iJuAyBHO30WErF=QW9B/!DN2MCstZU9^xbwE%@ZP=NPQvUs",
+		"hT3lbgqdhU~p87w?i=8XtKE8Xdqy1@oa>5R0vwo?ouA&&sYK?o2t5!fih/Rrf=nZ?W+=Yjdx_qNl1Gl!",
+		"DVCInX>zRHvEX45Z-75fIm*oO*idSEP$@zhEppRFg%Od^%Fd^ye0Op0qD>83$6_4a5^pTBvF3pUiud^b",
+		"7B0Myy=tmfWOoNfJl?~Nl^g3W?kaT42+?qtmABn1/7SeCiwKGObMZo1x!CeYL!Yl^o%Jqc8-?pjrJKoE",
+		"Ae3OY<drG/cjYo81bM~/5C#&NnHzxSqVn^M$~L9^0^nQAieqiE5mqn_>HX4nv-3evj!k3q&<rU~gW@eg",
+		"2C57A^hx?!Ar>/wv$KPMj4D~9t9+4eYr^dz+n$t>h!*gij$7QVADiks#UjRCN3jL92l?-ZZ!BBc_*b@~",
+		"l0<LTpRlBJcl_$kowQu/vj*OyE1R^8C!$jPcF!UKofl/%9s?<ngZd<67g^5v6~N-wj~dG>8trRf7g6kn",
+		"PSN7smq%wM-l+~!2cX6Y08oOyKyCz%bqAJ*6Jw<^?W8992vJ?h-FVgW-B5yoEt4cF<YyVSs8Rdpi6ws*",
+		"2?>Z0O_Sd0CvRspi9FcIRB4bP%>#U3>PPyS+mq=PQOeTlnhBinGX7v0#$jGe#uRPxr~~E>6Bq$vouB>v",
+		"o7*?B8D*+Ag%~&1DTc9iK1tBgOR~KVgSe5x<-/Kma9dlxATMfsqAR7=fA!QL^0_d^v<6%j=/j#/N7JGv",
+		"O2e-XfT^3mE^9sDgMyG$!QbjpYtSMsku_rm?&uX/^6ud1OdaZpd>3pg/G!9SP-vHw8355y9ul1kJ5V%3",
+		"oJ8ljYim96R6gY$iOa+o+?Psv+YLSBmHJsb0a_gSutqXhb*Feqnznu/$8GUB@IsXrZZWfafXjm38ya>x",
+		"65xdypUb3lRT<_e7WI!ImNWayHW$feenff2*_4<80iT<C_#ibJ_Rk~X7rq^695X25f-sl<65yOhaQwxV",
+		"d3jifAbzRPMImH2Vt3=yaWX-nsTAHI=r>~Cz?&I>qfe&3di?9GdYc=_je5T4ogdR$b--l76gX%?qHjRj",
+		"lqYHz+3pN^YR?3PR-RsV7x@*SSG61phxA22hgO5A!or_I?olGcvf_UI75/jzXgf_$b$l*e3nn_4fSPb?",
+		"6?@YTn?Xh&nnT@%E2iLwhoXX2*$*M-HP@WB/~mb/S=lhOJrdn~e@ZLRXLC-AT$7Ke1+r~LD2X3muIx6c",
+		"9AC^SwbAMQoK2Ri_7Ggf3wTb2d>&j?cJPUM_FnZk*K~@nmGyp8OST-CMp&CPk>DyK8J!SOc/>UNApRHK",
+		"LhO608EmTjcZhu#Ahdvis@H-kaiqY7I7I_J577ma9=M^tnMU?er^ugtaDSPh3s-W=k^KFVz7eNMf<MjA",
+		"At&c$a@J_MuybDCNpl@SdL=BCF2Rju!lnthldFpfgv34w#uXV#$@Wbjs05Nzq^rJ+7zDoIrQPXM0jIm5",
+		"6DwjJvMDGT*9Rc$=d#A6i6=CDtmfc10ZDGiwl%pYQ%!n=995d#TL-y3=Bw*Jns4eUk2kiYh9Ie>tYGFM",
+		"3MYYgvkglJ3mgcR*8$QHrIF&9SElzV-cAW#hCVk3g/NniuaRNx3f8hK*ny4BfXRgmw!rNI6%eAR*&-M~",
+		"23gp25gGecpi@Z&@%B9XFywB8FR7@Qwe0Qy1BHgG^@W<nWL<6%y156q-S%6EI&$sYhFz$+chG+_FCBxq",
+		"gsf^-3vr=p%p7j021f/S0%+?zd-+E8w@#EkAki~hl<qIiSuGelC6LyBP<nZ/iOeGDhK4X^mQmYy5Crc8",
+		"6t59=2c&=^=31XGd>@cHsTu$ft=pK1Lwg$BMyE8lp3P6bN~pXRz^gmojrtXUTl1#VUW_m_ZM_G43%I~u",
+		"MTyPFDJVwe0MRdsq0wT-ylmH~fyiUN~$C<<q6@m4nLFuqkH9OH*Ps<BwmDjo6IcU0*3R+*%N1c^X?4TT",
+		"6Bnpwzj%?WvBywp23Il$VDs$Pk&DCuvRSPTuuzO+mzixCf@bRAXZo/Ffk6LM62Gy5f-!6xY/Q2*OKW*d",
+		"Wqt4L*I/J1F^Q-QXr#q~~Kj0R9bL&LqIeQG<AM0%UER>a5pbkN7EJwWbAEguaf~1YTq+c8fd&/2mJ9Ub",
+		"sf~Y6oar-s?C*rEfKu+HtcC!~u!9Dtu&bipu$opwn0V=A&ss5a0$sMPp@r2KnI>==Y*0Pfoi&1Nqu+Wh",
+		"aOBo&zxYkJQlYN@#j8R+66kNTHuWZUig0pQNo4W7NqOdJhHE_#714rQ<0yRsIrCmj>13QM0lOi*aP0!T",
+		"5DqzhIeRCUNMW@uO*pyDbA@MMnlz5Yj5DyJj7icRq5%~-hIPcz3OZ0/wBz2q3g-==QNR%oM_bI3-w79g",
+		"&Ty-o=vPCZlEW1Zup0OoagQFg<&Xd#ch*STb?Sx&4Ag#A&?jJE5v4B&n6ibzeAkCjq_XQ>&_UDjY3gws",
+		"1*&Oar=1M-N=FIDOt=<o7cf-$YePX1ms!@N65Zk-GM_B&4BAOax?~-dx9p1zU$~o#3Hkmp>Qqk&1FL&@",
+		"C>Z2Ybcea%mgt8&18ZB@J2sVLf<3KH<nw4FTwd28ttNE-Pmnn$/4-Jr/=u!P1>xO?qJhIE3aB7g4P9Cf",
+		"i6K=EC9==Yi~zv=Voq%6j=7Pz?*Hi#nqjq3O3sdr!5Tle1HXYfHD6vG8b<Ty+CZus!rCIJhNUIRc4#2y",
+		"X?Biqqbga4Wa-F>3v37nlf&UNFHq8Cg_ij&wp4S>uISl>kdOQBolBIc%$9t69<g6#o$$il0lmzQqAcm<",
+		"*!Wxzg!E~k4yczZd#K>z?edVrjknxqRaN/1P^j=EG+d#d7HfXuq/YhS#8+_snFDphFQV^*croH/j5Rt!",
+		"Zrijqmadvxcm7SbQ@Nl<>ku=K=dU7vp7ppml5&j?p~rOr*O0qFaL%je?8Bt2gMWqRM4s0J_#x*frUt^&",
+		"FNWJk14Farb_I$+g-OD#0a!M!XS-+L69cLD*g6KW0TR4S&PxZG6o$!kif%DR31bCfkp<Jwv2c#k+iGPV",
+		"sc8?Ii7a%u4Dj2sU>4Z?FuEnAuuNpkrd^AgzIhoyRRx8gudZhSlO_ACb*uvjUuub%kJ<Nev1BgQClo9Y",
+		"Z-ev0gwFj/g*vdAublmUh@y<R>Rf6W=c-TO1GYoQ&1O*tCJwCZcNwBe/nBm?E7-?UE%IIJk8ZTYm&46I",
+		"O~cXTO$-Dnuu@k?tbVZLXh6903k=pALLUWZ88Ei>iFB%~e+R8W1OAD@BDt~K9ym5L4Tms2CdH9OiNqqr",
+		"ZTrXG4@?<^#N~TzerG09#HWm^h_GJs7c+FyVR0A8/vbQcIN6gT9P$~Vcv4-0Lt~@E7uBWsa_P8zbtzjC",
+		"p=7I~C<M7bc9R=7VSvyK=6AXR&eV&+AZ>N/qCs0lx97R7s5YNjpk2ySLgp*7QDTa0!UYuk2w*1B/>RrI",
+		"4fPU+u_78eKlomh-A0^<kX-DMQd6H<2jXKEun474q+?FNaJpz@c_01>@QoxcsLG/&506C$f~/YEeiaal",
+		"0@o-&l6<_t*uq6nuC4MPXqW~3A??EOnkA>~lngJjTc~GgnfOaMz!idU6XTe^2k6/W?ijLTgfjjA-jYDg",
+		"F$#OZv#Vik1S^+#zq!pJtbYmnR@_u_v8H>$bvR!-cK_Ua<r&s@tLK#c-gyFuUsBn9d3bT<^DO9kszxBI",
+		"c>k7htH!8AzfPinu/Qep_x_UzCVhqMWZ_t&eJ6K=$0Liuk3&r=nuFW8%skq69VUY*%ih/=boH4N*8E1G",
+		"u1=RcZ/r156+tV-9%SUl/W/_K8&o@>%6YIyE9%WaCykuUYZ-CcfS8FR4WYQXPwG33XY~&~At6Ds*?qjD",
+		"Sw3cw0$%Vn+r*^amHT<JWZ>A2n&uyPVfmU#if3z^eA4N_3qtrHU0R*v7G@HLxhp6XH?G6/5beN0IHlWS",
+		"!S<*M49eSC+f#x6JE/<M_ncFeXn0afcK=t/7@PeTv5X/ydnd@d3t4Y+4I8HwMcVKjv$4vIJ^v&8vkMG=",
+		"d_h1wl1jqZ2>QTyx/Agv5ch=au5<e5<Bm>^sYAHg3/Djhl/l9X8J-@24KmKZ=h3uK65w*SvibNbv5hEz",
+		"suQD&9qP+6%X7Vh^o=SDBCr/p8>MxAvbTRy-3ZR*09&dBflGTPP%t$MR-s@S4ghonftLwSPKu/#PKR?_",
+		"muTPC9wa2w4>cA$0G~QbeTPOx@Zm#t%bw*KfyY9%QsnAr2YrMrbb1Yr=>^isiz&Alq2h#^nuhZ5jo&ia",
+		"xa=AFoLa1$S*X*9P/_s^fuTINp$-zmKTlz<tgV-Ay_eX5fiNGDdV4VC8p6pRt+PQj-Ac+VxY<&@SF8=_",
+		"_*Ij~9UyW?cC$OO/4j3r+=IMSax5S8c_6Bwgt#HPtX/~o@$LHvW7nS&1CjBvXls<piE*&ksfAevu^uuf",
+		"TtSE5vbLP-%NAfYTk8!Q08ub2p?IDBoeZW8mClqCl6bATn40H&lpsESjKUz8hXFR+JCOPl%0tX6gYWSQ",
+		"#GWqY3PxbrSXq2n5F&949eqs*Sc0~Y5AiuU^S1i~i1Iredm1xW#sMST8=Q*c-4MR_l7jle#_f~O#/#Bu",
+		"yVBfew^Sy%%TmZ2V6fXa08w8Jp?IBPoh1mjmClqCl6jq-mTPJ!IleS#B6UFV4XQIzmedS4p*PbNmmpTj",
+		"c#>7g%?<8LlvQhoc~vy2pj~k0XTF+@%Vkgo5tAmobcS8Viv?ba+X#o@gB!HGWyhQnk#rDkPAajy8t<HA",
+		"ibCRgtmFt#Lu0dFXmVq+olsA9zilcm6fiy32S!5~!4@OUg!vaFvMZ<~p8RZO3k=$UhRHB646IY?0Wce1",
+		"ZyN/m$$NCWv4/2p>oRawPLZp/oQufah=U+k/EAzkUlFbN9-8okba15>-g8W3dtrNBkS<9m>9Z0Rai-G+",
+		"qdb$eD*!HiipEaJE*F^65pN%sR8?l*?Z78Uo6nsXO3i<>D3zzxUTCs*/lqfA4729RBYs3KqQ%4-qh2O$",
+		"oyn_dz4x=ObsxPlaJ~a2kH7AZoK!!tBFZmugxl5wotz-uObWhZGP!CT3trxjir@E6mKGRwkZ+V<_/F^u",
+		"x~fQJv-FeJMX@xDHc1A0KBe1SpYeQNk^sY>a=GoJk6RDt@2e55@OxnKkEA/nQ5OWK1@eJAiosQqgH2@0",
+		"5>uOrB@7qk3Bxx2MHYC0VL9*pa!e-$gafpGc!lOKhoC3O^ecvjW0XGQ6cL&v7CQsfh3T~apnbfg9vfc3",
+		"!eXUcrAXMA&-#Zi9_4&SNVRp0<c>~C26USh4fpI^Mg&hElb4nEfV?Z_M?LUD1zbb@iLVHSLsihcO?g>5",
+		"&vQt#RiXq%G1pHBc8=DAJ3EpZgU*lVfXXjGiMIuCoU00Yv<8UR28nd<<#DUWu0AiizD@apYI~#fB3%GK",
+		">praX$c1CbJ6AEKzSJqD?M7@MF2Q+T&vUZp5wa^60dn037Ln5@RhLA%srGyV8$dV6shE@qZz7^Rhu3uT",
+		"2Z$LXnn<=PcMtR?/az~lpm$*?fabf7ZZhI?L?+mnNUN*Bw5raErE=bNnTmLWoo<Ywh~Niq+>rO3scSgD",
+		"hb6Rkhb1rp*ZhO2xHUlVu_ooLwxNHGHLk^u1+pR06-p>Xc3MOfhUp@90_v<<P9>5UO=kmMQo>#5CF66>",
+		"JyTfHv~FAE2P77E=xCuVcLg5yr~-N+=Mc0V7iA0<I&~$IcrF^aK$7%MAJb69yTIrifU^=lc3W1v69%mu",
+		"xMjd>-4o4>9pAi%j^R&9E=PoKtZa/W8Zb4+u=PL5CouQMrQ-NtXoZNrui%oNrqy61r@ILfaq^$%4>bQe",
+		"cW?pC3PJ/qkgmes86*lOBxiqFh_SIf0+B~dlgtP<j~@K#>G#jT?_*<q2j*HY/IMTQ9CvfX9uCWenwNT9",
+		"=iCTelqL3G$CKCGIi=e+dAH+f^qHY%73&NxMFA<9aEqrVb#Yx/TbbZUGJVY4tPP^mj~m~GJ0dY>otKCa",
+		"h>pdBmrWBek-*uPI6ud_G66pMrsgfy$arVa3bSeOY_M^n>j<wygWeFs2F^8<1RW@$xSEQqdLgOfjOb@N",
+		"Qa/L<5e/3kqO3*lc6SE!?T$3xtROaBI~Gt6C5M?g%5IzPK0^y1eZAcpTEq<9l7Tfz30M=XPm*w09uK43",
+		"lA=8vj_LR!i=CwCncGm?nW8ij6*KC?EIh2<69u-Ce742X<UhVXfLCJ<MB=?I-gnRfGL7W-rlL%v1_CUj",
+		"5Wf!O92=DRn&-p<WR^iLg6*VxO+#F~BPc@sefxinMKDL7$*=I0jX2Fk0&-Fed>TVcYb^2<2%9DOu~AE%",
+		"!ilXm*=C5Kh?+mD8gpr7-rCbMjgUV=O$UXvH70SZ@6x1-4zj8q*mLV5-W7=r*Za/l%g?QNkX#gH%Z+>c",
+		"gspJaRQ%aESZ0@_lBHhYMvukruVLcaWO>xxL<mc3TvL_q4qqY>gRL7SJrvy-hY_RO8!4QFgiw_L7ccaU",
+		"3r@G2jydW>KwtD0f3Ur9PMmOoSqU7N1B*iS!?Y-h^8CqO7dD%kLMCIA01sPn~*q0*a@PAtwMN5B8B9w>",
+		"OBY7L7t<~A8?MEHwd$ae036jJ4P&~@tZD&U6nHcO!lqMyY/0CycRa@oG~k*C@GtRqw$YVypYaqxM#&Y/",
+		"gXVZ2DYNifuLhJvAlFe!8T^IhljP1eYtd~Y9t8-wsB0W8bo_&+=#-kle7bc5Gg<ktfOe+7!Htp&CnaS3",
+		"dK9H=YwD^?BEM_+bdu2*H/2BVzYiF0sd>wJRd-B<6/G20-FJwtnczZ*kYnQF~$_Ghl7^7uF0jxtRmF#6",
+		"qkgtMDqmnXzmq6Ceg>U_uky4AxJV^RKSqKOgn~A=%wy6ba&q8hqsIVf^?^3O7=YWQE%<!9dTlt45TwCA",
+		"yAb?e0W^%4uN$?dvlH%y^Q>LaW~~?aVEWMJIXip_13umUOYOjmWa&Xqqt6#6rwCJwKb?lLk>W&RAIB_y",
+		"K_RGGcAZ31~D5TV7-t+PV3ttGsJf&2qJc?>3Clfu+VSo%!wN~y5LVH~OewN-d@WXP7w2Ftk>~QaBjo!Z",
+		"!t_>&QM*nD65p*J4U#oUa!RdrJy@gCgmHhfXy5v=!ffBOmPW!v=jy<1l#es09rgJ~jwWnE=7+u>rr2L#",
+		"6F$8d9BLo!g<5NH9_UcmOp%@$9xG>u0M<R/Fxn<_jNqSxCd<qvBvkLpOzY#h/<#+0M@?BQJSd*k+omdZ",
+		"19eJ$ZZu@UpmC=x_&%#C6HGoJVPXG9IEPL*2IN>h7^EcijfmdkiS%tech0hV%aHvD6<l~wHwyGHtx=>>",
+		"RV2pYshy^bI^c225L^Y6GFd_rp!<yfbfs%O5/b%8dX<ApOW*8opUDWK%X-CcpW?cBF5tCr1!VjVv3KET",
+		"D=9YLa<?4YfLaZmglkkp42*J-hP/<J8FMDsk$b<C5%?@b323UvJMnsZhGHo*cXAfmyCSC8WPu8o!D^il",
+		"ox=fd!iWf/v4^mF1Pv%CGRXm5ZHw4!0$7W?g^M2KceOBxI^yxEaMW#Lun/z+<1p!Hr7CiheLqHQl_j=v",
+		"rJf</IFZ!QhvPQpF6fX!heC<8iYt$oM7k*Cck_G_RUednVfK_-t$YXIJLQh8r8JZ9&Bspvmk%1vVj5s/",
+		"2+v2v6bB6^IyJzg%o3#sA$8UrrAA%U3Cl6W4C&#CX&Y6IN%oVD7S2cWesA2OrdN/q?xmwlgPUk<?A79E",
+		"8xijRcjb+8_5ZDEgpSSy+nDVf&T0DId@3X!>6QOKrL@eivLdLml>k9tm04JYAa6lU4s1iRa7m4jj-2q1",
+		"IufOiC%iI=jY@9ViIaa%Z9y?hUbRFVmf6PXOlrUOmz+_A9Xr5bv3*+9*1ihG7=+HFc@s3fSxiHZ$/6pO",
+		"ME@zpwin$*$wCuYaL%aKJgVzkhKSFQZV?k6PD*yMhG&NVvT*Op0HzI5HXwrIVmwGp55E!VnK6>bJXZyF",
+		"baFX/oH-p^*Yo5zs2X=CX-NI9j15sh5oSY%y@vZRrPjW*DM4/HmI#Gycv7XdhNM1dhd7+1%J1S+&7?B9",
+		"O/W/*KI@xIsPd?uaGc?lhdu*13dYB&tIXaWjhpYPfT##Rr34gtZmHQ1/naz1-A1%=Qb4Xhyd3/be%P!H",
+		"oY&d/$<c&8~Joxvn&H/!sbRSo=PP*UOb^Wd6N2_62sCJ24*NK1VeNpA--?&2qmw<2m^q*t2E_#x3>xG<",
+		"hO3GQfA*eE8LbZha/<-#AVR4d08^iP/DR0R29p9#BsvE_vfCSClvozT/$2v40Et=1HWrypV#x8BcVGUX",
+		"$r3j5K>%Pcx/Q+apE~RhAg!ZyNZhoN#j#Hi^w4D!/=/2EgGrI?/OHux^1$2i2s2my#_BKz?~-i>c&wnI",
+		"O9^KOqf?<9F6?JYAv6!k1%Wj2y%hzwd7ywnqkJdcolpH9Kh3bH//4xACXa2RbZ#s3l!0KrcHUhDyqYFi",
+		"k_E^j#p/XxOfruFX^-IC-3@wok1A4_qCsjIlnHHzl$Zd$nCTglD?^0cnThSYWqpN_4O^CPye%36S9d3d",
+		"$N1!85?>?vc+E9ZcJC&Zal*ylg7!kT>_Uv2qfhFD3tUdR5qDAdla3*UsacZOS~ue#kw>A<Ggwu7sJeg2",
+		"W#b>BOF^#uvtRDM3S>YHH>n&~efvM&yqLFed^9m#>lpNahZDWV3MYw&qpcqYqx&^7DOQ=Dd8O$XOuUVk",
+		"/@G^nm-XpeMZLuGgMAGSfRi_~7Kg=Tj&Exm5ilJyI#20cgmspd5gH#eweSnMfX3+!6U8Z<6nA0>>jOr8",
+		"1gQ9^lMru3&Yz!V5FD%1op~FdJTW_5dmVG_emOQ-P0nInf2j*uapY@su3>?D3%Ol-!-<Cr0kSl5n1~6n",
+		"CY^-@Fb<q4#O5UW3QTTJmF~k4q-p&cZM6E8xBlx*BUFN4bJBTWAURIiDYeolamhoomfEjAntQqLEyRl+",
+		"e8&hU=^i/>nnio2UhLxTs$v=bmcUHB6pu3R8u42YS$&Hs2tdrR^!?^3cEauua%dD!*r>rE_GZyXU9Hy&",
+		"t0Am1R9j<S+gr@oM84FX*NsuO&&SpBuoHS>5xVKt2nM2j29T_XRc^abub69yvN*mDt&IDwiW#+AedS0t",
+		"?<LNTXjBsEqz%qVbJ+gdd+fpx#C^gPX#hfvVN+>L~x0Ve<NX^uqOl41qIG@ob6qw=9+?YZmB=_cfXLcG",
+		"eUQk5yC2~$8^~p2^Fh%~f!PbVm-CUzawqLMWmRfP6qT6?P/7$6AXh^!Bc5aPLGYUQ!J<2uwL6wOmVryY",
+		"+CWS6lh#7iT#~z&tTv&<rkh42svkonfpj8^mGrnBqs-Msn+pu+yHgubeX=doQ9s!OvqG_yy_hcP$0#/%",
+		"7~s*?d$^M0~gp?Kshx4Gec!$yRBt463>V^uoT-bLg>sbSkzZWNNEgislWTJ32?3v!9wV~Ej>>rFS=duP",
+		"e6ig5q!3QWLH~6$J_bfH5^<@bGm!y1Bs<6ZDoYnm0!SZ2$7>qL?Fh43i^lZ5umDMwB2?1JcDLvuiw_/C",
+		"g^/*UfOLHoqew>2$LVJ-2<F7w8a+PDf&Wj6h0@jt1D~kOpCLUKT<y/Bs#zHS6=sb5eLJk1Lvz@J1DLRN",
+		"3Nyn/Mjr8v*0oz1BQB%l86iCH%O4qkFC7e+MqmAw4iq6<Zr5_TPJN8d3T7nmoI$p&mn9EOgRw#p#3M1m",
+		"tx@=$3M?Pg43S6c-N#yn8y4W$Y4VDH~fF&2gSHkYnv~2Jja-y?Ff4pJr&U2diiHW>jJ&T4_xf@he+tIk",
+		"D>ZNsYE##%iGT&y2n/y>fEO*Gb@AEL-tSc<_%y^Kl4V^i?F7j$NJPvXIY0BYX9VRiXG&0Tpz_bvsy$z7",
+		"Fv6eZ8k9P#c/KoFOg#+L74pd/XSd%!CD%6F@@>B#~%-hY1oNpVq8k!r2qNJRNA31sjY_rpa2E>1n4WX^",
+		"<Xyv$$3cAWk%<fwX2Ky_aBnT5uvpgbJe9uOslKkdCtT-sLx_6WfrtfI+YkxBMm8RV1$X>08_TkSxoiAg",
+		"czDNRlkzxnn0!--NTHL_$1tvQfGDi5TX+zku=mf/V?*9pQ$<bPiQJihvtZS$p_EE2f-wn<cEOCG_#jW*",
+		"nR8Aqfhsv#NCL=rb>Dnb<#3OLZdHeL6dyCwf</@bqvcHKw<fL22ehMqt5FC7u@ZT?ejPk>5NfIodh-g_",
+		"%QDjEu<-kOnyvr?1Luys-RPIf54D#4x@fl<6T550krRm5w5&6r#aFT*h=?vv?_kF6$RP-9UhSimdv@3W",
+		"ic!Caa!<GEusnj=X1$L0m/V50VLS_UM4~m/kx>UitJM_1qrx*t7^n?FpDPYW7q_GULHcv^kg1gCzdP/g",
+		"Z75#?8M^3D7<rFaeD@q&d3w/_Cg5~VsRm~fW~Urw~aV+l5n&l1*3ThRr6jI/nxZgLR7L^Dju0&WplLNC",
+		"q#@LnoI2v5s2=pXqFy$E6t>&oVzgzZCjQ^$0kk-oszTOqw6kZ_x*Udagpdk$+wx/_j7rZ_mXmThiO>fe",
+		"~YgCJRAyYg0t*s6bP=qC9BaxGCY_LDzl*Mt0~&xTdZrVojeu^^~jHK0vtGXZl&rclSFkt-hBJbdpPZt8",
+		"-=E~cY?MZq9&2U?w@Wd^e/yRnb5$C^elm8oSx/hc6!GHsjcEtbbH6a9_%q@ii1b=#d<#XPtUhvDl/fd/",
+		"oSissa9GPNk?9fPFM-*n0b7L6eF27m7Onw++R3Rty8@4@nWuD8gKvudgP@^-cj*52eri=8PN-Ozbx1Zf",
+		"4s#OsdaoVWoy^dG-0*!T2HaE~ZnWr8psu0C#-Qiehikda60JgzSW*BXsgl^<ye@y^QhHsp9>&DeO<de6",
+		"$#3Golyuqw@Gb_N!PP+?r=C=9=jv_-aDlKMt*=TDNGM!X0meai2-k%N?SlURQnuAvqq0IhaFzWsFD+cK",
+		"CvFVW1TX*Kb_>yke9#I&lGcAQfcRBaHBlZ8k5efyYvpfsMFVQt01%-qkN!6k0l7-wQ#DexbQ3PFXD2g0",
+		"^7acqb438ydXB0BsVZuyyxS8YV%QCpcNkY@=PS%+rY_HfHnuhoitO/=7+O~cqpDBNPYR-!&zsT3hO2Ex",
+		">uCJzxLC@dkv$bS0un+&KM=R4IGn_l!E^gMQA-<e%qeC>=$U$-9IvpsM_a+Eqsl<V3U3i8mCcl9O2Up1",
+		"9>fvEiWXx&>b6F9a<hDL?yXTLhX0olkO>T2$~FGOhXN7V=lYPdfNMkbQRg>/$=XTNfjMJoxJ_tq37pC8",
+		"~~ydcI%4l*5DQnOr%3bi#<aCptQ~kxN!WmYgzigzN&AuxZX7PI4cp2cuUot^*Lhq_~SZbXkjuZ~R7JBc",
+		"FALn0l^D+_M4nAFb7I%+<&=1x6TvqV>&47caT2PkLm_6sgkzLljjx8C-&UJbfoUSv0k+03V7SXe9ASpo",
+		"adE2h01zx^QXhI2p3+vF9fe/EVo#4hoLLg0K6/8DkaGbF/AGr#ODPfGlfVqPm8BVi/TrF_$1Skm2S^dG",
+		"oUwe7#PvgFE4jpI9SsC^Bj&Eay5cn90KXN-+2=nP=41oJ24G6Hm7i<bo08vXZv6dm2=lr0oobzIsC-%!",
+		"@%Co>p17~J1pBYoM/LB/DUG~e$xWcfDpVLN01HD+rMk~H<Dk@~aW_&?kA%_hVh-B6R/Km6gOWuaT0utu",
+		"mhwBHpdB_aMjYzS/GTo&pxl5sX-0OMX>HPi3kblPz7*ae5IZ^mk2<I@5i+q~i?#2?d?q@ShfGurHBacn",
+		"mV/vhJ5WPa2rkhR^O!>@R$_Akr-=#UevTeb^wm?otFJ13rf_R&MU-Y6/xcUpkf+_O2AU4SmDE2RhT#KG",
+		"pA2Hc>AnE4N%c=$03N5~sQ$N^g/ToR0b/r0Smj<bJ3Tv4yS/7S$_%__Fy!SndvPVt3MlOclHA&@&Hjf@",
+		"0HQ6+E4c1cuid4&_LeYsL$!Sj$vcint1y6If/Vt^0Ai%pn7=^IQ<EchcA4w2q3fQ0fF<F0lp%uUCk!%j",
+		"bYj_w0vVa^aFP2m5zn6vbXF1u=h09xh-0%=tV5YLbu^7o45L<%=rX2nu8Y+cDH~$2Qw2R/S59xh&?7?7",
+		"j>SkB8!>jyHa!%B4lB2y956~CR2DxoHseucpBlloG>/hxOWiX!ggW&Y$r>-3mmo7d^oMSU==eeq2T!pE",
+		"B=n^zo3bcdtQ@zCZR@fjPSaTCU+ytY+wGE60VC$/~vC-Ez@bJlN%1VOgBb8UBS&-uvRgkGT2BgOac3Zq",
+		"lEPgp3S_iv=bx9N4tbfKa@5D8D>B^~ODS2>Zj3xlz#k=stFeb8hk8YN!9A-t51K~=fODX#lZDS1z*%Ca",
+		"ZEW^0esAi!iZHTX408Y2f^suFKU-&MW1siZoE8*w$9_Ltr^S/qnQ-I%n+IPcu/1oRbb=P0SdEPv6hJ@q",
+		"9Os/k7CRh?pRBhrg=QBo4+!v2Y*@t~*3#NqY?esf2<NUYtV=$K^JmA_5LoFCvaAYPs8lHDkQc~o55YF7",
+		"wNE=PPU4Bc_wDYUlC8B6$xL6qa@gc>LRLn<hCVK84M8-M9eaBykb=szZ<!qiUtOcnpq?yfzX!uEl3@tr",
+		"W15LGEC~b*aynbamjqozx7Lh!!<K0@SV^#8i!5%soV8NFQW&gZ=mY%3@>F6szVKd4ZRYc6~yi7^g7=0w",
+		"b3=b85ZR0-axkO3k07O4p<tbem4mcY=+uA-%M~t#z5#&a??dI=55%x<B6Gkc9a2Ts4I%uaQB&1G6+5D0",
+		"nIUkZQ%&2Cq*Sqd>tEfy8BY3%XuBx>ucxdNni?HyQgN?vRNq7XgYFN6S6K+V9&m8/6#9rug+CTiwT7k9",
+		"MB%V^Z=$<F/1/uSzA40QOZDUdq7~PzrvZwS^YsFz@XROP@-XJudAN&&pAdBi2vVU/@45~aA@sHp3ST1b",
+		"Hz9c~38VpnNa!4CYR+F5m/oNNhjoBX4*q1LezuA!45<nZXqoXL=Ze3UvD>9br=2U*8y1xBV4_k%uhdk&",
+		"j8hQ!boH_%8otIJ5!MKab^YuHJs%12K$Ih2kpYXpiFBrIn2+>^cyhgxF0wWu5Ux/CXvRA2_=GTCYi?^0",
+		"n!Al>hVxRr&Y2Xp9ShUvt=9<RuhfA/d~smHiJg0WIjy1CkLuaJfOBO9?PWL1Pg2q-QgVp/eO2DTDW45o",
+		"t7rdehTg+vTELqVK/xd*Q1A$k1vFu@6@mPNUU/h36Lx2Dfl>R#s_Ng>7nlSE2h8Ty3f^HBa+~hijKFVH",
+		"!K=eRk>Ea!kvbxPuZMx*i6Hj%tgj7cLy3Ir^E#OiVcdK%khb!ie2d2>/^WindsdBGPD?WFqi9KSq=~$5",
+		"c^P=l?2paMa6g0Qg@&wF?=GfLmt$~=gCNgT&>ZGyO*tZ_7eV1>rTgJuhK1UxPACk6D?*y7+e+>Or>v?X",
+		"feRPyMnJepli@&tf>7?FpoGmwZ98RjCXpS~OckZSbKLNl-Qgxd-#4=MU~dMM=7n%*ro9IgHCxTgAsU~F",
+		"7tGXaedXKxc_5guqOoli?sVgS9<gB<TnM/E3xNebwZoSq&b51Q6rk#rr+69qftjZhbp5@Fv-v_9pZb&D",
+		"44MLgxX5D_&1@yOou2~OctwHcj61@Vc4RJOgOjgcGUy^ymbf2jymrS0kW~WjO*Opnbk0*8n@3vPq5g=S",
+		"yksx8TPjDQb/9OzaMaAEiv-Xs/!j$KAMUW$aZDwj@jFhMyKd2jaFm$F1vJk_LYULpOwqWg78eZiNeWf?",
+		"1zhL^yb5VNEU!yd2L4w~UDd46f_Wto90n#omC@q2AoLom^dvQ@=Xdlf3?ur=/BQ$~q^vp+dRUotcW?8$",
+		"U0^Nsk-M@x~SGa=edy?gP4cjZ6?09Tq*P%AH0qLFz>i~2eq_VCgwKFvuJMu<C7sipj<hXoOzT1m&gd%7",
+		"18yPkhk~j7poShQ<MSl1he#1Lg!y#R~Xrrk5s&&8_jQO?yrt!Y0++v+<9Tag6%mKp@AG0uHcwOj_S!ju",
+		"7ndLHTxW<HdN>%!>TFRy?tIV=Nzrsb7+0fGUjiVoR_A*e<+6njk^x=Dhi1zb#2_@~<29wZJw?Fdjtk~u",
+		"NBIW/o1Ma#y@%Cpviv1#lS8<9rm1>En4!-0deS@PWPpy0VGYlngVc+0aqv0~~ZVdrOO=E?#8rC%pJT-C",
+		"-j=&/y~pbvnBV/MjEsd7qaY=BEAwm!2WiuwqrxpxUiW!nDsDENbaAIb26*H5T~S>C8H%q8skmn+Q4eHU",
+		"GqqqT8FZU0q4>6&<LJ&Is2aB!l5RO7d2=&f%Kmp_dMWNNtp^f>1Ri=d9j4Pxi&GUhdtuRi%2zP*<fUGF",
+		"8q5NWmVXE>>8OesC6oZ&A>1N+uHwMxaF0wy+aYEGtz-/3~YOKw2*NE$tb$LR62F0P3~z-kjW$frKey*u",
+		"F~!c/6ND+-lwM3+iByFc8RKape0n3Bf4S!/u-KwLL=p6V1I0J6>Lm0lDiVH5J8mXQ0^a?k?^U-Smk47B",
+		"Hyv!-ANc=F?I%Z8lSvD35zGnn5ws*?7vK^nn@&uW~Y6F1J^X7r8$usTiM$yjnKreh26Dss%eJ+a7sn3&",
+		">ETZ%k@pAPf_ML-Y0phr6zMx91saXcYLbDg7^?p476j4ZqtvPLqScw2qu3yYtFuDT6f*FVd?j4HDdEXI",
+		"&c2NUu/A$K0?HHi<#av>0BR=i~S~aUw5liBs#e<5F41S-3~@I1#%%3SB+2ezPc%I=2-bUS7JPB8Sj_zW",
+		"uWC_Z9&4F&_v<5-S9Jx^/tW#G?7B?0#O73NtyF$F4cW9Vq0T>e0$ntMfT#hX8Gj&n0+fZds*E@_L3cE1",
+		"7JOKMl5w+0IaC?Sacy_v-zO_PT7-Wej^0uZ$zi$~oZNdZx5afm/t7hUu==>psoPpPuA56Ge=vOZzTXzX",
+		"5t1pA3^JgWt+p5$0T*110_2vE5P1P/kau0K!8n-10#>?&uxC^4vgu@p179qDfj?&I2^bbpSJ<l+ypg?p",
+		"1Q4sE6s!?D6LhHL*o^i8I3Ru9tU/g_K8N&tE31~t6EV!Kd1QzeO*@fCmiw*u5x+sjczCTO5rSK=fV~Ss",
+		"#R#P-fQ~jD49s%UI3%kQEi57Bu6JG8LMTQtE7!scmdMFjgli_XjaCWRY!^wVzBUTpIBZcwdH_h@eZbvm",
+		"gnpo3RqX!B<^cGHU~jcRp&BD~4iJugM724%V0-KcL>vnhyFUT-LcqB5^f?lr*zq237*~RyfLUO+d0c<&",
+		"z9ZRnx@1-zcjBry3!f>0i3Yu%Q$vHv5E03IAjwC@o?vWi~-x$bkjkgxRIX~LtD9e*b^atQHSZmK2P<*f",
+		"Bb8@o0VKhZvKYF&c88+Lwa1T=6lY^W>4QbqEv3?B2gtkjfVM0@4Fu7A3c5**0xt1rCX_LmqH!iCo9at&",
+		"4Lub~5<p9poUGQCHse24mh&zAsLwS^tN6!JfE^kvbf1R@*buXav?UiA%JXTc8fLp9&xm~gaCH$-3^uGC",
+		"bt-foMWlR-abriYZ8E#q^!i-o->~JRUo3FdbOHacCGk1K?31h@hhazBf@W!/v6FN#9p0+uIYhYYcid@a",
+		"iUAGioH&XCpNMzgbOtWY#~1TiRIi3nlzY/Ie*YG/9MFwf5yxwusnvwfgjAK^Le89Lh1rCUj1S*vKl?M/",
+		"a>MZJi2Q$4tR6?48$60F+4u!0gqZ<@2@YP3dsj<!e*--/o9xk*r&K/PAz0SrLx#zpY=<rGoyYkIQ0&K^",
+		"=k=MlJ$A_!nG~>NyJkjq@V0pc%<k3y<2>pK1xVGL?BORXU~-Pb4MIue8H&*x0HG~HZk#Y3v^9CP!orF3",
+		"bp5%/nMcnW80?wH*pzFL_FJNvb7%zhQ8MKdf~#S@qqC59q!7uSLK+Fenk/C/WY-QT!nRnSk8wqtJKCAf",
+		"eFCQP-E0?qpPG1GUyePD-^xk-0PLVD8=uaW9c@t/rCk$+qP^o%tg4e$WdFkN9dPR-ale34Z1$fLkS%YK",
+		"Tb39IjvKoZp5ag>Htq^GO>NgBexEJZdW>ZYmUNcFX+C_>d#=6AT?/d@qLeETaiatlCLcl7T3wzo+/CK4",
+		"ktt0g3Cx1ObM>!5HG2lom89bAG?T5uaASou56ua^?XoxgUjYalD_yaO%o1ElC2Gm^3JZie6NIRAKLFAJ",
+		"!6eh%8HE3E@8wG1b&_SC0o7~rT&4&+5SYrhsqEyB5r1h>lodcKljuOEoBh-CJHhnYuR8ZX_+lC%4jmu>",
+		"&g95qig_%fu~G^??chcS7&!DYt4dEL54qK#~e1B-T=pGi*GSko3-5-qmL-ltjya*Yjm45M6<lG2sjJ_r",
+		"tdA0jup+$/aqnPtlgzTuC<_nfK#S+t29A@mE0$9=tv1h>Ub9E#0WHukaun$9P#njWpQ@Mup9wQF0>jFY",
+		"2~=LAzz$r6RFgb!s<+Xh3$9Jrhg7PKI!#6!S_N@mddlDX84Qe-lgI_@j4TUMKi99NmV4h^uYdPj#%VLr",
+		">ZouKOZ0qkCUak<ke0icQRaUL4v?JrEZKwd1I2bU=L&J-0p~mfP~sUn0x1Ms52%0Doh~_Xog#9QY-bU9",
+		"=etK/6m*nPn%$RCAt=+aYSWXTlbW$f6R3+dkJ1DP1@gWCA^PXl1X6KK2JCEfN%@LWri=1!_@hoXrddVV",
+		"39dv$hXzyEf65~Ddrs-qod<i2fT-?eY%!GkUavjOj06uw^+O=8qF20/!~dXy~/MoOH4Vu=vJP/Rm$yW-",
+		"_Mqf!&9#M+o~Yh#%Exzg+DTQDz$l~ZUbsgH9Nhd!pVSu5b~2mGc#X/>c?t4y~7HzK&Lhf<-ZqmnpDf0@",
+		"M_tlM==&>0adX~j>*xtpW%6_F#6t@2u>aZU1w2xItn$&F*f1G-13CKxd-a%?r$~E$pxU4@e7cyB@xXm9",
+		"6_-SzF>5FuqGKE2gFzXbgLKF&H%3+tT>6CrL&$*#p1Mqv6L=fvnCHJi9o_mL?85P#@Za<N1e#A-$3F~M",
+		"=Fl<x~1AM~5J?P885!<ni?3+lOp4DpdjnC5oiPHHLNkPxmk9*54jv%kPCuLy1~X^oARZufzlE>rTs9%u",
+		"gD8ygRCe1iI!v5VgD!H0sfQ16>%ej?T!e84b~h3MQB886r>O2FSGevpjG<n~hd5z<hZU4i9uP6S>IY_$",
+		"3^tj9b<MMUbDn=_A&>I?CQy-U**k@N<-6Akc%8@iWjXSqpUnPj8y!GvjO-fwEy?1ss&h@f5T1X*9<pUD",
+		"_a+t8gs-REO5+VPXT7Ack>2dH0zae~h8??+dSUW<H?Xtqgj++>GX_nMprSmE/zLUSoPBTM1YlsLtPNo8",
+		"^*L4zznU=33r#H#U=DF9btVI7osdo8fXbzTJN?Hg1zmTkr$g5NHqZQr?03>vexvVt9>bAlb4iBXnBDI_",
+		"mwX^ZEfui0H!dWa==r<_n-@<M/1zC$bvSD<SW!~+1*U<&GFVw#c+/%V>^%?knHAE4m9WSbyz%mKcoCB1",
+		"a#qa9nVm56-BVU04lB$>3317jzui^AP?YM30%p&VBP5=D#*Ba>4vq-RlNr7dwEDWLf=gd-nP!oL!s8el",
+		"tyrLMzn9etFkDG6afp50p+>AiqbcKKz$4Q5S+Y0/=@pidgex87rJ3Ru5@5v~5+J?Ax$BVclhM#up/5Yp",
+		"aBO9&$KRsPsrsS~1Ukcb>DiHtnSrYn/#hwAe7$x12uliez6@LWw@dxs~/9IP49MPVnFiCDgAPma&6VMi",
+		"PJjRj=aON3g^>jcE#hPyp1W3gr<cP#?JVy+r/0%98_<~pXfU?tfm4FXfMs^PpmmpCm3*&#0U5bfRDZ8-",
+		"Zps@bg8dmTxjWoy*K!sPNe$svsCEWWuUrdQci=j>3l2DI5f@JhffOwC73J+6<0zy!PspKfi=m6L8pNRd",
+		"DTG$4U#Z^dCGk*^OXQK4p>QK$Af&jS9Yb3N7=T0FjNmhAjnAZ-EMJ#Au@gz8NWS00lp39gp&wqgyQ0Ss",
+		"2&nKKYV#jX^J%AdpuOFDfe=^ke9mJmu$e4~oc8zImeVGI0pQr4qnPh$!iQH?9adpvtXxB7v-p#lr3j97",
+		"36^74UPT3NeWSl^~De<wTeJY=xY2Eo?Rmh&LwT@O2N$9l!loQCf<Bc~nU>90+#7+-$=Q1yZo3JqF+m#j",
+		"^F*tiz*x7=NVDZHz5@Y509$UD9LOaHRbyAD9C2^n~?^e=Ae@&*xCAb&#uq0+4kGX?4MyDl@IUdb2p3pW",
+		"3#P!Rs_C=J4dXz+tbi^J3%+TneneX>x>G0-//=XXa_n8<<1Bq1o%/K&/~7vO2kNDGl3%pr1!x>j_MK@%",
+		"N^**bn~OX$869Y@-7B5=hk%Bx1S2%ert+rbZVyw&T=!Q+kqr^48LRa4qCR0rdUza*lHEmZ$7MI=1Ie2m",
+		"k_?#4HxnYnOAj_oueBl$lCK1Hb~qF+rLT=X7fUPyrP@Nva8P*Wh_g8VvTQMykIv_@evNx8~TD68aHl3i",
+		"o$i9Ivxy$Y0ayt9k%yEuoKu>e$<f^!8/oKF=!w*$y3&gaRBn2N92gC3kV@-FMd=@5B#F4eb1HRV4I^eu",
+		"aJrW7ZRB9chdIlfQwxkfu048Lg7Ied6LBFd9_J4FcbB7q8PC4@h#aZTksN=Vo8d4_7h!UAVX^h?a<FGU",
+		"*aJ!?st7LCWbgY-~MJ<&<>KkIxeUmFytwR@q<>6BQfya@/S+ehA+#RZ7J*aX8U8bMt5^d=gmmX9mX<z*",
+		"*Ium?!>9a!QC4+ZgM0x<6PDXL$5l0?8DkSRR>$J0~#va!1KAue5DAFYmNi!IDNiIcpxZL4bgzkF#WmpW",
+		">a?U<n<QhL^=i9EbG-NKoveB2ltEA1nd<Pxkdm2#jVdx=ebhwgSvXb=s%vT@2Jm$x<G0_JZVvtGv*$eP",
+		"+zhAJrFtcXFbcOv9On?FzU%iF^U?keVyC@p2XAJMZI?WjJqmU4msdgjvf8c#>4/W6aJqpgda&/rItz2I",
+		"ei%_ABpsqSfCk2kh0C<>reo0Is%<N0srX1IZe>4rH@uBoEs$c24v1eWsgh+kh5BXpo/qBGgDwt@arUlG",
+		"DLysq=E_7n%#ppn~4ZkiooIb%%a=PG%#$6BS*#ERW>^exm/5PBk77hAaaW%t%~<sNN>xyKgNVm>wMO*-",
+		"EyQ8V/L-/60gR!xr<?Naj7#/tl/sz!a3m*32#FRZPr+j-=8+pd0^TPVy0KFXKa0u3pA7U8z3Ip1>Xhu_",
+		"sA7Kq5@m5GtX5Qyh<enLmVjc%cC7ct@>^bf%_+y21@K@39dWuuWYet>G6HqJ$hz+ko8%/LfD!=e1X>0j",
+		"hFx^B2f~4s%=!au+D&V9l09pAtQvhUqyyo!rHi==JkmJ@37I8lmMD9riWbuuuBsY5zG&c2r+yJSgu7pd",
+		"90Z27lg9xSRANch93bo0XMRuv%QhI87f^TV@c5uhfiSl4rJ$-bl<%bDoOi/soKaZxjMWP04VE^3d8#SD",
+		"t?Cd$UHl>RY@&cJP<vhLVkD@-8+Pb=E7Tp07q?TqJ@$6JRcZFeiqes1x~SnfQ=Q<*5hiHx52u3<yPPsn",
+		"mGk@9DPs_vj8jC<nJOW6!$GkTpwA5~%11rZ!-aTf=p8KPd?4y=B004nl+OoUbh=To69a>2eFa#=4VGVi",
+		"PWPNPa<hFZ6dMk9alim<9IY-HDWc<03*-ue-?yU<HT~kd/1o8FcfMg-7vS0&ou$sr7UM*-s_WJuMu#yw",
+		"7y%wjH~TIwZgu^41c~LHjMqCj8p?qUdW?3SuJUMf6r?8$VwCsWj6fT6dY/EUKpS#QH7v+-@E@He5_>?M",
+		"ro5R8ZB%FGvAy/YHTchWWbm>R%L@5G$MKZbxYxxe1tj~d?UXqk64Lf7bb>Ay@edf&7PhWz7H-qs5>gzR",
+		"Ax=7@1kgQ=l@8wO>j2s%nfvE9!-2CJxci+ZHNbaJVLbzqN>0nl%y&k~b&RWN?=#J4/T~M=A!fBqRQ4B2",
+		"c2vjez!ttaDJx^nm0TX$p8r6ls?2be3sMclc#HdpDSh^Ps0/?2ur=kWPDB6^0QD$yvbEpzXj5kw=QGBj",
+		"@Z3%j/#6WHXTCI<j?-CMr$gq8-FDnxe2R>^80YlprSj>d6<3_teP$plbVL@zy2nq+4o$0z=P_vilX9p2",
+		"+h~tLe47ECj<@pmp6?b07$*f^cmDKisTu+^px#_J*BFL#>3XVsr?1%yq8Udy<bYn?hWscw6%^y62v7G~",
+		"o^9+YzLI?p4U/a?AAsbcZv_gDe~sm8OV@7hY1MYD~a~Y/odPtRp90d5p<l%9Y+2?r?/cxXt&QP!rdi6E",
+		"k<7W&PPGs~p<W@D-3o!<V>8xc6Hp!jhPlVrMe36~1zg#%g9d0t*K8dB45GAdw+ugHm4E8sf>b7YZ~gDz",
+		"_HMTBUIxP~4Um<0rwWQ#_a2IFzE2o~%yv+/tm?lyxGz8ulNUQohrEbiutHmPgluK9ouBml9k04+1_*W5",
+		"b&X7vaaSeCSkkf+?<v0eHU3!$tba6Lh_FA$pxhzGj/@QjW92rraK>Ip2bFl=nFEmIiicloFQ@_SmAd1N",
+		"TsZbiZm5MG-nsJ4/XH=7BbjT-1f5vYPe?K2lLy2F2ba$0qP%CEegLg/FtvJJDMF#~sDm0Xlzifn55Qw4",
+		"A6Tr@f?gLe0^Kx3jySQWVY9Dd5jHDj8r2?>sDWM?6&W5eU@^BI8fA$hlLc*1YLxD5o&Q~S<SWs<+0L55",
+		"CncjCzQ0RLi1H+P5zaylZ?-Rj4u1***ouso7l<K2boG*b?lDMe18N4/BebiZr8h%t0nxUa?IJblAmd<M",
+		"Zc?u8#@kneaaIn!h%A/#mbLq=a7u=qT$%RU4wXdsuoIo+q/LyUt^K?A10fq>xnmGmA^s@$cT*h-vaFYr",
+		"/M@3WqgJxpT3_4A7_BJKrSD%<mLf>tim@Hw8PQ<+^_3Nb1ofN</hZ68g3><N=J#T?x$TSL9G&ZzpBR^W",
+		"n4kduTJeC/kLju?j9h~>57a7Bl44*tI2~+JDZgNr4+JOc<MZo5go~DMKd&=YrEpJ8v5rRvNd-/zn3M8$",
+		"F?_~tDxAXrEEi9-a6aeCZHX4d2*2bkd8J8Ipsx35OBgKw0!r8yE_aaorXm2_Wpy2lvcJ9WnZP*=nF2Om",
+		"+ylVg/ATeKL4!Q0L_sIdFV%1<2sn&4S%=IUbD*g$n>PUI$bEYUnT2bt0k2vjh+VDNEbNojmo&p#b$B3_",
+		"jTYIyg%Yxv9l2lelQ9v^NyO4!x&tZ2iny/uRaM2i!/LeDs$kN864?0-u&*SnEx+4vIssO78K9DUppJIh",
+		"#T$b0Vy~0e4dE2=mCK8=^92WO50k$Ip7eBTk$ZyAha~tPpQV9hq%T<sC/kH*q4x%@c58!mdrlfOb-vYO",
+		"6&cWYaY7gcyC>eYks4bS^aFNf0xSkYHk1%Y8K$LJ^8PC$7dt9b*gW2Ba%jpF?RNsC#yLunPVEXtiriR-",
+		"VYM<P7Gdb2j<J>%/8SH<cxAsE~0Uh9cS^C1kvJ#m=nE1s17T97wSS--U2B=O@L$Xwg/5Vl$QGGbcU5l>",
+		"ZzI#bBqfD=DNp@Ejc4n?*MM<!2sqYHm8i$C9_W4d6^tfD/H%8Us9Dxe18r/jws8u0mL$d-NmS*s8JX?M",
+		"6iv4dw0xR2^0?co2ppeO8-Ohu3r/cz!yZcX2U=cnsFX9BKEDS7i?c+%2<U_+$lo!/iFIO%q6#yJ$CL^+",
+		"jJ<d7uXna*&adsgrC9rn3c3!RbtfgS7FnA4qTiX$zFoRL7~sjox1CdFc%4euoU+jMoC!OGsB>&%mvF-J",
+		"oURI?5Co6%lwHNtP^7>YMq=HEuUl2DD3iB=Dk5wm~V2m%4Rsep9SQ!LMOeZK9Sta1_#9<3IqF45cLTXo",
+		"HzgW0==Wkls8O$@623ziL$iE@GOT=aWoq4mtoqw_olezkSz1-G9^C!0g1PRQecuWXu2Y9GN@Uj45?TKQ",
+		"se3Kxz1aZxRIEm+VnyA@k+Mj7dw7t?ofOn19L4pAY4qM59WmJDmUZ~m7?TnPPKre~gaq0hn@7301ws+O",
+		">*5SmQF@ydyS/M11UOKla3JnZXx#L*xKw_%0@7lUZI5=Eup>!~t_eFFrFBPh<8lyLqvDRg#hVlGjgIfZ",
+		"$QJxilRsry9k4#N/cFV954/O66lhEdl37Znv^nv%Zm+d-kv4&>x^-MRI2C=ps>KJp~6cALqKjS#rZYE_",
+		"o8X=NjbPd4eQx1a-^1%p4Vb?kazlu-/rZ8=mvcTL4kqAuLfQhaBM#ls=19LcIql/3bD-9<2m=%Wja$1b",
+		"4jSYG5jp1!Lu8%xe/TSV9#pEjj#7+_rqJVCre%_jjW5&Ni~mcO+3g1FniLvdKWJmn+Jnk%RPur2qzQ$l",
+		"^nq1q$12!!68WIY-_jX43>oGOpC?J%-ZTb</P^pjh-a?m_7c?mh43P8jm-!C3sMH5<a&imr^T>~iRTe@",
+		"gp_WTjbh6DhQzwa!Z&i$bTaSGzk$&oyNN9=_R5ZE-k0SdW>X3n6$-miT3zF1gRzlb2f>!jjBb98+zf~n",
+		"D2Thl/8JG~$48HG4JGQeZ>BOz42VinH7bWAE=f_86mKt*TZkD6giY2*yRKjwgXrS/&#H~!oay@pQvml-",
+		"9z~05LrG%^y-ES*qv^K5oM1=td9mU!!iAqN8KRtWn#B!/&xLF-r6!gDP<oA5aWB60OR+dcp7&ac9~*/a",
+		"f+SGi<nAFQafB1w#vmcER1R9QnR!63@lRCVcmBH0dH*<P+AFwz*mPgm6ULKPl*8QWrph#e6#QTf0ve0/",
+		"0/!Oh*q7?42VS<QmQ%ADqv8M>Su*YJ7ReS03f7ZK6u!iB5^osim&Z&J86#Z=O!&_UfFjku_zpQ&Tl7J4",
+		"7istdjYQhAvmLS0Q=D$Q#Xs=3j9tlhSk-w11fy=iNuSTWyxU70z7zfXij&h-v7NvFv0M%zTVPQF-5ghQ",
+		"9KHdi>>dH8m3z1XsTBgOC142m5d9OMuc?B~6Q$skmtLTYoY/1A?jmYev-DOu7C52Kr_1rUdQ7qawH<I<",
+		"q~F?BiD*zIM~plx3zjz+i#9HPWQ7Fa0#4VLo#7AEDl-ZV1@<@>nZs9X%Ds43#sS3?VoHqMRHwy&+3=@V",
+		"lyJsMcV<167%v8U7=ms+2eJ*mz8^*LXNDcH6i!zimZwij/>qkHTg?_=HU<7I6Ya9fb@!+DyMisq4z?_L",
+		"&0w$$DTs*iSwJ5gC/DrCYMH3qK2<fp2S$Y9zH-A8lix!Y=KN%CLoAB5q7nEG0YjeHp_KvR3WvsBec9+g",
+		"mlP%#o%jtBJ9^G0Ve4*8uXtt5LN%&AIHbNiA6#%b/QX$qQjA/x0V+8Flr=f>x%ff2kKPt3sr_UsnoDrR",
+		"u?8TqhkAJ>G$5&a!_qV*lQ8_S6%$2/7D7/4eE<-/ijgK3-JYcP8R2pFod>Xu-M2~9=z85<2UzIb_h67g",
+		"#Xp$O#xTs9YX<csCboc?z%YCIeUXzsHQPZm*Q%%d<RR2NyMPbtO>>4JmTBpXOI%!bTE7dzsyO!k!/m$#",
+		"pR^!vo7HC94naL?cc1*ITYm6s7Atm-r-hKc*$Jfbl*%K#sg#-5b6r@LUH-5N$cr5Pm>-ycMZjE97HB1i",
+		"?rsE1m/IYSJG@?IPeNESkW&88p_EP@UCQcyT@%4Tg?/@XQI-Rxmf6dQok~TqSpPvy8ydlY?N0>a6ONG6",
+		"pK^SelaiO4qmn$5%4R-1bCIAHEelFdzd34@k+Fwf<~rhfxgsP&bZIxk%av6Xx*%#DrM08d$nErImtgh#",
+		"hqvB81ia<nsdB6z7YW8%hwfu0htT/%#f=t4nJfZAq%ozQpm-%srSATcbdutR9V1PJfFf+j_fyE~c5u~5",
+		"V&3aXpn>Kd2HiGvauJ~Hn5iMQ4SG@YoBSFqm4R9HHFSxI/@IRbman?&WLdO!^!E=Vs4Mntux6-lb>~!$",
+		"nv=6sJ&n03uV2Wpedggg%3WtHL$1S58MfNV<POqpuOnhw-bGhMkZCrCNCP<gpah$MO6Od4F9DFAqc2CY",
+		"-nHTG9N4XqzCqzHmi_&Eir/ut43P-^5%^CS0fjpd6%E8~c+LsOD54QqPrD*Lx*=s_r-mI0$w24+mpzik",
+		"q_/Z219$rdMng$h4$4CgeP7~L8IFTcaNO-~FKa$D2D!YtR!0tcZJd^2%V8DK%<7qwQF5!2SMBkH4q6CJ",
+		"p&-a&9iZMZ_Zt4R538qWm6wxN@AIr<rGm8DLQHWC@-1qY4iD6SzusLY6=@8N+W4vm>7a5L&iZXPJY<r4",
+		"E@M-elmVB!c//rNT5R_7=U!e6sFHDCog&DmCls2Yhru%cJTSy+MP3&_me5um&C$1E/b!goetQ30sLGoW",
+		"1cx~_ep-m5>wFN9j!RhuN3@9Z_<jCb0L<74JN#X@j%hMn2mq$^Pl47RFRx+q=v5@vkm*~^6^T%lk3cPb",
+		"^in7~BU8+8volzW0xV2i??jEagWnM/pb^F4GTGeLn_+x$emb6M2UzO^FQWPjtfs>mXgTGy4qprx6n51>",
+		"JB5<+VTjYz@$hAsFk+w<92oVA4z@DtuC/Wdk6~R^vzz8s_Po?OBj7gl8Jz^miUN@w_ZD@oiyj<O1_>O*",
+		"kEWUJm<q^*oe^Rj~bfYP8sP<mGp#TLu!~O5zQllb4E!1pEcPHkftpSVIaY*x1oDs5pwB-^K@IJPEdaE&",
+		"5Hz&9+v8NwiBK^/nyTdu6m+0ZcnCGLnegmL1lnj=w1c2!gkoCz>VDB$/@jU%oh8q?hQyXpe&$X/AqSeu",
+		"_k>hwkPmX3e@4Cpse#KAsd3!/l#noT&>U%e46i2B6Kyau+s<wN?Ltg<sTK-pieZ6E^zhuZVk9Po6#2PR",
+		"49$?Oq^TZUr&A?v1/6R5TYxmBi-KBvdqf5psC-mKjgEdR=agdCL4Eij_<>Lm^4IxCwcsqg?K>2gY5IJS",
+		"nFxOd0^=mkZCbduey#75m*$%zCnSF1f&kCzEG7soldiZtAftGFQA!Y~6M8^6d=1_AXkpiooaCxpJxAED",
+		"sb6ndw%WKiHrNX^r~GJX8k+oV0+yxbW0$PamwqNyO1*qTL/*F^duq%_Nor_/hqbrmsQv!ghXFsjyM_Ck",
+		"7y&rN04J2/1Le@v8?*HzeWgOV+N_Y/=#&AuU6Dh0x3S<Ik1R1yloXn~va2!lPoQ1NiKWr%n=tqnnLO@!",
+		"eWdGMqiH~hC!j*#%5KY9aN@btyk~dA5EBvEi=ZK-54Us^Jo~WXH0&Y/p#Bb5bWyg3DT8g!b5jJoA=t?o",
+		"tP^@+df^VcHSB@-4-mqJClHT>X5eE3cXE1HikqP=3>W^?eh/MGbwXy8MQmROsZ#Caw7I/Gzt4nPY2!FA",
+		"mD!6@7Lxz+kG+kB1pHtEsAzx%jHB2u8wW_fsb+Gl%6Joei4cF@c83Ytf^N??a7qMS26V<MuxRO?h+oB<",
+		"ye7lw5?Z>wk$%>@#5f5uWruGf8*-ndTN5EI7/c^?AD5BNqMp7!ZlULyz47PP7vmvj#C@+b>AHs*oLNZ%",
+		"edEwFtfL=-SK^7=_Oni+1M<^%90lDMD42+BdLsls8=qIPq3gQCif#NoT77MbCOs6+t-~C3>QuSI5Xl%=",
+		"Z#2DAbuez@_emF>Dk$aP&7F6b+cK7~seQ%3bVwMRCcpBbHM7>>oGJb4KelEQ?27mrpU0+fu<qNp$^g81",
+		"*>r$VgUa=FR!uVRHaLpIu%?x6XOam&W&-<j8XQdH-qEG6LYz%%a=Eo$U+ifunA#KTf2dVznI^Q64i2bK",
+		"Y!!@PYy7m7f9?wkk8R^F3/2xiA&qlTZ~2OUA~YKvQT*ijG$YuIsKNwP<3bBajqbWzmX?6b>MtyVit6Xq",
+		">Qtti/SQMc_dra30bcFs8bmq3Ut_MGgQ^dew*oY*m?7CT68t~^6>5Z48&LDRbk*5OcONuQ8QV1VgpO&o",
+		"q1H_VivjrhZb<B/0<ku4w??aMYIu?MkY->AtDF?SnpZf<0mkB1cIlF%gFHa%3@<Tn2K8lxilOBLbHxk7",
+		"x9DToQrxV$aZ<jIgReONqHJ^ht9b^jx~~$f0WLBBwOeGr*qr@^6hTXC1nrWYqe59h!6Qta4=9Ca-nAv>",
+		"?c_^i0jD/oerP&s0D=X4n~%fTa*SiOEghl-Igzu2a623fQ98?bc3VlK?gab-l1A*I3&B$8al?3<3&Wy%",
+		"SUS9u+bICDiDn^9bI<iAQ0-4W@>lkYW_TaNni3ElM9sR1Wrnqlzmuhkn1LVaO3JJn3okk*X2i1wKoz!J",
+		"QPT!ZtCxsRS3Z?pizK1z9BMqZbSTisnWO*Nm>~u^pR2M/mVeB-qMwgu>qEMM?uyIleX=luRua0MaU>j-",
+		"yTTMtj1WIxvkUr2=xYt9i^0tiBEtLQItKFhuiE2Y1Ftv<GgS1$hae!^/_d0!j33maT%iKgiNet!84*-R",
+		"iw_CWYiw%VlJD*v7FWztaPZ0zwyBByBMrhwuAhzgNuSkO8~>F3%*B#5eHcJD?JwbX3Ik@8dx*X-wjgKu",
+		"1_HZ$4LBm55l-7QNzZ$Id1R=QSbV->x_~/~b%IGQkCXzj_z$5_78RUtZDeU#r-xDzmVdJ_IG8U2p0siz",
+		"fHwb7sZMC0*Pydg7s=H4hW?+aafji!4PxcE<2I<FgsS=$wVxK#OUkF2aiokxoxjT<Xd5_D+71+BkS9D5",
+		"IDZ=Nn1%dImVtp07X/VU9PJPXa=*~uYR>WQ43ndTYR?m#O7GSZa5V>GFNNOmTG5/9DRKVBCM7y/eQ~hX",
+		"TRUeZFffzaa2H7Jga7h6P09kO2mQv$w=?Y+e@XjD4A1hled7#3n7i%^+dW=H+U_XDRg6bNd<cBV3Z%zX",
+		"T0o&=v0<b3x5*?2lgru*T%Kv+v&puKfUseyx+F>QOifFQlbCd#1K>jprb3#yDWSfE09cWwW3t@$hpML+",
+		"UN*I5<bSPtyzl!*s<@#g-nT4amWRK0t1rvv9tq+no&4m%5j@Hu<OnTWJnt8%OCYPW3_W@7WY~G3O-_wL",
+		"31Y57+AOTrrVy5VAqLk%~IK$c3qWIJ0pJ%!_?+^D26C_Mu7*Ox6A>3xhB*=%$XP%^PdTgu=@BE&VIqb9",
+		"2O-vAMr!BFnLgtuf0N#!c2E^Jhs55qaV/r@4tT&/WG66r*v!uLkWjifH8kFCK>sEbf*hUpt6Y-km44CI",
+		"fX9U_0pYmxQMQl~eI!k042GD%E0CPYsogu2Xqk1IaKA~I_tti$hzlLjV?*9=QqR#?qypocZppKFgw/jk",
+		"e+6W_+hg+msX>~tjADwvP2&rEiSoeBW&Ya&%h9S_0@9vSYx4YAjn7yX604^M+erOQdbis/cO!#!bSEdP",
+		"g*2eXjmP5ormk~Kr==>zjBqJo<VS*b~@Rq>7>-syq7oAJyTZe7iV1u08?YwntqOY6iZ3Jl6!FvkIJ3O<",
+		"udMdrkvs+e5YTv%^HRXNF~Cc?C-_lsUjOR*uXxrU3qC!?bwRy^A0QUMt/^1CAMBked#g>7fC2Qzhlf##",
+		"i/<u%jiPQVj7d/WpA2C7WDzTp9vPg^a4V^e0hwjgXrDfoky2K%ptsMri30jCtTsj2M9P*+inG5L%G=tJ",
+		"95%SxptvQFlQKAVH/6?LhPJufjCiq?eFZ85Me_->I6ZeddLvh8f_6G@=ynNxQLNbcht3RjXo_LUs7nJX",
+		"WA0@HAIBkHozU%-6YG/fmkOzS=yWro7pM5>9e7xu7Og3?k$Fv?Tr0I88nfprfwWz+H%/Jx^AaAhsGgjC",
+		"6QWI_E1/D+48B9VLDvENxbdU>qG3+iaXy!mlwu=ZuAwGrlBP0856&frPrH_njfmDm5fZbqvknbY7O10V",
+		"m0A6y530C3Zekzhg4H2N1STPeZxsM_f7x$Z^@Vo25Qt7oc73u7gJX#L#eJ_yI^IWu5D-v^bDN978^^@i",
+		"6d-G~js?YqzXCvz3RFD6l8CSEcM^gv3fHKwiXuKceCoXE60-W2H<+ua#-iYz<OgVBQE/@r4@X%HlHyq*",
+		"yC_PCl@CDgBx&+C7XPqfZp$bN#u5kb2IyIEjg~i2pC5NSzcE8bLV=KIXD@?lqewZ4&!<q*9#*_mQ+=^L",
+		"qC^mo1rAW^jTwAX&r9DjLuK+F1CZbkvULx3FPx8TnCKlAW*hIIZ8vJxtyR+iwd4jE?C-D&o@ey^C>e5A",
+		"iQ$rwqdWJ#WXMBYb&Xi2^P/aQ@BI>0=bCrm45_#NYQHj?7zn%iaJKD?*4I!KbRaJGGR<PkL_Cg>4>h_p",
+		"OUaeN$m*Hng*PAe!M^V+e%8KAMl~P3iMRG9Xj*/Y8j*Lu8wv%Ypk><QpqEA>87KFigaF03bB+q?+a^O%",
+		"WdeiKZe%GKq+yr#8aW%DsS0x9Kc8NB9r79FB4#YE5C^#llbMVCJ*tA~f2hR45$d<Rs1Zg^s8nxJXExwQ",
+		"T#J@IW+9zGQp+j=yrE~6&2b3hN9!q^^^O-dX+m>hcU+QOshrndKVwGWd$GuMhFX0#bN8WNM8aUp2eWht",
+		"SZGYvp@TBRMTa$u8US+F0W2@u2Ua1sXji?XbK3j9aT&QyKJB9^lVC*D8<D&ioYY4*lHdS%_Gf<wdcUOi",
+		"ST342W>mx>V!btg<yz4B54d1M17dI#GOS>Nc%X~KNP9s%QlH4d5UcI#yKwLTk*+RVLekBra?CyVPph6L",
+		"FIzoi2vyw@q&Ofy99&BF&eTcPW6mJ/^B^4V0EC4ob@m&Mm8nxc1>+%u9Jh93qD6FCFzECnG-zh7fPc9e",
+		"2bq>p6E>i#BlOq_1c~8q@2j/?XH3GYaj%cM8x<e4/aJ&jD%AVTx*8tBXt1oP3IAVYfZTiGc9NnWwFdhe",
+		"0@&wRsT+$fi7E4nmAH#~=aPyFf6$h<lC3!0>2vdyqM<@~y%gUomsjdisPwt#4W#xC?r4oR_fgIzYob3D",
+		"@Ucz4ediSi3M/BqHw32Ru*T%HE&*@fT86>dcpty4bz~AIhA9UA+sC-j8Gfztf2wL~o~3$_5aGsr58H&d",
+		"oihXvj$ep/G4Az%99^u!zf>H-9kz%O<A3?At%UUQdVWMSx5v0@ODy4=nzGaOf>ucbK29r26Is+Hr7j6y",
+		"4?y1vCjIn50s*h2!&dYkB06E@mwh@ngQOIsD?jzZmLCekGMNO3lfb7q1@TCtnn&<<tBh_?r%X4ptg^l@",
+		"5F#VRQ3IEmuW2EScps7XQE@dliTI=Sx-A@@sEXJOdxno%q18%0WQ1g3QrcuEFRM#QSutY6c#NkUIWV-T",
+		"%zSqDy1$NR>12X3e5YU*Q^GrF0pPBPuPRtw9KZ6ed!OKDKJWi$Yzp@0YNs/O1~8vlt!<swIeHN%8&iNo",
+		"91@6sdH$T&pcS4WeuMGOf^Z_ao1jZuKWn6z~pUxw>hU#*FEg1Egy^9zTfO2CjiW2>qC!m1/+/xkOxP0^",
+		"STPv6DX5u%7UteUaY1*zkE76U<A*dc+OTZtfgg$>PDK6jh!Nx<7kA*7z#Wq&YYDE#M$2y?Q=Q**%D/WN",
+		"b@B^<3x#rkJKZ<BY_Tv96E6KI9rInc5fMamgf!lkYRkcG!BJjOgqH^6+k^+JrG?cAeEddjHfOP?+Ztgd",
+		"gJe!4DGmG-a-?lpi@pAN<C>hRl&$#L09YqKXAoqKInP$=/ytW3j&XzfYK%BVr_=Gaa_LQe>??-#funCw",
+		"6n3c6>gZR^Qdiv$Zp1$h3i9kE!LvR/^A44u7580<jyBhUhnstWe~>Kv?xUB!vSw4Jb#j%wf*R0TetqRT",
+		"bn5Zk7J?SXA=@@ciadK~1Fe#BKLvdx&1~nf*Z825&<RgqPCeUu8ZY$su%Bgfb?aRpWfJgZwRxkOmy?_x",
+		"qLraeX&mA3zBa@ne5j$GeWcIZ8uZCXj25AqC?hC?N0!gsUzzk2MA7Dw>TeyFteFQaxVP+KveYlX8MurY",
+		"dxWn0dr_SckeL!G!c8tPmT3M8SqOLu39^TfJYSfElkEo7G97fDO#eUs_0D7O7u!qA/1J<cmfBUjeII3%",
+		"q>$aJmdgB~+3C9z5!2a3RT#fv~+~#hgk==p?_xfTQEj+T+0T7$ozjJ=aRjIjUfw806<Bj1x@%TX~Av~f",
+		"u_4j*^1Uiumx-DKt2n43s^Kj=n^017Dheaig<W+nYyLK3koVZ~fzr<eh/Kfo$0GtXJ?2>Ed/e7YYqXrK",
+		"t#4SUpgSi1c=!p8tn36Quh<gS1nQYI2tH=vI9K_$ha5bW-NCSyebD8OKi6<_cYl&Mr-4vfzh*Z=_6qH^",
+		"^@y_$!!o+C=JQN!S+XPyFw4Rfa6Gc>tbKZ0qw0h1Tp*C=wpTJ=r5BT_1+>rfoLRZx-mWwmyL6/dfWVnL",
+		"vp!Dt=>M>8SOMQ6fZ@NMpstAnnioKHRG#+1luq9O7UmjV30=WUxqJ5FoHS3Ox2D+cqYe3-nztFrt6$7@",
+		"70?SOuF0^B#rETYi-YHkvVpf3YNmZLq^OnP^vm7FeFl=IVE3j>pV8KeylU0my/u>+q41XQUpkYT5$=kB",
+		"=K~x2b1JfB29u2r8rCH<eVAjLnY8BHfREe14@X^zNbRM9UUm$qGRo8MtB9g2hw#qLhCet0s9faQpgrXX",
+		"_jhB<E3M=Avc3595b$I$zNNZ9g<%nXmp&xWIzwjbqlUSihN>mCjovm2h-aH7!nlO3*A6dNlcHCU#~!2A",
+		"a?C7f9g&1MW=uEt5XG-z4ayDF4nX1AtAb<t1*%kkqJ%!iJel5ksHmX6nCuM6@A0PBWenYmmN~x*tv<62",
+		"w*6>j%V@MmCg&wdV6fXakTt/Vp?IBPoGyJymClqCoAaCCn40KllpsESjKUz8hQA3985dMiilN+F~L=TL",
+		"km*$SdZ+5whEE^$dgg6!qS2vW#oli#cSY<~4Du1alG-1rr_D^kYDPDUfVS/_4*nGvt-_GS0qPE559883",
+		"RS2ToHnTA@BLl>p6sBE@0rGOuY3a_>vC+g~c7kXA8Dj2i-&3X=YGkc68_sU8~kro5iB>4Rfoc3V*OuOO",
+		"37l5k6N3J%*VdnTVJD0b6Awc%qiG7umwWlX5ND4n6INAo*i&<_j0B9U@0l!Dx2e!=vHj@kdwCP9e*Qj0",
+		"J>Y#xMq<N1kl^%71??GOcW1KTfWtaX^t8Q0U4w9LAae6A7?Zq+QOhVI1veWDsYWM~7rm^Q&58wGr@?Id",
+		"vJeu$v2Ghqq>5cOG/S+@bz@BXc&<7wqlx51O$nyCbF7g_%PTlu5KL3TmFzEK%Z#7em2MyJ3M6%^VYtGX",
+		"IaLGJf$RCJuUTjuiHp#!d/NqML7/Xh#5EcymKG3masZ=lmg2DrE^-oeb^7O!$mZ09!&HxpnYiVfJQl&-",
+		"8im4j$%!KQDG_!5WPIWU6$iOyo0fn!I9OwBfOMRvR+0N*@i8b~M=z0%GNQLf29Uoo#h#/wmHf8ynuJ6?",
+		"66d-t5EaL#J@<dKVC$Rs+V*vx9CBc3fpTAIrcH80CfK9d9$lwh@W@Y2STvF8P*ePm7Xm@=!1zDu6nO##",
+		"/>JCg_oCWbsi0z$7aY<A_3=Lf?eZBFL=UulJ2mi>6lnIlDC*8WgQ7jE8nUtF052Ocj!MNr-%VQtWjUrQ",
+		"cm$Fg5L*kMjaGgPL32D7T%DpiYtI@dq>t_YbN?*>yjV2GH!Al5oeS#aEoGb32Vgy#5uwfc3qG1rMnJfI",
+		"u6fJFkvaQ>4_as4ErT9/%7+kWlZ*<%$q3ImPE5=>p<g4e~l8QY0O&HDAbn2uJFbdYN*f4k=5=n87%ZIz",
+		"w-qCe&RCN-gYt~CVb4-k7qk6TZB!81U8ain7eg9HHF?7U20nd?2mO^YkIUlaxY$X>dxd&o#e7@/X9tW%",
+		"T~-$$LbNYO8L<Qe1lk+^@kdNdmn~hkkL&N@<g%/GcOw@N>v8VZY-f48$3>$7un/OPB2RZOz?^1*b2l>D",
+		"D2s#A+*B0y^DC5PpFAZhk-hAs/11O9kgR^J#7k3Q~BB3zk?-yZt?SN_dvGAdm%fH8qGzt+bHke5xwKOQ",
+		"p^Ne-_f?QLLrV/>NGzszNNDAZx9NyzU-$bWVHj5JU<be1I_bP/571^JN/OrJOkFTWJrmNkolRKvp>1i9",
+		"7P5/eUBzBr!-C4wBq4&bvbJ?z2stWe=@YcsqB-U_1!wpCszsMK?nEKsmq^Ir?<3kHp8zv@&Sit^G%W^/",
+		"nEfBD30mh7dxynLhnx5G<=>FdiJQZ8~GdChDKGUmvRK!^3lwdbpxDCSmkYE@k4d$uwSONFn/V<*86!GT",
+		"0<A>qs0uDBi/cWHM*EEI!@qlW=ReR5k6<#NtqoYQnhc%38IzTNqBN48R5S&74WjJEq?-!nnMqzQ8xFUb",
+		"<yFs$t4LdGqwlJwu3QUVHbor8C9j_cl#SAn+NDj#076$oZ<*SGqSKnGg!ynvr~3*#an&mEcIng*uyfXt",
+		"IhG/qvUcPavnsWtm@yTDg6LExoU5Ou2=6#4/tPS6n^k5R=miZ>$lTuw0ADr7y6z&IshJxxGCK!=cD6Eb",
+		"kUw@wI4Rf8BLhXy6jVq$QMrT-nW<76^CNQ2m7@nL6^/iy9x=27&Rx@uL~EfM9W/abmfuG_/$tTN*W9f*",
+		"0_fOcm2*x*9c&Cgkz>6<EXMSYZrEK^Dj!n-EI&Fa8X^JD?1</R8=Q@Z^L#jmv62RMiE*L>!Bp7VvbaPX",
+		"axvW~TtrkloGqDzJoSZv30OX>D~*#hj+_rnbo&JoOhQ7f>S#YIs&^Ga!Oup^9B626sTew?BHeZ=otD^4",
+		"O5Z2Oj0NC=xMnwa1vrS6ed>5o>2jB>iji4cpBLN5Jo!G+n34^Dacx1U^0K2gsdvHUuNK?vx~9bu?6/c<",
+		"&Qws6<!F5Roq$Uz6sKA+hhG3IYIMRNXuh*n$<EX8cmZ8TiHY2U5$FS@h0~$0s4VZ2Vjqv4CiQ~_^@lfx",
+		"9Vs6Mzw+d1dI!QDn%-rnqEfph2Q>4PzjzxWH<vtYllF#jjf00UlNtO!sUoB<UfXDg4z-U~e0/ic5/at=",
+		"/b1r9gXjh_3@tKI4/-H6azL_U8?@7>8C3bSqg3WYvk%xw3ou~x7vU5>oTc?X5EP/tmkXG2_#JlA0^gg2",
+		"4rwk*9lq7Ds0^LbmUQerF4U0!87zL9q@CIMoR/wgB~YeVVCA*tr_EPeeIE0wv71npK3PDPy$_bW%E=&E",
+		"d*HmTW#p#tE9>xOEniQ/Tp_>4xO<oLEH+1U5Xqb7yD<LVa%Tck<L+%ZU2r0Ie^9/1^qv?U0!qA@0?lfM",
+		"3#Fs/aVrt>O?/CDTr+N#JVqdnghXpAQgVpy_hWJ4=x!hW&INw#LKU@G6ya2newTAR8cEoFeUw?UqC^wg",
+		"n_%*/der_em=QGl5+esl#ON_+yL+!=7>P=Gsajbysh<d4W1coXDc/uXn5Qu6+_Kg-d/k?w=<_jLzG6Wb",
+		"<Vzf7MO?VLaJ5ou#8Mk/1ARBy~0$iY1Ob=flnyEsAP3*+LGnyFjFgtL0w2c81JXeZA$n_ccsCHG<MP$R",
+		"m@v=FgXpAow=CPK4fLwPr$%vOZ49d@esmMnP-c@d^SOpDpmSehR8-^PgY884gFAasf@=Db39!Szk1~!c",
+		"f9tm2MWf7F3~*qXg0@-P4D/GEc1-jS/KG!PJb4DiqO6V^wjlaQf^dwe8Y0exfe8cvgbR9w$t5p7ZPh69",
+		"7@GsUa~bzkr4YG%hk-G0p$ah!TQ%TnYn8*jcqZreEl#s7EH@o2vQ@G$s~VuY#m*P?DIUCLZH_nC81p@/",
+		"544rA5!SvTI&lt<G!koJ92B-peFo2!^B9~uYud?E/3Hg%!tw<^X5#cjKM8paA$&k+S9Kj4Sro>RlsEl/",
+		"j1II<fQ_E*6NRlQEw!YVoMu3sqbcVqgKC+Lu2*50*1tx0V>La!2qMx4=%aS-FcrUt=rLT20@#m~jDdZW",
+		"nJ8piAX2-YUr^5ccpBG&AFT<2rmyur$0UG*diT=cpzpDqRh$#6J3K>Z-!mRy%~FG^5^7oFE=6FA9&ww=",
+		"p7<*mryG/jXka3TR?Su=HZe4Y~FGSVp_l0Xq$623FSw4r=#?5E!6Fmv+luFQgLL+RkB?jw7V4yOz9tjG",
+		"d1O_+pb1Ke54W*m5rx7%#-dy8~ikEWsYeu^E7lsg2ZbY6t/a%^Z$^Lw3mcha<iPU?l6=vc=9*A2v#Mof",
+		"bs-P1!b-/W^!j^sXyW+e4&c-sypq+s0AcQ6%BJQd49U%sp#sz<Wke@lfAEW&5$2o$wcWH/8wID8WB^dl",
+		"KKY+ObAVuwq^?0<m2xc36P3@mkhIUGs50>I4zwFSD1^k-OadIFb6v3O8m?N@YwrkM!^!&!cfRZ?&U$mz",
+		"b&Eszyxq0lR9D@TdDB>FS04n/iM5me^9o32#y?QjzadSKB+2#$vbC~4&q=@SK~68uua*=ib!uK?l*k-4",
+		"f6JxtwOd_^q5p3K5/BN_fIz?j0k/w+51jQ-bmBWnsLiUc2Iah6k6S/wP/03o0@<^?eC7e^?3b+O6wB~3",
+		"QY/r+h8xKtLLbwfGO2@CU+cgy4KbKW^Q3%~4sR2zmokAoO=jeH@Ozm~8#E^Epdy$9~<e7p<mBSjr0S?8",
+		"e@hCor^J~Ly$gDCJ8q!%Hc-SG$WIp-XB1Hx&KVB!sTU+Yenh63/>zw<_<Nki5T*I7jVe+b2%ndFI176~",
+		"v0WPFXPA7%W$wzqTyDFq9dQOssbzoqsg$Z<qv!P^h##1~?tT6H=P1ut/=to!-6eHHDZW3oC46^VApCuK",
+		"yIs&i@&i!$p9Sv#ajK6f2l9d+N~%pykl$gdt/X_jM<TB#4Xe0EsSKFem~h2Tcf1DXjUT@09_u9aqCVQ$",
+		"aot!pow-Lwfrh>qCA~~G8S3r$YP27RjNp&ZjKSOFn55X2n3^@50GAqS/=to!yXIJnDZW3oC49L9Apy<b",
+		"!cN<xYGC/nWZ3FD4JY9g_6rN<>5fT<Xo*~E06OmRnEVpU4vG3$@76Tgs-N@^e>=_IRL5jn1HtC6onagx",
+		"AurQvD*CftaO90JmXeKKhE*pWj8Lp?=nR%2Bcxn>o^r&VtFgjUln#?VlDU+26W-vigl1ES*%j~eAjhrA",
+		"/OKH#K>rtz$4A013BU2_pV6f#Dq$p^3y7#xeeIR@soyv?Y#Rna9m%>L^rX?Hq8PROtWFtWxsFWu-lJfI",
+		"o>mVJ5DROsoEX%Ks92QloKd%UVt6Cfev=5#3Qr5Bb06SABn9In>klsn?PS#w3m6%#ieqJO4~Gn_0L1?s",
+		"r@>1UvDpZLk-4<ChB8rB/QEN1ZXSL-6X2&ed*jahf<@I~Kp2liO81^O0#UIf7Pz2vtd_*tF8NMZyn0^=",
+		"SZ@EI+lzCP@RjRueMyl6pXRN3lkwO2g*IKUKJolct1E_6WK<83gsU@kq!I/Yx7+/GqgLg+&&!hu^B*b5",
+		"!xsS>1N@W#pYO4ZxxGeYva^=Jxp%ZAs8^k%gZl2_8Su5ORPy!Lai/33uhAXptZEW47WUM5uVF3qrF/Z*",
+		"eaxHPv8+Ao7<jmtYzY~cTfYI^YtuTkM+e^HofE4#yZC!+c/uB1lk8urYMfl1>8Q3E**W/9Jnkx=&bl+3",
+		"klzxAnDERP@1&b71&h0irI@!2oBevAgjY4hpVZq$cE5?/YRiMe*yNN8?On6/qRswQHgd5PkYKJVoYA4B",
+		"0Qf69BE<lr<^Qn>p_oH=0L%Kd@#IscQm7+80iEE3Z~t3x1~Iwf+X$l%4#xXYby?gqncQzQ5+J!mbVO8W",
+		"d%pcNqbz_gq>UJ9oD+SN3s*H$9GqhNL#aPXNYWj761Z~kb&9&!Mx!9&RYU/O1@SI6ga^z@c-JEI2ZLA0",
+		"rNT@Dp4m/Qi$*4wb<=lO6WV#oFRoDQ0ySsjHi2=my@zj&0D=$8u>t16q=LL=SYPXN!u2*b4bFn6UT41q",
+		"_fGEt=lLv3Y&T%<qz%RnLC0-v$%hMs06a$VB@48KuXmQ!*ba&bVek1%XxPecx~_GE1Iy&Ijd8p5>Q4C7",
+		"Otc++7^GeD0HH5ou2tWvDb!-NFNS_m1MK7~k<#7ot3g2dOSJAVhsX=#K1lV+D^i/&A7G45Xe>&oq41/4",
+		"+y<B81PoZm3gYa47@=Ir<TdJvsyDvM04dj-?6HwRsGHFahGs-^854$GwBSBP</CXHR$n9b%u>*79K6IR",
+		"/ft/&gQB%2sz3~3b4PxUH+wClYN95sk$E1~j3>kYlK0gbP@_36o_CN4hUZdOMqUtUzDNm3qefs9kdDM1",
+		"mf~Nf&itNxKh$z&~E7N1pP4-1#c@wmdTVQorDom!#E0xk!Pqr+uMDjjc&~Kr9!FXh=lUAYfdDp@AH9>6",
+		"p*T-~j9wH@9#q<jl178@v3/>_#4B$no2<k8zMSiZr/kgNFx!4gbfUEe9P3%#9BAA+qq7XV3c%qX-f&ux",
+		"H1U/C6oYhhtbknLc>g75CT-hZlZQ81i+9mdnHIUh6/ljAxWJRAk>sPs+S%Y3dABO51mgwo!3KAHutS^n",
+		"mI1h!tMPg1F$7GRn#Oz4or*cPtO7msvYsptkbS$OA#1~qN=!&Khz^AjsulG_7l@8aoM>ZBRKrx2n^Nru",
+		"_&BmSfPbK!n$5X#xqpgoXny_?&j!AWF1Cu9ATxC9h&<_Wo=i/7SB7DfG~yPFXvC?J+dGP8zYoqV<#2Ln",
+		"eQ80Rf^Fc_lFb$DsXAaI6GF2d>BxgzWZef^0D~W+f637^NFD=!m>FoQ5-MZ-Rze7C=ssJ<q&Bo6dP+7~",
+		"mve#<a*Ny~PAB4_fv@9Z_bGllkOtR0dZsJH?bTMqzPO%tr^?NvsD2txiVRz~1W#^p@?u+87!!HB&QrWT",
+		"ifKth5_Mw_h2^sU+hm#58y7Z/Le#PmCTao-rT+cxtdcQe%V9D638OocPPH/_?vU_L=e+Y1ig6k@3Gt3u",
+		"Mlh_9g%R-eO@Dw<2ziI9Wf>7/uJm1up7si-$1aBon0tS9t!^_ICVXVboVxy#N+iO5oA47qzntV0ljl9q",
+		"+^yJRAX<7#Ssq*3YH+^I2@t117$-=G7O&0Gl+iX1ZF^1*cTVqP7*CxQ#_$83WvcK8quFK>ca32klE@P^",
+		"W%AA+5nMt@37rrGdL#q/f#NU*55^#_RrfI*C?W*pIe*bbc<mx=7m#L96NgG~U?JPjyfQW&=cyfTCzlw<",
+		"kL<SsBduVMsn-FgN87EH5%0Sh41$6Z+!pfPmBk40s=uzK4<awm5=SKUU!e5GddIU?qAK?vhD_5U7xHl<",
+		"LVRYir@upOvo7fJ0oO-~sby0S9Oy@JhUvz-4p2fVEg8GHrWGpWf1pdZn0mMTvTuHGI>9acdMh&!im^72",
+		"I9s<A~+hkxYR$Fe8%MUTH^a@m<RR5PSNuXG47ce#*n1QQfPe%7vahD-aLYSm&6X82j*m1WLRRRIrsWiM",
+		"m!v=K+LD~#9rSmQ85Z+?B5qbyj2$1G$YvJM>-7jTRqY=4N-^NOexero=D&8v09k/dXm&b#deyVYn-S*~",
+		"gLCaZEs>9Coq?+_&pIfsf-b8t+%vJ5hLkswV%QmN%Ut@YDnyPi6MQ<#g-CUW9&5G-qX/=bVU~ikl<RuB",
+		"xRz0Xm5*M!flRhLSYCQNao!n/5>-=Isf!xE5A/s^pQOhEr?M/hWMxo1PcX/~eQBy=!RLQH>L@=8jRMzy",
+		"lsWS3VFGFB$VRda59yLxh$6tH5m?f%kb!KULoE887oB+1Wh*hgkCKvNhZCZgKv$fL?c_c7cFn*9lh%f3",
+		"5Va95nG%f3&l+xnMCf7S6BC&Fy=^JivuvSUqgdo08OH7B3bKmCG%>Qszb!E<24MC>k^Wm*PqtwbaI4Fa",
+		"626hy5=7gs7kExxw-l/4c7zA>2/hx!~$F3zpFE0c^jSlTPMGz&?hzRN0K1=x7rP<7iBKoSnCC4@+YW!h",
+		"!_M9AB8EY$V6V=j1qTf&qG1#DqSA$&78nvwJGb9up1^ApyONjoqHcYHRgrL~s*o9Yf>z+$u3qWz9b7Ps",
+		"eA<Em@@XYh10MG4S7n03^8KdE?bsQfBg5IZ6>E$r8=q^d1XdT0&KoAFgs0M/$RUt9q8glK?J?qu5&0Yb",
+		"NvuU5gEng@1h9f#a0x@wP=7ubJYBU+L9dviN/>bwnjzHNSHM>GlaYB^iJUOdj3s#/OZ7@98l%sJG_Pk7",
+		"9GM~tfhq~CExAxXYGk2pZ*foo1vc6I0yHnonqu~EYH63x=VDB=0#aa+pS-B58A!>oj#tV2FkTdGzpFu@",
+		"cZz=Gh+4&9Gt#z>kkG6nPFVS$2Jo2++FI/AkEgbDcZ59Lm=iPF_dm!^3PyvHjst%Qx9~oye%_Fu>Bs06",
+		"0/cl9y?BHnj3+Yq6UIN7dH_ujb#t%+*E+Si_6Ul<Q!Dnd7vunrul^l_+_U$y-cz50YWKO1Lax^0zmEs!",
+		"r$hLkdo~$mW!5XXUGsq&y009cbv1^A^JL!@/wJFr$/3hbtLuRn3Lm3uoD&Uejf?O9ne1RQPOPx>dA<m2",
+		"0Zreel@6m$pPMnHOnlg29nk__?t~iMjiRO_7_CH7WeDHmA/-X7z_pCIFqnseVABRAt?m3$i=^4zP!20n",
+		"_JCOOctmxcRNNi^QFe?~hWJXoKGYbn#-QTcM!3etI1fE!AglLGppPVfL^OfPERy5KAKjJ%?6BIbmD7D*",
+		"aNPoqfskbZk1D=to&w5sdj!d%G7QWXbpI*+21%!9WNz1YJ781>h&8Gj4@yu#$+@?7axyWiaY4-~s_T1a",
+		"qcM^!e8CI91NHRYH25&j!sc>~wpk@~s~7^ryR6squ2$/LpI1j/eTazYv36?8<OcNH!3s$Zxs-U*hvKPG",
+		"2YuvG5jkL_A+1M8Ucjm=tH1KV-Rqa=1Tnr=F-H+xl_Kc?%ZF_dmEc^O5PSuhZbb62$W<+VzdVySy_rq1",
+		"FOKJJ~/s6+6%VUbiOWq&R3-^FKdTkbi!VzuWEDG6l>iKIHRSjxNvrf8Lr-d~t!N3l+gYVlH41vTg-4#h",
+		"L++ycFI6v+32lECML3AcPL3h2Xf0%3j*%6cfw7oKL?~8lfPvSn_U/4gir*&EXY>V++=H30mpWKsZSiAw",
+		"XqpRkXDS!_FSeg*8OwL=72/fAcwstmf=hXllZl</%tXtoLJ8KGd30RTbCVn0A~b?Gen-rOWsh4mb<rLZ",
+		"5kF+9u5%ZoNcU>%pXbx=rK0JaNV8g=#_EHppGsbfP?1au257z>ZU*4~KC16BiOXCJ2ul@Xsoxs4Ny~da",
+		"clHi+yGC-nEUZQv/jbfI4w*L@okDQitnI5?rL@po=_r32D&dkyzQxpDfO2BPu~HCY8HwFsBSwRg8-ZXP",
+		"-sYAU1l/2XWU4RrFB>wO$6TD9LmgZfj$?mM19rN<o#Zei?E%EWAL*ohy*63L-6h%!DZW5al40!j#/jrM",
+		"yTn/%YGC-Cvj3u4V6fXa08w8Jp?OKCorkSevU!v<S-n~3Hp%Rtp=6+wf^03sj8KAj8SAz8N^$C8*2aYM",
+		"n719Kg0oJr%&F7Mo!T1~TIJzAt^K*esg!cE_%~hooRbLv?tQAY=P1ut/=to!-6eHHDZW3oC4abfyvQ9S",
+		"wwmnXs^ImU2~okFYMcN9Zheip5EGiH-6Qo9fwcK%oCHyyYtGWJ?s8@3b_YcyzF-N0SUiqlAf0ql++/W!",
+		"daUCFesjpSea*zxf5YS_+kbEXC9IUkGxGCOcOZu!n?6S~v5Z3@*RHu!hEx6~%b~-!kK+wC-@r~pY$!b/",
+		"~okG1=VC%hfUqR3RmHp1%cS%/5*<L!amz1<ownZAjMoDw730OL~/>ia?!JE#2pSk!JZTe#?^8XIb=SDY",
+		"rOqH57/QXNm8BZVR3CZ2sIwqwr=1hDodGl~y>Iq5rxgE?2HY!Ix9JBIowrYRhSRhG4!uQ8Jp5@TgQ?gy",
+		"+?lIr8>Dzv1CUFfRqVmHgZNuV*OIz4A+1&f$tWbb^hA2#K*#nxiT8r9J+Bx4W6Y?Uy+pX%0I<a_d8f/U",
+		"nV+4Elst5kwDIaSF*2XrmhK86o3c+DMr-0YX$?=xKD5krM5mh80X9xckLNho&48bL07kWquwL*uc%#pk",
+		"lCVb>=y5T84u9M1gfDXeqd$0!lTwj6UY4>U&@Ev8Gx<!p~BqSz1u6ssNhd0-nOp$v61!^lsEI~338m1o",
+		"ve63IwYoVt6f0#Zawxty7MX++g9lh5SQ66zIS%8Bd!!~OiwJQ1daocHYow&Sa?G_80xBGeGS!Y9o*wmd",
+		"ow?zAVLQtK$2QvHrB7uCucmvZn>e3Q1Y2S5l?4SgSvK/~pgcTKO!G$D7zwE%cdnpQlu-*5h5lc5t2*pr",
+		"5I=KWx_gKGVLZYXf86s%cguc?t~@&mE^&mlnN<PgrCx6WQDGzaNi9nHH?s%7w-kg47qIZAcM&$V$h15b",
+		"oXu8>ectdwb+#=R2QI>isS49Z4$!xrow-xy9/ToGA8&q68qH-+#r7qLr+OgDBaWwrGVL!ZSs?n1n&VCG",
+		"in2gAn$x2#+$N<ugB1l?M94VtvP+#mCH_b1OdjcAkKe0ihH&LUfOMl-0q>Vw+adTz5jl@h5DlGm6#>!_",
+		"8LJENlaKAKtBy4<jZFE7oRQOIyG<lHkDiRBvoWl6D$&qOtKzE_XCh-lxZ6/KtrdE=>A744u4bavk6Gmj",
+		"BqYQfKEj&OnlP/N1Z1RN8aM^KWb68su<p9wt~y/^WA-t*j7J@1Mb#zbPu-PYvS7^q%r0r9/xv+!dhWwD",
+		"kxGJP8v30tZV3iwv1@Ebd>^c8wP1MoUQbgmlh??umS^1!eUqT58$1g^aGC2!FlXTJo+d~RT^+e@7_6CF",
+		"cTdSa1!RAzGqvrlY99/>9tA<dmcZKIwk%U-W<CjetIWyMDUdQ#Q^xv=U2hfw9n!@63WViSBTnC0cmiMW",
+		"94vsrrBmhdraI>VVO2@q=7!OWpwq_Q-Qgrl2QKY<@0dShx~j=ZD?_4CbYgF_98y^ts6<Hxhl3#M2$hfL",
+		"/%UFa%JHwcmn*ArG+P*^=J#AybXpf#ZHdDr3Eyw-kP65E9EAC7#Wglxbo7oVae+2UbF95Uu_61%t_ujz",
+		"=qeEu<Y817mFcu8OSd-ZKHLi&m2F>IuuLk1^Eaztsb?~8m-7gGWDm&kpRzpsRA9f#Q=MqWmrI_~Rk&t8",
+		"NAU!x%>8kj!LS!S<Xc4>x_xNVklPs2lC!?-qnUxsN!3WiN#1PN%N/%k6+4P@L~+EEiPNbU@t~bMBS4OZ",
+		"rcg@vqQqU#g8R~C8GVspijoxD7~-E+DjYZgD$*u5Dvbh-*pfUUz>A~23Be-0hkY_>Nbw!sdiC9&2#pX%",
+		"=K<pJHdw6v-J8-~7!KE7+u8xbfVdElCWU2>hKJtV2?k9LreJUxSof4#5htO7Xofy_L*vmr2b6260TG1?",
+		"4eo>qVs*b%!tGtU0hn9FdF#w7<+J/y=DSfK?DqV!UJc~mo5v!&cLdO>SILhXh=_^oqo_#ug<9gokDcEN",
+		"h1cjkvkg$5azrraG$JkiIxr6JI#BPysULn7$e-VX$G27^hB@u>jvxq^WS>Z=#kvbO^l0^-K*PmegVa#f",
+		"6X3PtAjR>l04#!/UtA1j<x<S@#R_NsyYSwEv?Txs*AvdQ9gW_~!SFi6nd$GE8<2XV2mMKRisyA6G~+ES",
+		"nWgdRL@yaoeUZp#b/7<K0-&7w^Lt7s*0znQ5q3aqcbuaJj9IMK^rhuU7Wu>lcG?X!2HBcD?WAFh48NN1",
+		"?iRv3H3rC_tW%^Vtt!kt5BP2kmMp~cWoVwxb*+2>aZN3h=-<o<i/y4Ub9$bA1xlyHlDFxy5_OVx-O+&E",
+		"u#C?&WOz$X-M-zn8B$A+sC12ll*eYGfG003DA!ydbOZm5xls#Rm7?&VH521hd*!<8U0hlqDbFEtjf/S?",
+		"i_S?W0r3I2Fl0=eV^q360mme7pug+iK/%#!qt3WX?kZQkj~BndtG>GXI%vSSJGl&w4b$4^bk@-9*w0q9",
+		"~^#aK7vp7Ol8<-e4!QmL3V^JpI56?05@Q5YA!@P9suO/R%FYALw6<WrCJYiY38Jh0#l4y3r=lwM?z?l8",
+		"nb5v5BKTHwF=%+rfwPmwfypHdld_$CCH_8T~tyySB^js=C@^O@Om2oaB^J6&A^EBbkpe3*1=edF7PY$F",
+		"z+jmpBzMggoH6$A%PxN*^<gEQozK07lZtXjzv&V@h3gzl2HVkjxABx%%atEghoB4?uj3Ozx%lrZm%>@L",
+		"ZR/D~V$zkR0*UVkxBb@5zirXq~5eZvJaS#$rWK~pLjDT1cvrHe&B<=5qH$MWa8wAubs$w7Id2H#*10nu",
+		"5j!wYx&$Z+aOny!daVX-AF015q3tdH0q_bkkx5jcmei56cP1^Rj<DE%OcWu5n9W3X5p&O@hmqUBG?b%Z",
+		"/r?gcbyzYZV3oGzucZ~r6qxYQkYj_F6HvEN~Gou!fsLct<mxj=JYG!YFQ@8Dms/i$O=jRRR5HAx2w+RA",
+		"#Cq@3UB%wh_lRFd+dZI/Cw21=aPB*E3JkhAyzmsoqn_4OYGJSM6JfA87j^0Jj/kHIRMGt02oRr8NldR5",
+		">~KZd_E$@Q<QXbM?0TNJ=/Q&sgh+Ya7f4lwQu<Gjx6RHN2rj!Al7q3Cio<PESqm&er&hbmhQEeW2e4W3",
+		"_IDrp98h>CogamAGJ%sJ-jk>kPJJbtfV_WwcF4Jh8#NJE#jo>&wxOAX~l2H!SfwlDkg*NEoRr4j6lTeT",
+		"I=b0Gimpyjvp!n8V3HyS0w6I~SmSiUa@*GsRCpXNMj!Fc#AamT9=UDe?JZt7Rbw%fNJPl/2*jiXep4/G",
+		"1^%->7CvJA2-Jg>GFE~<kQm2NHL38=gHHqB!QS?e0P+>hhQBl3^A3JzdVykHeg6ku$xq57tm^=!paoO5",
+		"d?t+=O$Rz%B!xgVt$9Rm~x3C>jPnCL_!/g-kh%>d4u7EhOQJ!rRs7mENg&#P&geeK!Os1Sp6EHkVd+zH",
+		"rSbQo%o#8=E7p>PQA62MIRWye<YlESeFatU2B4BV6!Lh5rZwq2XCE!v9QWtpS9>V//ZOU2nhNyR@#m/J",
+		"w-9RdhA#EjvUxw_@~=l0hT<+L32!m*02baP8jI6nu4NqDC/#=Frw>TwOu54cf5NX@+S<<Lp&wG!g#jB/",
+		"9L4Ze+31iTisALih2ya5i^R8iGEMe^PhI##h7hKLL-=R!?tTq4d!sYV%RY<2gahkq9b32NU>@Y8!VwD5",
+		"r!r*nqkm3>0=qnbiUKW&0mGZmb#xE=Jh>h8KKare$q$l*5-Orl*%ghSQ!1<7u_LWeFJ?Yzu6UV-a3^fy",
+		"e4*&X6P1x_@1esgmES1Mqm0PojPk!et5q-<4@vItonqI7@KZ_0q&saFxoPEtt>DMX%M-v1u7+v5pyWWw",
+		"ZnGJn8OKTckqEWju6CQr$EZKypw5_861bFWHitFG0KhEG3Bl<aTOlMH1vTVr7kbnJtp83$p>S9um/xLi",
+		"GLR3nt*PCeA?o/7uDIX~951vd9dHGrXPVB99rs2B5&CxKEvtT$=WJ8&eU*0Jsi1/NGEE9M7A2R6shsBx",
+		"QwOlq2k~hLEun9Ae>SWmoEtjeHPuCse<X710w#uHyGoeYhbE~fzG<drea+#S8^fkMdh=zpBxFzVb6%B~",
+		"ckGGw/XDvRT1jPUADe~brL2mFuy6~7ASOOUA9D&pIHAnJ5zLPW50inTfKC*/4sKnEm?3o5%Wh~p1&7*#",
+		"DRaU~8x0g6Mp^c+9tV9y<Myr_hG*m%XQ77GeL7kn/4?rm-gqKCbca4d3%soLhYY4ALOEY&T%Kght7v7_",
+		"f11bLv~&Om<oCq@l3CR8n5fd#hZs6TmzlrPw$?e8mmhcQI#obcb$?n%9$4IhF8pkSQHWmI<vXlC-_Ew3",
+		"?v>$=p%l=Jdx0K_dkhxuev7*y_KUKyBY_wg+<6jGI$_0HlLgE4EF!NjP!b#&~l~9ia91pS5GfYA%0ko-",
+		"t8H~AeJxGRwlqb6ldNZPp$6H*k&g#cstQ*q#Ej*fnw1XFrrwj66VCs4iV%wDWjr*DapV7^V$ms?rOl-z",
+		"ldD9J7GEcN=N<Y@of9DPdsrx/3cSQqx28+r4A8iYl*ns$jr#CYN40wHoQ5rsoXXNPlBwPEsF8AHqb7Kj",
+		"j<nsVwrIIaWnI/u7+sc%IsV^LqxS$/6xmu@is@&juRp#7Q<g8>p~wDfy3J~Knz7IwvX254Dyf$oSHrHX",
+		"1@!Tb%oRInM~X-+rrxmr/GhW+6XO9l@RrwUc=eD<=GO<kjm@Zipa&knTLGPtnf!rPwiSaow6^VFP#6d%",
+		"$vfK7ag$Aql%sls0lR?#7b5=BcEO_aE=MlkBk+P3h7eW85X=Oi2/STTh*p*E7j+-O%Mk2M?pgt=7=WMV",
+		"?n&qlW+oZ<7eJtpuB8yUQTiXninltavO~@*XtM?>G0L*brZZD*feyW3e1Fe!fV~qS-aP~14kyM9EdJG%",
+		"l9=b!1=>9J_V6^o2%ziMzizqBLL*!wGS5ciNWE-qAX1LvpY?0njvQddj*l1TTv7&33<r!nk-LE_eRE5^",
+		"YIx_Zv6i$qSK@CJppaCG/5aeY1%2V-@nLcMs0~TaNCfWyDAS>/hJW7>#fSeSIIEEo%i3iy%VVM&PU0#/",
+		"6jFU1atm<mqm^2p!xz7efL/pAo<!A_$rHs0aCSkC42?3@4-fx&Ve^6Lk^qHZax*n?lOO3WkOm=qowwo7",
+		"Ik4hwh5nSqhwv!kviB-KnKJvNJyiEoasq&&lY@oU6Sn&uorRHChzBcedM1Mqxt9FxXyB%dl9/v$nimz1",
+		"Ito!@~W*Cznn9R&9q-?9e-nFLpnDfL@UaZjXz/K%eN#Ggr056^5YZq9nlhJGuv=*DObDoc0b>LLlLKOy",
+		"bq_LORY9=vP^-3$XyuJ+ifkeAA>u=?r?V3fON#H#n4l1<#$+CNloyb+lAO1<gT<ft6Ftmqazk_#jo2_t",
+		"8<+=-o_xr8wXyyyf=FlA!Hty1p>i&C23t4Kv78VsjNzlWpNRJq@I#!Nv<e<NeVdtBuo6B@tU=pO?fve+",
+		"6N=lx5uVj$lP-#Wq7XzP4a&5otQ5@dv3a26I8FGbcC+1Tn0Cu^w#u&$tHI2j$6srX5u7B+QkDd+ueM!@",
+		"oaXMY9pAUbs<FvytmoOOmap%<KK8WNwvlGWVvA4>6Tz_8SN+<!fPbT2jLjzGm@2RmCote^U_fh^Apy/?",
+		"rTrigYx@fO%Tnx-V6fXa08w8Jp?IBPog=w5mClsrl6dpKlX9d7tyj~0l4ha8j~RAm4im?jxZD!lgoH92",
+		"&vVxpJXe22I-XLK%ct#*qPzi$SIVf^<Y<$1otXVpHe2Vjdho-23Dg4v@<sQ2-4P@AlfU+g%V>O&Apz54",
+		"yVyI!w^Sy%W/j%LV6fXW08w8Jp?IBPoGGzMmCls=l6jq-n3<h*p&<C>u^~qLn#ZUl3^M3GZpLk^4UGJq",
+		"mRSSY+SW#s%<A41qNeL?t5Jx?7kFXV/?I!51HxRt+i4p$fCr1&46KkF4Rx&F0efv9fuB4b?M9--@wGpM",
+		"de>&Q6/uTNw7SmjSLN>g-l8fK@!lj1U~^@Me0L5<E5X>CJs^?aOBH&w+_DIppv2LEj~<Vwg8wTOKe+Xq",
+		"tLihUa1=Z!~<%<lUdEI^IWcX&sN4lOW3vQD!0>q2Bv9wFeS4KcBEJiQQBZC^0xm?m5F&Oy9t7IQmBkch",
+		"y7M*^t&&VQlrQ/wsPo9mKSA6m0uDvTX?V*&BhGN76gZE@1oNO<orv9SpOiRlYArYsp1B0#UWC=>ZTsj/",
+		"1V~B*9~dc_ySsvF>_b7SWfB0BEz7HtF?JOTM2y+N56Vrl^tVMl79~LLNj>CH6&Q?MPk$>G5@eOjHmQC>",
+		"91VvEa*VQa3e_F9wBziYaz1_U99P/8fJV&KkyN&5*c/MgukPr1riO$a4WVKus#183aC0Y0jMkZ17eczZ",
+		"OWq^PI#a*Ctqr1c3EwfVH^EHyyyWO$eUE>MFXx/W0c_aFhMU?zEOjdkcA~TRle>TM//8$-26^Q4$f7hC",
+		"kSl>87zvT6!>i%r!gjx<sPMn*XTk4=lXIaop&u+bTCr4UlN!/l39#yLgEijj8RgQ%sxGAf4#hqpKf?z1",
+		"J=KW_8oZj9UkZ?s7^uatvcBP58LWnZgjXEpQO$$O$ANIu0Z3oxuL*0zP0MTIHyUVYsliqrGP-wFZ46vi",
+		"IkqDoF/z9BU!$dR4~#~jC1nh!F>rvAF5=7vVIzZ%B*@EC2vcxnZg2_IBLFr21mLMte9^Gea?i-68?pEg",
+		"XAJLQ*GAuWeuc<Jqwl6Bt@A?it^K+Lsg!cE_%~ho-j2gV?tQz@=P1ut/=to!-6eHHDZW3oCe4Gzkl@>w",
+		"iK5y^22XxX_@ya<wKFETZej&S7NnSsSTv?Nt06$L+M=WmeWSDk$wOoIsp+na7YYUnmvXM_10T^tb~S7=",
+		"c7*nLZY&IfW/lo+42^bH9fgH@s4Ivhsay5<qEnVihZS_x?CdEM=P1ut/=to!-6eHHDZW3oC46^VApCvO",
+		"yTndXh>cMge<TqF$SZavP5kctimv^x0zt^r#</pMs9HiS~r7F9S?uYIn?U3!f?59pmqQ*F2o&w27H7W=",
+		"BoqyLf=0TCHjSjRn@=!6+pts^PZWsIlFIb_Awxnxag@XWJxu+E7PGdkBt8Sz%$vKV24VswhmcfB8MLw>",
+		"75=>_4sa3gTSh^je7FEV8pyvedDEk<05P4HaWe$yl&5J$/NI_&p?ReY?<SAdz09xP--<rZ7fWX3Fpl/?",
+		"4=k3Mp!XWLQMk@!AgCag^+$^%o8%gtZp!IZz?Jh%RoAU+-35VN1iDyIprR^v0lIqC7m8$RZS?^RrK9LA",
+		"9~W4fs-6>Q$MgcIIuLnaJn0>b#l^ZA~kpKD5h4MNp/Bf5ladP~7nFHxn@2YPi&q&2tY->1VTPJHqdF8R",
+		"0esLN1alQyU@9Ds/T*U~M>uIa4Cx&hhMueRQVXPBd#>c=rA7nWvaftpd4PHG%1s#$J&mfoC0QMf0S8!O",
+		"po?$TbOfq~8^2v&h=6FsuO3mf2t>UutG@t25?aAdKD4P-cFjz9k8peQO5FAhd5terH+2@AqSnmW*iQZ8",
+		"9QZCqrUZ?WFjC3R2jiAaWE6P1h*EoH*~y~M!=BTC!LiJNBYY=kgY&JdB?7U~toT~*kyy~oftYlc3is0^",
+		"rhq$~55sYNWn!n8rUZU<drrg!5pp<>Hy5Y4kclXE29Bs2hVqT5iCaiKL&P^f43>eHS<fNR1VvE3&JvlA",
+		"9<kqdf/7QjO0ipsL##Zxi>-DjbY3Ee/<Sc*tO79@76h2xhVJeLTdz-poT3k3rOjnsk9%Ug$0F<R7%v6E",
+		"75rQsemjBHZ5~6o3teV>z12cVZuvRRv6S9YdI-L5J?j3=D1~6?0awFBnty_nwY929aiqfLLFkg=AtQ-B",
+		"1X#Nm7P~E*1w%kI7=c=%KTqAuA!d+V1o42&gkB~CIm/PVW11=7Cktd=qtp?IQiUoBI9mNmasF8bqF0d_",
+		"+hHJF3Ld1Sjo_sNEYsAdNWth+RyY4kFf4ZuM-0f26=7S>FbfLs!I%3IiNKeGN<DexJNe!Y7AWc5CW*/*",
+		"c7rLEut@h9qx!mO3KGyX~/oQYKaio@@=srrHCeCiA9aOrVD!tkOs3W>GCyoT#iNp8nZEeQ=S_pCvQsjd",
+		"LjLaa4kdUqd@wR9z8Ww/rM~3>UG*K<Lo<ua_jwJX<DV9EASH5~*QtduDsev7Jn6cQi^s^UT7T?Pg@WAN",
+		"6$DlcHQvw5mTzbBOq_8hDuEnfuTor0oTxT@8LC/oo3#o~i+hz@633yPI^GMEb0C@+2bFwXn!@LArtTH5",
+		"q&AHP6=L^WdpW@e47=uFVIml363p_nYq9ISSPNVm2M<seLd@YE3x_~9i3yYJa&aO!0!%@/P<&wx-V?n%",
+		"PDXSu8q/%460Rk@Gwga$&5?UOAsQ5L9TXAj6YV@M<rgnFMG0g@7g8Z*KO*d=>2=iVk$U>/Cw98K8fHgc",
+		"dzg=ZKJOX3?K+-=nyU*Fhf~L<rj7k==<XcbuKjnR#tL%d6r1tw0%S3K3nsF2JTJ+bPw0>IZmzaW>i3kv",
+		"3v>=&mLz+?GaDFiscsl7a*b^c_2#dM!dOip5X35G4lI*ck3SZMTza6B1zfSqkUaZYL8Z??ydoVa4_=r_",
+		"gP8CTd&H338N=zh#?kdi7+m0-<W+8>KGbBtU6mWC9t$<IxTM$&y18NJK5l0y9P+*UwGbR&6ghKE!Jd=V",
+		"a7CN?88L!-4PCkmp*0-JuA-0/4o12XmTHSf_R!500P3fxmX~PppWv8wHAV^&6bp/9?k_-itiJ3!NHRM<",
+		"AK#oASRDs6ZK$C6bW#3=c/Bt^fpB<wA%Np2?&UU@rAq?K9N%&VdK8sFXw5*_dlpUVvKxct7sN_Fr9xEE",
+		"lJTM!E?zR^5qY4zJtsKwp8F6w2bXVjqij!Y12V^WOq~@m1>r%!F?XdIQTT+!pfd6ea5efe+R%>wlDH3v",
+		"wn~6R/!kc0F1O=kxD6*<5RJJj8@Kl+knHNPgFvmsdSpJeeWsh9AZwh+7mA6UaZkhun0!c7hyNzW<5N@Y",
+		"n1lT%SZwTaSP@YxUz25Ea_B0w~?hB<vf+n!=tm?obgwa!nrfyCHVCem!u6yK~J/b!ijJWMtD*@EjKQZ2",
+		"ha7h=#Zjc0%NgSiqgtZTgg8wL41QP4m^dMOqhkDH7I3RgGg9DKi=XS<t7gdM_e%6Mn</>9!qj4g>2irn",
+		"1FOUR_kqVMTWRx9b4Aq?46cPXOL8F984k#upB>aMvf!I2Y6+8lnJTRs5-djcH&G_LErq^0=Pp1o2GF1%",
+		"9H!?YiXVVPuRuZcDryGF=Qb/Q&2U&7v&H5XzkopL@H<VD2KNB?q=6GrPDnz=0=syY0uaxEAXH&+#q9bc",
+		"Fd/+_m*5VdRVXi!3fSHxcIdDmgr/%2T//y@f0r5xC~FAHuDzi0lVB/i#QMgC604nNjFl?=k#4!a#VdTQ",
+		"7+BewkkTbC3JVVBp6W?1j7UPHcr$0G3o+#+d>38Qb+=iHerB9aP60_pfi#ZV^qg<sWjUtY4RrfysH$KY",
+		"py$9JTgV^5^MNdj<GriOV&CE#97cOROt6Ehq+M4Mt25*2<37_d5hg_ImoB^Fr7NMR0$ge_2TarP9iRHf",
+		"f^+NKTou~LK%WbiOQoTVBL=nkkHS-*8d-0RpEDDn<3c?+U7+bB5*Mf<m8Q_0##/Rc8MepJvfqbn7&<Ya",
+		"2<xKOQ&-z_rTS3vpqbeUi=XID9xX@%~zm+Ks@e!WmS76gZs>pd=pGC/j<BAM8Fe=Oajt5U=BHcG5Y+<r",
+		"8HckUcb$TwLQvNaxBsJt7nf$MK-lqNT#&sQtNKU9W0dG#bdMH#EB?GR1S/sIh80F~IygwashA9eZa>xs",
+		"3W#qlGJxET!h&I3M*jNC9FY0zaMMlBikk77^I>cVwuxBfUm*wPRNdLC!TTpRo%4S/l5D1$T/cW&tX>X8",
+		"rIhGm3&hPbm%V/YG*z&6d4p0J@<QCmKb+cK9q1W2TNcu3HQl>Wv5URex1N72NvT^yybvlUp@3I~R9w/Z",
+		"fsD@^?w#jLct/5H2rjBtS7XZ^@K4J>6t<OfOMAc9To298kDcxI~H=x%dY%1/-5Q+&JUwJ/qOM3wv1F=H",
+		"SC&n!rP_OArl~Ru7f939#*$5C1N<^3t_I6shOW*@-@@^wnt*!ke7kLuoh-Zrq3%guN^@VUs/&#<kKaBr",
+		"-nEyB!%lx~ouLrpp*$ci9UfNuFxAKx0t7$H9tLWK9?MI8qlSg#<K2QJ8P9pi/y_o4qkY2IM#DRb/3Gl9",
+		"LL4>zYvNb25Umi%k6!oHuFNY5d~al>A-+3K/N-uUh!^34r>/0DbulAJ0j*j5aEjHRpB7bv3*B2-NG5?%",
+		"fBkBl&mO%/i1+^dFF_i!%%9yJzklH6mZ%b7cE=N<ZGiMH2gYxT=ztIBHsITZpOT^qn6>lfn3B?bFRYPq",
+		"FT^j*3!q?0pVW7@9eXC~B*Pn4lKqLgZimhMRv7YhrB_3UqYdW>T-mx!8sHhnC>$AA!VTpPrs503+nj-m",
+		"1O?oqxlv2d$c^/OADsaXd^SNb_*L#vaUalHi3#Q-@<Gj/VV>5MU>f&Ho%Bk~-5mDsI@z<&p-pWp<a<~5",
+		"=I8Lm2HIOXoXE6yeD2FQFXvvc#Z>1DjQN!#GY&nXkO=4m1cD^I?S<j=OeWJWeSZ!nsIf!s7R0CT9uS#%",
+		"Iv4Rl=I!8^*Uy0rVIC@7d<&JMcNOz1!@$?FY^MUnnw4+_LnGWHk75+TqZrL^1zF/G%^v%4qM2a98Qj!z",
+		"cxITQ8wG3XWIB@No~gw1l~R?D~3!EQ72^LM8NcaVezSfpK<SOj3io35Bp@4w7??%J1XC$*UD!/=V_I9V",
+		"vxsh4a~zBhf6_>jg+oltlPRD@Z>FJe$dB?-q1PNOuR-$%2N+$lmoLaPE+q89e&k35a@rt/6#dw-q_Nw>",
+		"hX+23~DXhiLymee7Z+8Whps&U6n0t^RW?2prF!<xIqemwKP5h45Cu*8o@vNaRfWlT4phvvHj40DEjBQa",
+		"RsbN2<9#vy2*!0!@kcSQl1d%yKXkNp!MI6@LLPfO@$U6B2skd^<R-~F=p!2ytn0Cl6yUDltsBc6_&ZTS",
+		"rw5t-3<tc9WMKtl~&Suu>27%Tp=#Gu>QwiFs0hknhNIe0eq=e/92~okdc+H&f=h+Dr#JXyL~*cU1z/IV",
+		"7Ehj@2po~-fP#Lrno$aHclT&At8C/F1ac&BE?ry>FZuD<9_xYugEb7qol0+Kdod2brl5Dx7-Uv&vjsBB",
+		"DKx8&m+fBNvDp*gOV#JH>3#zgIw//VcrbmkqoUs!ij--v=88L4gA4C+v#k-*bMz2ZgJ0=J<b_WFS$dc7",
+		"ApL7e7G~dsP~&zX5!/Z4r#?rPBM<rBKAka$4WO7MnVVu&Blb4NeT!OL_7VsuR&^fKIh_nftA22JxI%sP",
+		"HilBni_qJur<3gVmzIW1n>PJ8n0slp>fjnkM9dP^N^4K>sOUSzbKVDeaVixf7czC!gIIx^w^u%kL9V7V",
+		"Wex+3&N6=X7phzI7UIJV44<@2j@j*+MT/4J4ju!A=e/<&djA<=v1-I<h7>&>rShm0fFq~dt_lVE4g!Tu",
+		"9HBqP*Ur/aL7GTD&o&iJ_B6G$sR!E+JRg_&qko^vFR//2nA2_rRZt5R<h99@0eoG_X$4Od%R0m%3Gq>Q",
+		"w+oo&Thp*=Sqg4snl@2tfHU2xjf0c692x^h/u=^<eZ2!4jXjpq0EI=ll=hZI2_#pc3Kz%$0TO2N#zZa9",
+		"3zB&To<3goKwcfCrH3kF$Mw<XY*Rht<=%JUK$3Z-8G^*ojq!OhDYHB2tZA*1tP9r4*FHh^MZ-iZAI^4k",
+		"gRobF/k&x!gwWJ<0>c<z&J>BFA/g0s0IlUkh>Cs*1BR^nJQty>rao=FjSH6HaPUDxOSBb2komRM$9sqU",
+		"!vYzOfow@AwQifW5x$&60d@uz*=yc-akhzy<+f7Tiq&KKbU0iUsE0YdlV8q5h/<Mz7+JiWvlro_g$tZq",
+		"i?k>EaHpF9Apd_B/CPIHDjb%yylA0EcNFgv+L20m~>S=Gos3Ev%16S%&UKAH*BK9!iw_mzWbLD=%ciM*",
+		"=EqR&52HcbpK&d!p9Okg+-nzmnvPQ*nWIrIISjq>lW^r?7jAQ#62-dr/Jg=uyt/@rtL=jp?u3@Ld$TA%",
+		"jm$VE9lPp!^C+/I#hsQ$>OVh9Zicoo3rM5X10H8-0>7e4u8cPZ6KMI<j89h!39ng$b<EIUjn6CkCVoAC",
+		"q*O0~PnmgjPV+~oDYKjPp!+?Y!M*!q0m@pSbnGb/unLU5aaCC~I/!?upg$kX3A%q=^Lx52p1g$M2wHqP",
+		"_d^0r?qo@n>m+Lya%-*>hkdmJ^x$r#6fPf@?Mjogt=QDEcJ6sc+J!LUjBgJ=!/C9oSRG1M6!IxPu6TrB",
+		"$A-J>1iUR8d_HvVTa>7@w59ENwaaXJq7vbighP&MG!NfQerxb2<6%6mKZ2%1lFoUOkIEQFb!yy/C-ui4",
+		"I-sSrUb/O!d5>pY5^Xtv4BMKInHUi-bIRe%11tO6bV/-Cp%3%iN8?2v_-W8Yi#tg!2&!nrKWTzrfgh$e",
+		"kIx%6k*_V2ja4q#o@^toSNT$-!7nAJ5U1=bRr$Mr!omlV_*cjy6yn1sY6CKnRPE>Zsds?Docc3gZSJgu",
+		"9HJ?%TT=aEJf+knzRCrQ5^=djl=oX6a3O=5Mv8AWLzVRrj3x0/3l=rTLhmo6ipD_^iyQ5bhGtiEdP02h",
+		"sRb!o_9u0EXMhML$7T*jNwwwIPJchZZyqky#M=sbpxdX3hDljA4%t6D^/xfZrV/qlyJDLMCds&mv/M73",
+		"CEWYbmKi~QH3D/Q76n+tesyGiq%ucvlF*BPQCcH&ttX<#867yclRK9v5nQg!RcQ?I0BO&tQ8p9>9ms><",
+		"TcwUjuL?c1u7Q^nmRwCr5CPcktUN$PFe?&!hf3XMq%NMsQvvmK!VpDf1M+3G>=Rk%6Q!oR7gkDr!p<N<",
+		"eMQ!MJPADmA@n08/xsKE59wxB^mGgT0ZFtn0dXgu229_Uj+uImpceOTq~j=hCw@M7rQev/3JoFy&b@MI",
+		"MbLs-3QnZDLZ6lwL7ISGlq-uec5mp^?JGCM9aD+?5PjWv5xsLJtzYJ0-es$t!TUBSRBBgDbp8jrbKL?K",
+		"*UxoiFW0B>cTBeoG-riRupjXlu6oT=Kb8Ly4QE$O1AR-bp@W-WJougkPI0HZaK#Aq6%Q&?WrE^e9eXFm",
+		"+-?MV/d?VPaJdTm?hPN2q=t~auC*WAj7Z3KI@IU58Hv4iZv/d<WNxa!a^z/z6qZ^Kw6nah3j3#_gHuOR",
+		"Hiw+f3oZH5EDakbtA7k#1/zqmihQ+J8Hwr=iGbe$RAa33f_fNU8Lt+X9q=2k9OYdc~Qj5xW@!w_jzWR3",
+		"v*P7fBszbtW/@_8jU3cLL!s%eyp%dof-!mYnYk?J/Da3x?wMIxZ/HnQsdLj*TvzT4kl@110At+DbPNS8",
+		"tg20Ro^?0Os8^N<vQB<*w!$!BZ4xH+U?t2pr-@$8=njJxpB~+bhZNi_AA4F4tfHq#OS!SjVhoXjzAsn1",
+		"UtlXokV9/@%%STju&NxcOKSf&PpDilZy$iF+x@l*ezMgphPm9m8xX5LS4aTg7N~?Yc!b1Cs3>&?6J$^M",
+		"ctl>6?e667oLZgv+Q=C*$CbQAbt0=BsS-n_9&mY$2F&flWjopwjpFHxQCP0%a^SM4$kdv&Fc$~ShCbxa",
+		"s=Jw@jfVRm6G!4dSnvi4T&zF?bBTrnn0$pU+5efam=ion9nLjDwZ3OQYbc7%oP!#Nk-6lKL&1C4%&PPF",
+		"aBSn/yvwxz5w!fvmVAJ2IwTas>zXPxVa*MM@y#0B1FE$+>fAu!Ol_Nkep7uQ7o3QU*#<ED5HnBWjzx<D",
+		"6~q#qfaWh_WO?KPd6ba8zf%J?0HcXS^AYU?1%l*Iq/Ks7dO-a>omgp~2D1xUM9R*05OASAPw>v=FUU+$",
+		"<sJHQjpEQd10Q&Tt/?RB7<44RqeZFHsFoAx2gJ3bKL7=EdzOKo3Vs!kKfm!Tdr=JQM^@FWy4rYoqad_V",
+		"i8@y-^v?bkK1!~qfyEN><o9@9ibolP-6DN1fStEg^1XlZ1MDlCk+EIa8NFl4l9cuIjrIplMEOSLBA_I=",
+		"n5dcR@-6Ip7+PLhY^3RC_*+Trpy%PBE7T0%1FT96o8^mXwC$Ms9B9!SOAHlJWUGf9uwEpc?i-vfJskaL",
+		"a0lhIYP$@Po&nQdCU*Db_EjMIsrg>XK6h5N2u?$kFYoHYnx/QXRQ+1h<h7$k01HAnX+oS%%R0m%y3W<_",
+		"2UsQ^2i/1WVAN8815Q>T#WIFqFY6EA=EGp76x_*4l5pmXJiIpiPiSVBa_/s&ui9jG#FQb%Xz<bUl*IG4",
+		"uqKnk&w3^ccE2vE#/i##sWA1X9w=AI/oe?&l4b=uAPZJVxheDw6?<Q%hmRfbjO+&m0J6#c6~V?-c-pF6",
+		"j=$/d9$ozttl5Z!4Xq=UubUz$uF8~Ild34C#G8Kre*Uy=-x9J7=YKZ8-=RZ=#gO~t&!/idBm0%CesluR",
+		"KZ@l+KR<4Zh+6It_uw@~0p>iWe2I5dDiR8!J^GvXaaBOzAS0M=fKCW#c24a*27+UJSvm-3sySLii3_5/",
+		"=ZG7M2KAYz6gAI6dk3rBP*62OAv-D0c3nk@uVxnab@t@pQBGTtt$dPci?veoONRAMjWu8Y7~VNH9UJSG",
+		"^OmRhQ2P!1iNW^vNK>sIcp3?#aim#j<X33gz<pCupX1b*e7?K~%kYxP32ov^UVFGJcM6!*ij#8eKblHM",
+		"zbs_&5_YFj5D-f/Ii+Sx9fWTicNE>?iZkj=V68kS3&>PNWUm$TR9vG=dVc>Xi?3X+*z0$l+7Krr=Nppm",
+		"j*q53iv?jWH0yFOw*6zX+SW6TuO07t*^*h0KCsH+^psdr4AmtYt20OPqD/N%90fb?XcF9@@RZYQA160!",
+		"hRge2Cgg&zpYCe03@7f8a!f5q6b5n4uIao~@dxeriya60v$FjfMgzvA4?IXrtgL$R8Ahr&c_+TACP8*-",
+		"u9~>_Iv%MDRYz7=tLd2X7rx82co7d-6W$StvA*Ol=ZWjmSuI~Jh7BH-ao3V2hKJjZC~=Bjd8ZBamVX>#",
+		"WUe65g!^V/LiLcTKTT7W2&AB^pLAr8pRs@9RVWN5t078_c41E0nAti^j=L<9cyzC%q?O&Hj^Ei>G>0#O",
+		"Ku37y8snSExpq64NIg/&OM/oUqe<oTc@!JUqmvlenNpHWbO5%nY4Y6Q5R5P@69Hewrq2NS&JFU~7=rIK",
+		"5aYT0e01i?vc?h=dT=n#6ZbkiLr0ODIQSmpg5FiA$oauReCRhD%~C8J8Jz~0*bX5B0%v<Bju*_Ogy3rl",
+		"hMeQ_y%TifcA&aueP^<Nmk92op%uI3z6iBZ/OoblLCZVEEq@=%uqe?H4WKW0yG3w$tnbU1v>@U##4v!c",
+		"mUrH6=iJyqI_71Xr+k-oHrl5hcT7<j>E1+!oO9jigE^A_@oRxG@QjJwE@H+3zYTHVYxuL2dH~NzohpQV",
+		"aAi64h<8%Qkj&hIjNi8cl2F8~od=ejcWSbXa#QSQYhDH@qE$M/5cSta+S/wBnx?WAbcNWfr/kvURPB6o",
+		"<McRf@2SEAHG8wv_#nO~sSwBK+5^2%5wv>=cByK?7cKQw*c0uTup2-RstuS0$NRoEixG>$-FVhhWI$S/",
+		"$?og_ufdjaP?F0&5l3bnowMc+l/rs_?GsFJjRFs3GWs*4tt=@nl+?dRP@tYto$-h9Ndtr4W!DM@o/OVR",
+		"nsldjjHszZj2#ertXk0&D<ZdAqZb<U@095#1MNw>Wh0aR5kVIoa*A=n5t_Kx6@YyYv7/CRFN?c^vz=Qq",
+		"m++kc+8m?~no0uj5168_gquu4c0PJh%6ZHuz@9^tc62<PuBlfmpazvsc>94XX7JIHMF7P32/eeXN0xrS",
+		"9D9st!Nvt0yIps0gZ+bW0K7M6Ho/pJ4evIla09?vmV&hv5i#/%pYn=x=LZymq~Vu4rTm0rx6W6_hC/>u",
+		"02RMxebi5$jPuJHs6AD6P5w*&uUuK@zsue01ssR5btvgTnQT%b2yzUr@fA9KT8A!~tICi!+r?HJuS3+0",
+		"ad0oH3X1SmDNrGv9g0s09hG^3dQC3_o8FTz5yWn%E2r7-ICzsG0t/k$s8%py7Qwp/cZMlz1#XuIjEFGx",
+		"rA?!ph5<RWDUXL8AA-QbM5tg@7yWKSC3/VRX^!RilvDoy2zjpE7g2DMW%LrayV1XJk_Z7T5!lJQB^aNq",
+		"%8wAbxt9QO443@=qpp<l/HlqoGT/5kCfA96jS^#62>d*61s7p6t3kCQuR==bbwMzHdeQ@Kl$<PG+_HJl",
+		"p/n$668P2NoqR0aeYX=mKDr1t9pJxB3xnvJ1/v6_7VieB<nRel7Kf!D3AYhv9DdeC3Ijhl5p3avlbHME",
+		"p-Q$OoFl~N%jjhuo!QXmdggcG6Q2vpc8-P1j9xvgJScZrlGSSGQQsyH5K~Z+aOpXhTXAcjWEzsgy6FA/",
+		"r-12E?1J+Wgj^2$0I>Fih7d@Pny2NP=J%l~qSpa9MAFG0&tU7PGxko!3fBvibloEF8o^^mbYH=wgeYmQ",
+		"77CO/4x-_0+g439h55H8KyNNChWFq#cF-ruCsQIgd12<>1LHxhgs^~Y7sD#Gk62t?<n_PI5=~ve*yIVO",
+		"iyySmUTvsmhwbeddOOK2eO7ov2hrz?A2c?wl1HZYkMR/%efqxWy~b3AzgwOi?8gFWSNq&srfJx1fl?sH",
+		"W-F-Fh5E~#uBg!36bAa?e21^+XZ=gbmYbj3=VaLv^gZTW20>fIdA-TtAOY+VlDq%cT<?pzPXr24/a7O+",
+		"jjy6=xaOs!r@=B@qnL>Ur-rYC^udK2L%YXf8U06KaBpkgjlfiDgqpHzfO5~3~?7nZ4~DNw8gr@Sv1_n6",
+		"69M<8bpjLhrR5/t~JkYU5z6OvtF1g^l/Ec?krpA*6~k1CmXSf7U?8CJ5@oYYB~gfxa!H6DxbHE&9fI$i",
+		"3nvB<m=4xHrrVM++plPK*jVnMp~Hgk1+zvmeRPFH$9smgJ?->j<?QkIg=pfTrOV^eMg6JP~?xF06DtDn",
+		"ePTktg++$Fa?#>hiDy*i2@&%M0/#xxc$v$D3^i%YSO4YJf#2YVcMU4v9^70I8LzfhX*-kZH?WHc=U_yu",
+		"S7?$Jb_1@&BO&iH#<v1x0#S5Ul037V$YxFA9WX16EAPc4F~9>3^&TcxU#x1OiZJKle$k$O%zWT2wq_Lw",
+		"iqQ+sg0uRPn*q+8Sca@wX7v7ts%2&+i$$6H23t?CPbWGyy1qo2@e/^2Y$v^17BP-hv50bj@YNCO4L3TM",
+		"VtIOlR*u5b*opQnvs4ssnzhIn3_uzQk!E0=P2t8up$P-E@f?WXV%<NW+c!6%ssDYuZ^l*7?CyuU%Z5^H",
+		"GZuLYzGsRv%9tzIK@xl#Ux!8mX~~d$#Xf=w2MB62JW9R4CM?04r^BSoc*#C-xiUt%rj~~DFu***RTjr5",
+		"fDF$~@ZzTn4zrIWyB&7&LgAlMdj^oeqlm2~jm$97l_@4XcIJgJj1EJGt#a?U1S%-Fgcj<JjQ*o+ti<&*",
+		"k?E3O<HRetb=Sl64a?7nsQlK#Gin0nR27or7fjKNNohr~i_uMDlsEw9%IV$I#saPig$jZWqx<bntNwkr",
+		"&-PLQ5<>dgpFt~UVd$vOPEkGjlcggS>31b$rnO^hcVS+yn_Q>7h0kvriPyjL<f5EQKOMZDm@~%tJMhwi",
+		"fWWA-%9ksU>^^p#LR=sD5<=6zggc/Rv*Rbk2Cdy*hFZ~Dm>txPlg$jI?+_=MoL9>?qVUjlvcTkfAg/%Z",
+		"nc*d-&b2-8^O0qaczklETA+w+R/i%/2Sg~Lrx!Nih^+0wFBU<F8_E7X>Sg#5F0ahr<q$_SIk^XUGXhPr",
+		"29^QPSBw?0ZfxVFqx-LlEv^HewjHjp_XGN8~aMK^hkhhWq44!UpsgDRuxU/Ak>v_y5br~7tQ$@CGU4QI",
+		"WmF*Z~91FSd3Ku~kpV&~5Y0c6vfM>Qps/pttmGO2h$P-f^@~k+T8/Rn1LBKuh+#zAj2mkgShqNXC0!zw",
+		"_5x^pz@=G++Wv&~nEIofabc%Bq4%Uq#gG_O6Sb4b@lZHKhRmi6jUsz<<^DokEpdLWbmWMwP=S7V!t/Jh",
+		"_O4JfJyHQzkCKo/E6B7dus*+?L/o*/ew=6UkEx-43Tbp@EDyr8qJ*q/Z-<%PaPN8ue9wL4%+GXF3>x@O",
+		"a+8TT98p@r7A4m55XG-z4ayDFt^K+Lsaw9dqEnVyoR8^fCNpT+oEzqvmx!*h/I9B%kxq7P1<y9xI*#_8",
+		"Cgqf6r8=i$lCDKuEde&ESO9uOT_!tb~!wvhSs_+!1&Ub2HZRu9OEnDbjYIn5*JRG^n4Dn3lnfhaV8qxn",
+		"3^Q7GYGFFTW=uEt5XG-z4ayDFt^K+Lsi?#1qEnVyoR8@9CN=V<2VpPE+-rskgv7gJ_EH8CG>FeWc3Uv$",
+		"<g8w!pom8-bxX%1N^VGd0xXSFt^We2EDqQgq82~e78ND69aO9#Ndzh@5ChIq3#%EZt=k1~Z#7vmIn@Wi",
+		"GyJ>8r2GwdUzxw540glF9hpYf0Lduw_<=Sy6E%PWbV=@$HLH$f1oU_9iNP^Rm<mT3K!kpCrhOWa*ZuEG",
+		"wzRsTHMX3Se!BwjmP*kg7pgnS5KI-@FHuH186JNCoxk16E-OsOaO6+M%1I@INeN~PJW=HBevR&$#EYw7",
+		"1~~NREIYdlp1z+5PIeJp^eTGo0NpmK/&VFB@>qFTQdpIeHHnB^MR?DeLtM9Ue/JbPdf47ubCGSI9MHzB",
+		"!n??6OkW1NB7eakK#dsvg#7e4/jh0+Cde6lu=SjPfg7waa6yzmNm1=dH2rD+DsJ=9y%BTti1MAwb~nFK",
+		"uu7SPBUOvz8-E&*3TKF794ke>7f3!p0DpRc~feNWlQq7eGPLfXIVLS@JcK_Lgjd48u&x#dexK^AkEPe?",
+		"4B2iSkdEyhXbIV0Rxi1u04coLsho!nr?m<OjrS<ep4C@RSJ0GNh5BT+n-HCZlFJnsTO~!k4^<T#hw^Os",
+		"nMFkHVIp!UC$pnM_sk6C=uFmM9g*g~/+MNU@/FAp-oA4FiDgFe_7GH7nu^^JlTaQnTpy#W03wD%5fRgU",
+		"VidoebHw5nikqyiZrSFlZrhKS5fs?*jNp!#h+Hppn4AqtoObq25dIwqhf8Yy1IN_~%H!EP+Lcp&q3pgg",
+		"jbiScSvSq&q0/l6=MtCRr/%Jeoz5Y3nG!En_%+IYeQ0t/rCGwUu>noYu=!pre*F3oYINo^%VsLIdFCOq",
+		"rVWAbe2k^8mu8#6b^VeApo3lpt94VH1WTG%r@2Y-n6N=_0C<G40HpLU3AA%d1JzD/+g*+OlrD7=/~WNs",
+		"7/umkmp6Q=#wkKO+J7Ycf@cEW6E1Ml~WfKj^_xCc^?Wi_hH78Zxo~+dtnH?d6-AQy6*!bQiaE&DH8MY6",
+		"@&m%b64fE$asn-bhboAa7=nf9bq/Srt1F/ApPXlSE0+?H*Lj%ejLgXX4lpqR3>K&VuMU?wlbNQ~5ACH&",
+		"3&h2?edxtl%T~TLgZ~N@xMIdCx^@S@GnoV4#D+Phns/!z!MbtjgK?5zxoCVJj%<0dn7dPf=>e5YheKiw",
+		"TGF0<AS*eCCKK02wfzYE0hGuH<v0IS#e88Y_UIn-Tir+vB02x?FA+_Z1xYp#eXqRrN-j4j~S#~Zz>WX@",
+		"mM5mb9CGYksqY-!bCBY<hz&3aqDd&2qj84kS6~!lndxs&/a%21&+pUGqK88~?hn?0R/7m/I=+>L5gBNg",
+		"67etiK&blN1FT%Y7V-sV%mni^<pm@$8wF2_iEKz>Bh5^wcHs>IiX*luE597nK3pGXtbk1a!aT%bX4%@g",
+		"D!/K&?Xu^^dB^t1lwWFy5QBIO8L$o!t1nRd_w/Fs?u9W&tfkIR<f+T4!taF!xX=1k3P%%5YG1gVqFcmm",
+		"PxOy=?aUDGs9w5o9?&m/cR4<YHtx0zzGE2tx-BOek@KoCpE4fntm-1Kr%2OgpeKAho~IGEn>_vfpc=PL",
+		"Lb2jqB+T~oyURYShOg3jUHtEr*ILkLUpr31c9GfEaXd>2p*=mFtx5Yli$t~1hA6jao3>?0hC<tTljZWM",
+		"y?iZsV@DmrxOstC9s?8+fExf*ZLZ*nfXGd3XYotZRS7e8r*dVFnCebieB~XoPA@B0_/i@2rYHtdFY8De",
+		"R0hd4^0V%FGIPg~/~-$#qXyVg0t1<vk6~bhr3n*-d%o<-Q5uk>mPweHqQEZG5D><$d1#uly<$_aJAjpj",
+		"fInYWO<iUGq&Ra>mc<O/rAs3G/~g83_QXqUq7adublCn1#dfvTPXvB+c4fX31W??>&@Pxvm+2dGbEEhh",
+		"?3Q6>RQ-@PL8-bjsPcBk+l>%/bV4d?Jr^&f<B<uSA6~C~4K8R3x^@qa4_Glgqe&AJviye9+Q&piDZhlZ",
+		"6kJbo6EGMZhV$?Gjsce%YdziN8$rycf%F@5rINQU8XW$+=W+umJ#UxMeHRXE+X_Y~?sE*X8RM9JcF5uh",
+		"m6xrb/WQxyhFnO~0~2@OZm/7!&rxvVfDKfzlI>Gr~~JW*oAP11$Ihg#jhGEwV_vwi89eBrp!Vp+4R/qE",
+		"YuyeE3_e*X0Afh@d-RPR3g@EKF2ICIjk@F_@DYnf~vsav2Fx6meVG/Hs-B9R9ZQB~@Y3uD$/G50&S?YS",
+		"qt6DvbRdE~ou*0AzI$z9cgKDZ&BBY8$<V1<d!0paiVxSwc6Vv7hs#Tt<RDglAXF=?mUOnbC?b5@zAfNd",
+		"#KJ@MjYOZ$dqtq~W41=F2_j2/qn&uj4/1uSq594atHrDQjAWP-4tWUP/F&0V2%U5T2umtJ&cGw&dtLv$",
+		"awVp30>fNr9vEZ1n=t/&=oQSXfNW_-ksefMAv6*OvjfrA3f8U*y0MGy0H7i~C$&h6REuh/gMEgx48xZH",
+		"Oh&7A3pdh_pAvcqcj6Nqg?0JNQK443P@yyuXr&4+xdn4*LR1p!5oU/v~yx9qsWfGz~IJy5orguxF/=0v",
+		"Jws!24ZPm55e4Z-MRT*+MnmI1sX=?eH70RME5Q/y%8YXP%yO^D^b<5epq$3@Tr6PHiT/0xac~YohJTKp",
+		"kqP?epCrh$=Ph=wPm<=Gu=FPlFB+LxgV%KbT*~jGA5HOesL_1t^^-os~IjHjme8?ccHTzfaQ02~adrQ=",
+		"b$8Y&?j0*0e+04ktAvy1p25zqnix9iII!CDD<C_lm^!%AN/>CQIRedaB4FO8>u3vcMziwZ6aOY3N>Huc",
+		"@Sb>BmT4!ib^X0E2mc?Hh#K&5zIAFy+fqQRth?z*FISiXDK@a#m&G<fd1bA8mhY6$JkF6#5?~81ovOWW",
+		"WlsF7lAGu!s2cs=sgu@a9xm@FPX88nlu_*t110?%u$q1EzDW!pm5?5J+*7gfi=&xKb53IHCy<77PD_%Z",
+		"z*JJjqXHHGRkpLT~It67o<VPkImbYA%3udq0=Adqyfu^ouigC*6vVqSn24Pl2udO5Mv$Z7#r4yI6&>AB",
+		"u~EHOQyDkzjv~WqSLGNDv#&+0cy%vQv6KN@__+zSLld#O#w=5Ym+X/W@f&O0jj8FDgL!g&f/xq-3^4C>",
+		"bJWl#W?MqYjFaHN7wMQAUbkPy7u=Pq3*FDl_0LBV~~h4mu##*Og>f1>zABQA9ya*da%sDyjG42S/5Q&8",
+		"qaACA/9y^D=HWp^D1I6&sGvxg1m5dIHt^CIr5Py9PQ40zosYtkboQOC_hKfr#F37<6WWL$/Z^syq7>!~",
+		"59%2zrQ&o#+7#PjpMMbE3B?j$Rl?cPV1=lSWJ7J3@qrX$p1m><uQ3g-jd!jh2o2wR+%qR0KsRRQPm1KO",
+		"*Bn>sqY~5zi4oIEKmGSp5yA9^hs>q89&FnBJSBhEkYqRRrgYm6pyE9=hn^BOWeXRk6T_lnhsX1598BCr",
+		"8si<aZ01X8=~9Fg0+CFm0H<%W?H=@M5@NkDEulJorV-NQ=V^yD!>U0Ry2Ub8KclCKRE7~xup983Fgb*x",
+		"mLBC/4Lv8s5@r@9UC5w=Frh9<!rIzVYe=_BNni?OuGVX<D1-cHg+_a~s0KBmfDXKvBRbyMm5^EhC5lj5",
+		"o-L<j9I!U#@ye/M@=_6*#OqQczsfx8dsU*i8!x>^mvJ@3~B$Odp!HLv1BMn_zNVCAHCgi@7Bl#LhcF--",
+		"i7AefR~phHSI&A*DGX22a-HNFn&W<#@unwlG5BCBiKb*Ev9*#7gQ!>sDSJO&22PG>RyJ6Nqr/fzE*xk*",
+		"!98!hrI!E/ijCV6$NL$lkbf9^d$iH8bZ#+rOFdYrXDGY6E$3gd?5NK~232?1laB742T1q9a5g$6jOPYH",
+		"2RKMLBzQocl728<PrG-Hj87Kq3_inMfO*pDinK8Qm^i#mdfoQM0FJ6jGV5/04%-gC3VyKKwo<Z0iuyDt",
+		"$#GIz5rO&imfBUEbr>Nh1vAbvK!K=m6#^jf%-Zkraq_OU5Ia@CaSH^=b72M15Z%>Sa?>Gb3uK_ImsCWU",
+		"jwt~cym%r@xXRjG5eal/hLgVOyRCN*TNIW$x0Qk6/ZcqYs4>FWVWR2yok+B~oO7T1b/u$qk0~yM*X?DZ",
+		"8nt~7xfYV7B>K~0gny5U^XLHytwnXQvDGpG!vu-mk+3j0@P!~a3uumSfy2oXE#FrFwyNiYoO8Me~R>Ri",
+		"slRw@+qzETjVs#qTyDT8^hsjBs57jv0P0RKqv!P^^ayHA?CdEw=P1ut/=to!-6eHHDZW3oC46^VApy=f",
+		"yTndXB=0En7%k^VsB>Hs0vnqRv1d-2hfWwWUyUnn-eO*PZL$v=m9/>rEodXTOV4RmieW<KlPU@>>T6Ff",
+		"+M!PYrVp>Irzdu?^h/Kqt@E4AW=/4-/@5!z_%~ho-j1H-n40JA0GA~G/=to!-6eHHDZW3oC46^VApy=f",
+		"<ppum&bB^=*=vm&4qed4pUU<Ik!pHJAfI5Gk^C6SxHlQxHFP*z9Q*mVn4/GMVtzD1~nvf~$bFBnxdSNJ",
+		"x8c?GVc54Ha5fCRY1iHyR0g8uWTofN4_N-KjM0Kz~azhgFAu&c2?_lTaGR5rDJjlL!cs3vx#Bo@~NY0k",
+		"%XLt76F_A!A^H%Vib<Jhpmvuqfpumy2hpz?dWryK8C&C=eM-&Vs8SVaPkppB#Tp0d+cVbXauF4&v?9G6",
+		"r*kPU<42vzeEyTLsBWFeCmS&6dfRKEYyp%xmL0$m0V$1slJ=gF10%leE3u!s3jj5LhOvDWgKuCer*ju*",
+		"gLcW9Z&0WDe==!fd^dPmw&EF2jN&tFcf1pN6ge*hVVcEla~h/#brge3a03Z6<A8_PK7G<Fl+7d$_W!<W",
+		"r9%JL7ALxti>c&_ndZh+td3bOJ44^gabjW43ciF_gtk4*$g9r*ukx<?IzjyU-wjiqmpnDO8<A~Gp#kp$",
+		"7oK2*RGWA?P+&<h^f&7kuG1nF1&dg!n=%Gd2hsD*PE#IdXzvizfWjU7gn6wxg9sy5ofw31MDQ-Z$8KVk",
+		"hL*-J/-gxlaR/WQ5XFGVr+wuJehTr6kmsen%ro0dcPoBIfdMgtHL!7r5?ufgGHWPmh#NDpOKurP~?QP_",
+		"#rV=CQmbVKE6?-OpsMpzq0@Ui1jxe5y~V@gUeAQF1$?Pj26G!pyLcqoix1_SpS~j2e-2SevfzLZk!Ee2",
+		"XvXNswLcRe2/1*i#/c&?fCJo^8*CcqF%2&<*NzHRxfr<d!9xk/Q3+uQb=mEYjfcK8jH<!WF4%N34tnkp",
+		"2CJXTe!LQfk2<y/lQIM%rjs9O?p2aJET*+K8iFs=Vb=2t46xy~m^fV!mL#n*6Au-y-6%@>7do@ZrWbdf",
+		"oPy/M#vcl<9T~QZo^/s0b+FEhUPqo$8DhPo92~f!Shy~S*%3TzbmYv6AeqScN^=/ORHZ<-8%4*P6sNLI",
+		"t+KF~bqQ@CcoeU!<rTVTe!$^>g~RI!QR9Xacc&0-brXfit2ZF?31Uju4igdY&#=UWjZGaA%T8%Wa0FLC",
+		"r553ht@aZJTqjHEXJT*T3S/wQ2kr#SC_r~_#$c$$-rFUwfZDYY2Ml^^qtLe$+>d*wV$/9/=F%EJjEmzA",
+		"@<YJ?xEDa3k7ue7?f@zgf#6R5@KN7hT9DYefLnP2GNu9kb!rHPpNITbcPOW>mTRmSnZxGnk_6Ig/R<CO",
+		"18heKwWehd33oKX5Tv*2t!W?W$xaGXtd%D=/9>1OTr!ON+y%7Fk^&j5fIo-m-0Qs_4v0R%L9#lRov54J",
+		"T~jc&2s^k+6/tNTLq0Q71B-%yt^=%utBBP!cOGFPvhi8kKqbDO7t1uFV=*2~MzP6GGE-qiq4r-rmiWc<",
+		"mizmx7ga<kO0X<BK$3U<cwm%~&BPBt650gZ_^c1$4mh/=dbEN?^YEe#IBQMy0mX6I9Y&C%^RVZHAHBMw",
+		"8lnUWfK/3L4lsP0LfG2^UpKDTlv^C8hVL&-9-vQT<_Q=lrl6=&*!yBZaIHuwn1+j>L?l7Zzin1?_4L8S",
+		"oIxDR1nat%i+VG%?<=7Cs%yhQWQHG0XRyi#0g_$TeEv@THpYINn@3ZycwHVn~i+QqhWaN@s#&Y96Sfte",
+		"jtPEMRtL++sfRp+JzoDwo+6u55=LM4aMx!Oe1lxIoGvi0O2Z!nhwkyW#dM/HXEKj1T&5eu25Qfi22T03",
+		"o3aKUtHyg-Hfo=67%+oU7_ws6AH<#T/JeCUcdGTx>Kx@!sCyHF!GpQf1VGfLSvexnkGk/Op6d8P&ZQpn",
+		"scpt98V3UMLRcc<~f__tWazW5*^_~-9x/I_&6^rW~KJ#V8tpdGzgGi+DQho!9i&lJy?9cr7XK06X+oa*",
+		"qQX^I@yDsw%Wtr4a74G$HB8_I>wrbnb91p4N1sIF~q?Tw<RhSanxDhw2Jh1Z83bV9zrb0^!rY*_tUx86",
+		"1cE2vvchRwgZHGSQmppTg!CqJ31loj4V~w6f>tcD_7ypsDK/k7JAxu^jB1A98a#A43=Nnuov3kPnv6Su",
+		"v0XXs3Yk1Oe6%AH$MG>bjTg%ecDAsHbjWTo9<RlAwxQT@xv&866FE&d4=ZY04CVes0Ge^~0bCEVu<8YA",
+		"JnX6*q5pMym_OjgEP*9VmU?@Hw2!=WlnZe$c6#~Yt$lNj3S%R1l4?qcNC@uFdBI*^-w2%kr--!9H4e~?",
+		"-9%RLVx1n~p~0@o^ERR#Jd86GGL/uXu<UQ>%?uaY2G=*?~<L+3CTIDfKV-Jq/kWba8JCR>d83/6/dfOu",
+		"^1iFa80VJy3FJR/9Fi/Uf</09or8?d4y-q8F#u1&qpM+8oJBgsrx5la@oSsU1k&1f7fMtklDj+G5zC+0",
+		"bIzxHG*3o7gBG@CUW?<PgzWf&H!iQB7S7o9iu-nTi+=^VLvVIx&atoUYwNqQQy%poL9ILFSA+qt<$T?z",
+		"?$<tgh&@derD~=TflpaOJE#?~o5_pFL90H%+Jg+W%Oir@ruF<6d+=BClHD<27nh!X&Eudqc~-0~xE~jS",
+		"bPG/s9_wqiry=g<dl3?QrlbY6a^0~Zfw44gW#x8~w>O#_7MVOMcdgtkQQz%NjoK+o2bl<zrd=p<1B?a0",
+		"^YNY+E84Z<jQ3GZg2&E^jMW70ml%*zM*Uv6KQ=~3tK4xI>xNP3be2WMfUpF&ztmbRWyRMb1KCG?~#y>Z",
+		"v1V~XnhQKsxpU1lA~$%+mb%gA%AWQP4=vS12S7s#0XZG2#wL#d9Hne?MgsKp9a@eBL>TPOLmhQ#N?/hP",
+		"9Lv/PA?qh2aS6G837X1oiC?8bmWOGuv>Vepo!8!K87aV4^pBSpIoiPsiQ00Rm5G8?@MPo8cq@>%*WTW9",
+		"S1Yuob4T<c5aXs9TP8Y7SZB6<aLyrJIZe?kaaS4W5*pf%stL0h?2NzLvwD_f!lbG7tHNJT3K2@M8-#E<",
+		"MiiRuuJze/SleT/qC@y#fnW*M5j^-og^_<@A8j~0qp/6utgidJa!x8D5Km0a<l&&eo@>doc8$@4qggi^",
+		"0E^E6DG09bSZsE@/-5Z0-*GYs##xO1g^0F97b#Df%iS%$%iEd@RZ_ynP=hxQoEI+Aa-ME!d9@tO4@mCq",
+		"zlMIL7ZQ_JrNrHIL=o6z*1/iLjho5GzBB99kid_jUfdiX9QR*baX~ROSOe5/ve!<3A$btTaPIeBoa~/E",
+		"3rCr#3gUKnO5W4zAimdAyI#/y+ABCas$sE/Afb!lcG_-/inKN00<cnqr_ZxCCrJI50wo$3x8*15x>ySV",
+		"e/1L7VJL=^mRmz=%Tln!o+PMFEXj<1asxhB>^_E1oS=gIdp22gzllda2j1T#Wuu/*o0&z3hr!UsF_7B1",
+		"9p<>Zn>hXZT$RP0iLBG@cJDU2az4%~foPWjn>9U-=1#ILYydaB$2=2^zk1V0dRP&6>Ten6J_#MZ*tXa-",
+		"Guoy_+0#ojfD-8~dokT40E<<QA/G17b/&lpLY7JlWd~0gBTVlA5Gw64qllK&ufWz2LuWZcmZjApXqUi*",
+		"Y+p6owSZ7P7wqDVdY4EPyv+RrMpjk9lEn/JVinqlG%I$B~o/-84iXW11O$F@4*u?!l&NUTogGs25~p=E",
+		"$iZezYL4Lk3cPVywDm~K<AV-A^ezBuE%LB&4<~_4I/<NrCpEkOxRw6qMlTUoZr!KAQTLh><ajF-xD$5b",
+		"gjg6Xmczaz/s$qD#slL+mInJep2Z@fsOuIw9TfXglIY6!jRQcD0fTY5mh>^b#5>YE49I1hKiWgrc>CGk",
+		">nkM<2V0PV0>SjN0JU1qcRap/LcGSG!3-i=<oPzUeIA6u>o4>J%~e!8A+cf_y~KJnpm&G6mk-u1W/1kt",
+		"qs$<Obd3YGIGWFp5Vb<MyW3/EHYKNPo4C_xfQFdh3<BgJ0aI%bsD@V<fLQ#sloI+tf*GLgjI^GxuRK-a",
+		"M9H8~<EcYAG<is$9#R@OcK4Hr1$am8Ls!ddyS>8/?n2xFxN+sCILsxg1WJJ-3^e3V3a2&cQnne0ueLl*",
+		"xfBSf2wQCJ4CbUB4N=gdXUKlCP!KC8V!#M@cV~>x7zfkgT5w6zhvgiBIgp+U-3J~Vzeew&0EmqUlYny4",
+		"D=z6aHWp=MB$j-!j~fdg$i^0ZtcV6h9LZ>*D5rEq7CGm@K5-Yl5cFrNlFGiSBj5x#V7+aagG!UTmtYEs",
+		"%5~zm<2YMXddrqpgGZ&kVj+^twent%enUQWw=dSXYD2_BPFC*-1+!bZ3p<DoL!$4Kvp^_BbgFe-2rWLd",
+		"Z>kSHs$^O24g-cdyuap^nA_sR1R4K4otid&71Fe/%VTrKVdAW!kmGAE%A2k&rTZbJ/~m_Aoc-NzV<&Z@",
+		"ox1hS=SHF7-J2T~rq1>@3<3fR3XcX7Z~@=T2EoD36bWi~24oRAo=VVDKHzvbxLNOU>/q5!kk#DATuc!o",
+		"9>PB820TD69?2s*gLaKu/@6dP*$1%TbW$2U+yUr5seK$BtJo9t58X8Ci/!o4ftfwWUzfG3%%Lj8s+_u&",
+		"23FB7D7%??GM_GmkWsuAvki6IE+f?YU5N-8Gat?!pJIQ88Q_D=MD&=3AgUP/+_~3#e^ss9nd9_tn=h89",
+		"^z/kz=&IrZKq9vJp@<>hG<M&6!l$m%eG@#e$ds~9Ur<L=i@6+g9XBXN%@=&XY-NJy=h#X48N^0R%_f$4",
+		"RWRNW1/pF-+%@>w#sL%2DNspDujp%cv0hSL1&~pMYkcO/g6r~&r~+wy*-84b9/rUMdYs!Po6E6p27~ch",
+		"g!#inwn-I=cgihs=K~Q~p$%R9s&m5XEvVNk9kR8_kvHj2*rET_$44wg40&HIjqQa>2q#eA2Ze0po1iGT",
+		"3-HSXk9R2cv3Wzrm97^Z?Rc<cmDNZs6&/qIgTqMFcUXHlK!o*MMjqEzzypp*bMOtePQ%YGCmzhz7/SNU",
+		"fEj_Bak*$WV_#ejbrFGY@4pqsKHLokSHWSXzpXWnjWF8qn5LkU9&EM5M$JP!$FUQEdoAttbUzXP32=qe",
+		"2f7!9br~p4f2MfbYocXqeqiU9lh5WXccM~gWHS73BiSIHRI#VBnuZ+tKiDacmAgCFw8Ze&d7?2gmJIw>",
+		"kIUOnns%/W2efasiq?@iw~<k8~fnF%t2OXT@=Dy5vGk1*elGaGVub*HVdf#&lY>jx2=N+vwhZMilHnG>",
+		"Qg~mm0+VmleO+Bf#Gi#s1F7ixxf>TOkh7RJdF-n>T_Xb5rzZdgk!<K#n%&E9oelJDrdCCVk@WCxE5z8r",
+		"sr0O~YP^e/wPYe=vbCHlBmAcPDovNd~wuFl-qZ@+&DW9vfVP~0-VHN-U6-t+l0Q@9m&~cD/2665Nn!19",
+		"dz0Z$g1UMu%KCQBoUd$>9vP+Fr3?b7Co39bhb+U&A1HF=&r_Pdu~FxnR~BT?cQt=a7ye=ft#z6U<im*F",
+		"LF7N^DVOc$5WDeWwMtn#cx_?jiEO>bTv-g@jztns1Z4uRV3hdl2-uj9!P+*68HINUKPEAX>YX6<3SXJ!",
+		"?3ajAwWjkvlwDT%s$N?7IQ&pfc3<+I0Dsvqg/fEImyh$ngRw4fNDLR2U1on8^pLz3#fnX~tMJ1x5vCwV",
+		"fsfF-xA1WhkOz?06^vQ78<Mu+Sw^weW?V<#Uh!?0kL79rmFv5%jqa-&~TQbX~-fU^HpM>yeGn^q@~==V",
+		"dC6Jp+labKw!zZrq/b97>IFo6TA40^7VhjQ==epAkeQ%Zx>k889iA8&d6Cgl9+7XV3n+zW<UO8Sq+GCN",
+		"8?2mLlXSp5v?O9TTS%~W0fUFudWuf5W63DE>EPyroXDxFJ=SnrJVIHbqexJ/OhHsXvPX_>IWkg>cwKtR",
+		"zmiwEPmgUaLhx5N1LYyRtbV%W9WiKFCqW0bV?W=bdC^<52m2kW8aOrM63jQo8T8CECg1y&bpDW<xO92R",
+		"7DR?!3<AIbazq8RGEmBeW7tCWU1+6_nqiSWara4M~Vj2A><I1s_nuK_2N#RKibQWDH2TD*tXY&93AuMt",
+		"e#cWiXRXfQm0P8xFj_kall2G>$2/cSdmAz?NY$K?tO~LPvb8v-1=gHFkt&tJrjNQ!pNcVrmaMT&MAEgz",
+		"X>aP&5w6B*kxGNgv@WQzlTpknT8lxP3&kS/cGRiq42kwji@ELCQWcT8v_d0OnI=fT3k902ZJ$Sz~nc$?",
+		"EO?Wp%xAvhQg8JK4~MF3yN=%xS?iLg5wWSf0+pX7BRN#5fgc%p3lepThHqlS=-u~J=!S@?5I_L/?vn=J",
+		"XflIt?1ejJf<3@Bpp7UjQ9#ch5vdtVY5YMLzuRq1&8I9+QITFfO-wuCIg!ML713eN7wdw!oW!9<DO#qh",
+		"mnWBLeI#GsIUkAmg^MM?>aH<AfYnH15oz#l-bWulTErvu0!WNf3m@a_!gEKgl/aGwtcPNvWD5o1al+Ym",
+		"@xw~UeBO2t9yqQ$1Sw+$Iy><3M4<K061Z!$p8!t?l_VaK4=N9R-M^bmsp+LR4RC9%2U8MB=5<@FhNMvP",
+		"MN#Le@&lmr5NFf%xl?l&RcO~??afdcmzy&2A8y~%c66y9*RWEm=MgIhZYkdK&kOVQ5N9?EhwivS0wb$y",
+		"joHz~b!u_UVD14Piz>9PsS1N~%vL&/Kcw4V&JhT6f5wqrn*1RWx&yyM1CN=wkvScnwgVpVGGJKsbddn2",
+		"vW57AlBwS3E$#yqpT!RvB&7#KEA1Dd8u8HkAm_l96~NJH!G6$fdZLo0pXFEx!UaZ5Zrbv^82w2/HKXY3",
+		"aFy8F8?#Xh0lGhpmVKQ_yeST^C8PEQ6!IPepHQDi9v@Ba+3o<+Je+Il&s&lk1%T*LLs4ugz!1&bi2d_W",
+		"BnV7H3XyaGf0*7K+oAVcGuLcu7$lVYG!lDhRCh9tfULcSfid>OhivD!DP41c!R2u_oGP?5E-2@/2XvQl",
+		"tsB8_V##7%2xYZtWKKQUe9WE*7e2K-2kagXWvyiI9=9M<MBTZNnP0lp36ird2/R#Ab!+l-@s!3UIo>X5",
+		"6VnDK@F<5yePen71GkKcGU/1+0LYaIinw@SHGOEQPhcDHlyZxgFDBXL0<^N7ub3bAEWMgH@NQz*pTgG0",
+		"pN$>AG>1YoMKmu9f@afazwy?bNI_n=HTzKphuWvWoJ!>iC!UY8NzY3p&aJ&Vm/m>OSL@1viDm@wsJ?*Y",
+		"91b+y*#3/h7d5</88TyrT7eHq!#eQNod@Kc9Wr@/gtwVG88OXphIobeEYo*#A#qcfiZjL4dI&_yHok0c",
+		"mhb^F/QZ+-j*W/vr*tISkIq!h6&&*1Ldwcle9/iUG^7lAn=$5xsB$rlA6a$0Ul$3yuaJ$L#zE4$YzrWY",
+		"MBj$hm+Cytul1erboXrTk2g!Y20fu3y-k6w~-^m4xX!gCCEJQA4Y6B^fB8+oka=U0NoK!A3nEuvmtRjs",
+		"1dt+&WV7~Hf1F6pG=&hHs@dcg/31p_mSHQy8#5IOs0T<_UTSNSU#c5/756P$0&Il7tdMUo0SMl12z=CY",
+		"MBz>?C%DcOJe@2v4%jj2ks*%E4gYiFu2MW40dqE$7B3V?s^SkXKDrUEnaQT!Qn<kCZ5bWBSA4JlAq1tF",
+		"1mqWS8dS7VO060Mu0Uk5Gp%8_=*$wUoI#Bz6m+5LcBs267Cu*Bsjum5M2vvxQjc~g?fQ0=$%4pBpo@LI",
+		"c_b~7W2Dfx/1WP-o7@F3!-St>j&Mi>P0K1*xw7@8!w9UwdZlG2d9eLvt&=AZXi?VLHg$3=Oq2PzCOf&z",
+		"?=b2HK^pwQ+OnCO@/<KA2@q*AjI6CjPEf4rp%~SGmnF$=Ngo2Ef$pl*kAh=+p9uQjgjKV_cc5cd7sTEJ",
+		"y8Y7ap%xDLmZ!r9?7>f5KxQ1^jF?gI&sCDhy6%02cb8gIxlJ/W9E#37oE@5/m-JBjyo<&TZH2yA<Cp6L",
+		"6S4Ic@+V5PNfjigd6hL==r_liM$7L~8-TACVNlB7mtP~zj-MsvpT$CbES5tlodmVOyg3&#DKisPu?k86",
+		"tvcG%r%J=s93YK?_1O$htd*W5lqY$hEoO*=AC6mfOs8KfLbO<nuS=iH3oH3LLf6647t4uP-kjGjrurBv",
+		"%EmA0X-D7s?s4!Zh?1Na$-qyAh!8>Qh@v+uSUhV^aqEHQ*CmW#fX2#@8ZK=qily=ub9Upfl$q%Lm6w&M",
+		"?Y=cjfcjHvU*6QY0BLUrt%o-IWxA47Y@?Y=eU5HzSv>_BiFiIxJ?iscrUdEm-DJ?l?irH3GC4/&wQ6KZ",
+		"n1o8h8*y&=C%+P>=YO<1C-7p*gDMAA5_QKXmvf*QIObi98_Nv#16Pf-5toQcP9?@OoFP<^u*ZJOn@CT1",
+		"bmaYR7_6haGYEXEf>dxKnX6evj7k4Q6MAeUrYxFssZI^Q?7zBhDSVVCgdW2^j-#r_HFL7B2~=UKFu@cx",
+		"zTX$0g7VX#W@8<E#zV8CHw&EIIpj6Wd5$1dCIl&1IiC39a4jC09L*txFlYKwdt4_6iC3R92l9ASa2tXB",
+		"Qk24#hHoQ/Cyd!uI?w7HZT-<N1^qpLjv8tthA>Vlo^97%8GEkR<ko!8m?XQ4gF2difCrB<FnQu?u9ZYo",
+		"1sC33nMZqikw+v#UL4/Eh>ybAg^uKTU8XlQ2i^IL@RkZSYyk~iehe7Cr^2=-!jOA_&GV#i3YXg*3512p",
+		"mVlxHJ0l1C6J~sEzgAQh9WhOZU17?T/WO/wI4fRkWPqT&G>MqR#*2AGL41tVdF&8F#u^7@ow4dMg07cO",
+		"jqv6Mfl!UNPNVzA7u7Df*72n6ga4-B@R7mj4nB@h7=J3&1yz+d%A7*<Yb^c8acEtZ%WCz%~AgTvATIC2",
+		"3Q<AX-4+waoJc@ljCTkG22vI1YKZMaRm/4^$0<p365aC0hj+&Na<TfWV8n#~AqT72_&Yb^@#M&Ct=cv-",
+		"nny~H8!s>ZP2<rIdEA^gWVPM&&_xEObF=+vhD25uhg10_rXC*~</AK^PF>KZuS8CI3w2<0bBm@S73$A_",
+		"otkRr97&F$sdMsD$x78-eAIP%4XlF0aH@T!iJ9*/Lls&>2+<1sLV8afWWTOhdY=YZO4n15t5BL_vz<FI",
+		"zafXY-1AZf3vrl<uYe<@gBzCO#nVryd6a/h^1p4/H@+rsgocNTs=AT2?4%Ubi~A21aT$SIcJYZjhAf-c",
+		"bZL7DoVv/1l!0eJ2SCQ7t/PYe1ntgz&uL=valxW_%nRM05N0lx4qlpDu1U1ODH$2WdAYM33xCy54@@y#",
+		"IOL~OuTAYQZZd>fmlh9RwDr-Ke!N>zqzPpgt70>G5rZ17WIQz?=lVlSXiUo6BOEyD/2d$Q=9YqC4Ty0L",
+		"n5FrkrHQ+N3y5<e_=iB2lYF^/&cwmQdiHm?bWrV1xthItfAkS1xYsC~Q*=ENsc@D9^msZvT7+VRtEKqm",
+		"Li%^M3TY6^fMnm0w^3sb8DwrFp^Lr^i?tZZmY~acWhpd9K=qH0Iu5/$oEyC*blflS~4f-PXg5IxQ7fs?",
+		"eKPVIi~Ml7Ub=qnxYa5i6zb<z0EjXcuD%Q-jJNepd#&f=u+>586bqwzuVoKM-eY9zT*mqN/&QvhisWi$",
+		"yZM-bI+rSpc95?ff+W9#-g8s&7W^xHk>SuBUREklOiw1y%%=gCJ<2oH%V7+r>ldQU>+6N#=#5B!6dGOV",
+		"4ZT?<zW1Xw7sRn4/&k_BefHlrey1sT@fJr<&L*%NsIbbg_j*bDcvT28f^@sag%P2HsmV7N4di0p0i8^o",
+		"JDV^~1INSMqc64*V46+^v76pBS&E6by_JDQcZGDM=!Fb0Ed?#2F9i&yMscQq06g9yW-3*/b~mHuh%hjU",
+		"w*0bbQOPNFaoC9n?RYh~Gk-aXnY$/ysVosAtpNS<lPV~MjgI55_@?i^Vz!S>^LKu$8dCbp4>XS*i98PO",
+		"M+U*3f<FqF!sU^Q>=MzmCQx0+0_hjlNTgm@ogJ+7HG$Im1K=Tn&/X^Ig~*LwPaPWYKhsKq<kQ9d5ZfHn",
+		"&0B92+r%y?mh0/sat7JuTK4v_l*^7gv=6u=EofmBiir+994IH66B7KT#OAJgPHx<jz9T>VbQ$9S4vU#F",
+		"RN1glfPgPB=Pdr!%nJ5R5+=qrndsr&cIo!^_e<#-vf<c5%hr/0ZVOYr2GVxTryI8P73Ze0Vhu#~emj-L",
+		"q8u@#6tP6qLavabk5r+s0?Z/Y49!!t<EGwInJE2#58NFM8$heV420KoL64cn3=n!lL@/>vbYs6Ti-ZQp",
+		"a9W~M1yWB5Dt#C^wNuh3u>AFiZ$*%aqVp0-o#mwS9Ep%h76wxV_FyHG1$yKld92~+KiC8a6nLmh_u1jC",
+		"nGJaz0PAY*KEyNCj8t?X^8fT^j~ShCVLN^VUfrjYdIz$Q^I61Bn_&6Mv~Fv&2N<4?D^2al2ziI4N^e-6",
+		"Iysm&!ZELIm/K1SkscHysjpWjo22Myol4CAi>EY9ulCedfj^K&V+u008Y-+*2$jA~6j$B>eTvpck1SIh",
+		"BNWz&w57gFGq$71k@fLLa5c<Xp<NVPv@pKemO_7QNl%isYM/4*_M4^p_P/Z1Mx6Gj2r3J1c%A=hlQMcm",
+		"<aWN5qF<OsHOOvkT#7xGzomEXGQ324TLQm?>-K1*wQ_bNd*V+Mz~/hd#guQ!mxhtM+Eb0Exl_pkR*Pz0",
+		"$UzJE>tHOy*u9x^?A<?Z*MAgQk-lA?YdGTKD?6l$j%8$EMBAoGio?%9k+jRRoYVxGy2W=!2=CS0l9joW",
+		"t90DKb>>tiu@8x64JrA*3UtsyxX?Nxu9S7-FZ4$clnhARn*9sPGRBl=&Le^R*kGASg>SUpv&y/3m+az>",
+		"_R@Kt6vo4lZJXcHEnX~WtF&To^ODE*SrVUa<8jP7%d5@%F4Jw+p6Vuyl<@+B3A6+Jkr/_3D!-2zff@*2",
+		"2-Zdl*eWo#9Te+<$sgZetN<j~g2cSU3VM%rzDjSJk8&0C~F%VR7HQk051%k94lBWiyRQx*HQUR<G#5yi",
+		"%_Si0KmO?bmff@7Os-WP-jM59A?hPI8PjZV@xSDvpPkK7f7ptp9E>#$Ui^Uic0o/-!a2N5ra$48=N2WX",
+		"7J~q8KOap*I*XfFQ>!eV?aIvJ33c=Ug4a*UECpymvreNE0CjHL8X%iCX^gFHRF%DJ2&Phw7xVOA7-_ej",
+		"Hn/j$^v888Hv$#lc5z4YbY>bu<&!8%-Fi=b3?Nv2YCvFdoCb6c@E!38UCA06&bm?w*3&esz*N59Pi+!j",
+		"!YHH9Ae4fmzo%o_Sfp9#+4pl&/63ds3U<rMpnBiEaU&+wnn&GSL?$A^4?Bd-a%CvlfF#^e4y8izL%6L/",
+		"O1vubO7Ep@K>K--bCc<T7Rcj3rS3253EW@+jyy8G0CP>a78g2bVOD%c8xnj0f#6x?/NB$l<eQ2<y6b=6",
+		"ooPPlXN5-Ge@*RVb^ax?tNYd7Me/S5kic2Kuw$ILdr$A6r2pf_q=R/B+@kpHgJP41p0Azqqw<ePZ!mi9",
+		">UvHn8#JVK%2sE0I>MpmYdx&@Bnd3xi>bXjh?mW*G1P3wYH+swJc0b=zE=oIR*LQq6tzfiQtMmPQzc<o",
+		"U4*%9GIObjFjn6&<+?f~%L?L8jLHcLsi3rEnJl34J>g3eKIX6#~AC+G^/oT2g95xfdoyNPELLA*rKL<n",
+		"6$9fu1NhF%7sSX31U<C=eADU/#fla@*d3Q4R6o?T9dDRMkp&I38lPsM3VI6<Rq%DXcD@_%0fVP@iuLAv",
+		"5=AX/_h/mRUWw%R2aEQqoI*=rg4zOtoZR#TyLNy=HMXD7jTqi!/#EV6bq#emBT>Kb?2idS46+KC8I5+l",
+		"Z=z#M3IB%J1b=gK^jVwjio<eDP2+4N~tt$58reX+m#&N-duT0pNWuuu8&zyW5LMZok%ejT/A4dc%?q6Q",
+		"9_VkFEQ9oQjA#kRyR_UQ8L1vU=RzrViH12<pEUcGNk&L*f9HyHWUNseL=$b9ugM4hp>U7&aWm?y1J!?y",
+		"~y@-94?@LYka7*^8kdQyQG2xZu-FX1v3dn3ckI+TlC2Z<g759oDG+DrowwbqkqL-5JZjda0zltPh+H<a",
+		"gKr07i8/puo<6/imtw5#%^P1/SxV710PlJI<%vA+*@_r+oK<Hem&ggh#TyT1eTJa8lWN2+HwJYD5rw><",
+		"?GMy09sNar7b=VVlZOCpea01~1A%~R&~N$j72PgvrVqkWJZP/j1Kc%~!08!*QIGeGxbmj9q1r8ZGH<LG",
+		"=ZJOy8v_C#?Ed_ujT0727bK2ab29xf&ze<wRaU0=h/=9_j1QF&_<95Fbt$98qi4R@8X*P@F~df>oBJd$",
+		"v+D&wgHX0G_0w_Tl~1tBo1&&6Im2ESBkJ@=5Y*D~3heMro$hQBl8L85%/HK-44!BK5cMIgiyTfm-6~3u",
+		"r70p%ggx*@8uGJ$VbhFX8fFWMe@oEJWiFwC^U@VXB9sgldqLj_gN6eW=KQXw7X0/DSIVs#i#1PxcwDWr",
+		"rPpqmvb/AlCvD>&R_^mt$d9UVeqrxNbd3!yzF7E3h%Fgo&2wjRIOA$33FGYIPb%cJ1&i-E0s133kZ~Nv",
+		"TBub6_1liW2exMQOaYo6^u64$kM2J8cBi+N+VOg7tlY$/j^q41E?~oN5VIvTGj^kQceLzBSQdG5f#G<?",
+		"7mj/Ofil3wc<9=wy<67ErMGG6#svzjTx~cTZqO&&%0WE1sbW1Po+1R*dhhAzqxWw?ABCz^$7FPEb4EoX",
+		"~1hmPw$jHJ*jhil~FyoRQU2SR%pCA15!CK2MVM$0r*CjT@S?x<Q6-CJ89_44njOxJMCT$KnRPaVpz~gK",
+		"&qiu@=w^&&r6#->2O@!4Q+&SGp=rvhzq=e$No_Uvka&Te2o_<bh#HNXeWRvGqCvV+GftZ*o#!Q&^+cLe",
+		"s7?RUb^q$zLP!aF/9to436gRS+r47/mIKjIGCBHec3=ov#-xWqTXYaRe0S3=7Y1Fo3LUyFiFnEmtKpjy",
+		"+oC?3OF62KZ0l$sz5^nNMjR%0pEmW^iQ6SYg<QrfrE6U0D$#g*HD&A3i<SAHtHes>8@g9CSm6nDOVh^_",
+		"#AA-giqv&KLTz@&HuT*ZnmE@r1t!<LAZvv~^+!Udw$xO5l>J8eo<uKKs*Me!XmcaQ?VpmS-=2R$0i?hY",
+		"6v!nzaWKcJuagWFGFn9LNySpzA/T?qr~ZDl!S#AhxI<_F1ggytk&-%vInL^SMoQ38p+v<HW6F@MbpTm$",
+		"Vsn60YRK+g=o3LG*sKSAJ%1PDD2_tzcGYOZgn89#U8$iVQgMV!3+vGRnpb*<fSJmCetXre_m+1Fkko/r",
+		"2uccxzCiQ9z?CwebL6M>LENpNrt&_RnU2WRBrlR=$8%-Wj/tX94@iqz9S9%gI=bgo0z!sBux?bQ&UeIb",
+		"VKP~*BkJyK822>&qnhDvSsUX/5fxvSIlqWW1AKYUX3*3?klII?zas3ZnPpdZJUCSDuvB9OS@$-TcFk<a",
+		"cq3u%BdSCSMaPg0nGS&R?mF7-v2u9Uqxu+gSU?yHNXUrSoyG%hd2AkQ0t4rXoYk48uLHSj2IVOyx4$Kc",
+		"BuYGH270QJ9/L<Wm4b*<9r?qemDJzyi6ZKxqCQ2sPCAHNDEXx6wiy>%LdRu#S!+QLsdw>LAPThlnv!0g",
+		"nAy1GsWA8?QeOd#qWN=^BjZQ/&MffJVFs$Gj+VvpjIxHxqlWYLuArk#e?2FptkP&Oj<ti66m2SS9Ydi0",
+		"2+rKPmhHiolHamVzSWj/*0VXK^pGiMtH7XpNEaz^9%GbtdQ9Y*s#aks$0=$>2qeFVX@^~x8~yItSaGUW",
+		"rAe/fl<p8ZfoKJUQbCJ=u_1F^bjygfh9cY714l-?n*pIQLAfsEN#9uKzc>Vmw=f4XyM%CEx9T0<CHJ3G",
+		"8E~6rGPVq#cLlENbKYzSfVgkAXTV1CO/w@3X%8x5#7-75c4>#J&@31p2@JYS@LFfvWfiPltKX9V6klY7",
+		"a=K+TC&q<7*WoXscc+FkBhwd=vKAmrDaNXOffK1BrA^2rai&tqFgF/CAvBvIvE=ftnNx0zrzjmq3>OPB",
+		"266_w*h0adabqLfdhP<^Y%5-Z3/sv%Uv-&0LUr6S6mARLPTToFh$iC9qe74HW4uWiml9+Pns>Q#mWRs@",
+		"buNoiQYnK#@7DwEtvBKfzU5_pss2MAT1sAPNRvRe@-8H+doZuRogH09fa__ztL05&_gJ>f/nhUn44-B7",
+		"KX2x8dLwk/?6zI4VMBzpPu%hvVXj0Zo^VqFdOsly-3lb~8=FjJF&lL?sN*bgqX+WJ^*lu4%*pQ/RUyC6",
+		"fKup?Ns!HCqmEwbIACdUo58&p4LkUZdg2A#mf~FBdY$~j!o*E%kkfT*18vKyrh~7$m~&=VJO!Q4vjUE!",
+		"NDn8wpq/dDq3x~c>$Mp&jICT!&Ly/6@h>RChUJLeoP2GegF+7#tVmKFf@+rU13!ROoPlAZg9OvXjAK8Z",
+		"z%yD/gqLR@%R22fXAn0_rhyv=eQMtOpp>U_+51#Ii>3T52PGW%NmVEUNl?N&-I+wsm!5!4fyOFqlWo<W",
+		"bbq<e<z^^F7og9T^iJnuY/GldGgR2l4m&>+#w7P/fHovNm2Pv#eSM*aUZCqurTj*OWBtjJECYNSaCYo?",
+		"8nB2_9L?JW>hsTJ3+BxM5QaF>iJ79ayjEdPaSqDqvuonYafFjTMU*1OVYDEmbQ#T4IPYqB0SWk2Gq%uJ",
+		"fR=*$hq=d_#NvurzE<Vple>oD8gW-b20vLwdxeECJt<jMwI9kyVxhc_hD!%Ns0k+f6RmCPe+ICZ@!bdD",
+		"J/5Jsjb23TKx47AylU#giWrczQ09&?j94Cvlm>B#dm_vTkHWwnHX$WminuN^3YCsga?0ZFXf=Ss4MLx@",
+		"foGeHsoM8^g0aezjzmFdGS=s~AsB7VdY*zd3!pogE5Z0l&Cu%q2v1FDcN?Y%tj$k=i=xJfW!=n7kD=CT",
+		"-2*JK~nJ&C5@*&>2~o1uIFJAmp2dourl=MUonlDFL7NO2bt-%e5xmLOb5ECP9rk^pe-vT*SIDBn<Xk4l",
+		"D*/r3Y$7pgJ8V$9kk?!R+*~bFy>_XgFa~%Yr61RHtSoD_~O*_4!MkTVM^L-~B*Mr4Kd>db7Fiddq#oU-",
+		"@?5C48d8t95I/!i&#M!jtpk0gLGq?v9Ot?@dN/mb0uBAo/ehO<6~!IOiD@JLfFqHWuqtpD%DCcGvb^CN",
+		"s9wJZ0?7?=M~?rOn5&aLqA%>DMDG=9iyr!fwB=s3E^0!6Bqig^o6^z^pjfviu<Jyb-QMG#tkC?k!wktm",
+		"nufrM5bQq*<?&9kdJ9H/rj1~8C#yefX/H&oj&zT-=J!ySW&!?-omHvm3OVjx0lyO<ztuw7Vz!wy2oKcf",
+		"XEXqS2rMZ1e+<iryNMN?QK&Yx>v8tA=bsNYfuF^-VeXNR@pFl8127V=a^IIW&iWK^psG3~bpE_AJ#^D_",
+		"5L6V&=ZOPjJKJ2rcMI_IrQUF7$46P8A1SU07^llujW-APt+6hgmMNRs6udQ/f3/pA2V8=cJmUqZaQ4G%",
+		"gTM5EvNkX6ob&woSZd#J^zwL<4BB9@k~*^C<0#x-?tA_6L&Q=_d>XIAzdUSRuSM@h>@hxfcPFMkhGO2I",
+		"sR~p&99Lgb42^4^5Qol0F-iO6i6cpy3j=&*jQp9PB6uu07d6d*RkA5m#z7Sg!0t*uuKT_q9s1q8<guxx",
+		"Ja?O<h_^_HM%m+HcM4nnuVM+fp~Qbtw$sZkpikTfglGLkrwzaDt!ShS7PCexPojL@-c66hM!/ogu%~%^",
+		"8@lMPUYmib*S=+nnq@ouo$LKvLkKkpXszl#5Y6_XahVaIkmBh<Dz6J1/LvXLtny9uh3/nM9o2~Dh%ft4",
+		"1L-H5q0!S!5APfteZ#JW<dI<82eBp37kaHK*1860u1ta9jbFS<i#/YS#vwQX7nn$j-0oT-0XmtU9vaiP",
+		"R%Jw!y/9USI>U%GFMMFQ7Wir_Qw%QZ!1ROp94tG-sf#vM0#cpb4vIoZ@PQ2R5gl3gd_12NeaJ0Ynb0l1",
+		"sWZQftOz2#TYq9g1^ly!FXbrCiKSLnFF>S2rfmO4~+LM>sHsNzn~^rntypc!aF7h=nzUMMd5w#Q@WCfc",
+		"9/_69j8~pvq_LWPeL/>#5nh+^i~?PF2V9UWiUFb0PsV*gNWc^ejuQZ_MPo4!40vZlr@rR/?LkExhEe=&",
+		"E~vWhLSWJV8i!=~tGbO!gr*BIMPx0TsM^FX*p>VTNYGMKD1lA<6Cf>~2ni1ug-^K/JNxzWPo~2FNle$?",
+		"~iMw16U6+#1M*lyfaAF&0bpuP=qv9vihrMd00w4YGlcSR8BPRZsmDu@9s18xpD@3uj?T-cnw/sDqYvyK",
+		"eoq@3f+O34>M~D!4wW^R*r*hOuvUhG6Dv3KEqoGwEf7@d2zSfn2j692&_#B1PpI@SkIt&C8lyUkU-~kM",
+		"BF_5fpt9*PrRH5ZfMT3hZ3IgBuzl~T#I_lMilAB-bip@Ifl4PKXeQn3o5wgtQ~zNntR%DKrQ0E-qSemN",
+		"rJqi/=LtkYJO3w2GhHtX>agYmK48>H+A6x2-YyYph395#38E#a6yG-/6JmWQ!9PUeWw3DHpv250#6%YF",
+		"m%UoID9D17FmNkEyZ!CJcD9LrbMfddOzMR*pL*uG~>Nh47q4>!fKmaiP5&$7+-h?^kRoqQ=CCpq!WkVr",
+		"A4p@Gnp^%NL&M-@^PuveaYnkriQn=l37H0YEnV+kB!8%?8TaUjUp2nQ2m-aZWC?jLT*VOAle%gVmO=#x",
+		"QkxlRxSx&0L+ApskU/pL5dZqU/Rrd?6gncvsW?R@#$*xgDZU0sxxK@#+E93%D<pRa3*P5VF2JxrlWfGO",
+		"W/DvZr7d!LeuEdt!HjG4hNZVRFO>LDi6EWL@n98L6@aNGTFb-=CHp8Hh~sOh3X8S*lI0a20ym>yl%yA^",
+		"K/UdewIoAtHSa5JX>?vJn=#K@c=L8ve3u!xHt-n@sNp$cHXevSGEE8Q^CFV*nFO^tp5d+%byz5SiTPx#",
+		"C*Y_k-d9SK6_t0!24vzG?hZ14J5@gOR~8PF^WA6amO_fD5_YzQi>QL+GJ$Dnv%ny/j49ke<Rl_*aEKx+",
+		"6X%LQL+5NKddwv&x9IUYusWTiu+ej0kSTVE_j%U@lLZ4gQaL$IV?KDbePFuG6KyY1nM=rEn^e!Qq?yBA",
+		"SM9WC++Lz$_U6bd?wxERsPfdAqka%Zh4Iu5e</^I/Dax=t~$+a-oeq~ihx5YE/#%G/-9UDk8XkG$eQ?R",
+		"S6@fhnOv@Cc=X$XZOo~cuN*Uz9$GHdG4/j/qF8W>3d=6Ksxr<Vjc0mLNr#SAvQb68f#P!WU-JmbkSh@D",
+		"TcJan2_XJ_lnIiXQNn?i>c>iwI+5h-4knn/E7cp>0e6u<Dz~X!*5!/OE7V>=6*~>yuJqppGue5!czsEv",
+		"GcxcIp9wHP-tDM%9@N<tTddp~PZyN<CyF0oq#IZ+z<AQkWdX?v7EeIN%-4<q1E50i>z9pq<4fe+Du4mx",
+		"vVsXck~@A~lC_mcEp<dp!ekm&rusv</o5<RaRTN$@3@PfW>lhq4&wp2j4tzqMrE-kHVYhN#NCIy6nbK$",
+		"bB2055g7kj6S6Hds~WV/gC!*ITH*nbj!q<>p?-SKiq$YWdd^Maw5HK*h3pzgyL<4%72aQgw#br*fP53x",
+		"MoHb7%o_B?s_pvqEg<E&FqKbh$EAb+lKDQkDFH*z<>QdZhknXgcpTiq19Vzo/?pFxRL8l#n0rMkrX9**",
+		"HDx%5pPz<#_Sx@y&d_^Mmy-WsYQ8-4YAB&Cu67AWIs5oPa!/gMcb5$HbE>hd!sIS*%+uNhp0KiI_~w*r",
+		"&a~sn>5o<3EnkMu-j!1a0lD+cBSV!$fxabjJ#5i19-axn1bT^6l4vQCk=-WAKh/+G1IIT2fd_wAWPJ$_",
+		"jUqG=*7mu%UBf+1vbqUeV2v3x@r<9-B<sLue0hC6/3YkZ^9+Vj8UMXdjX!h>4KQ58$qMEo5cixMp$!g4",
+		"VeXwkdC~9x~3URnbMzJmn?q43hWtz*1VYn_>u92BMu<$A&#A_c*Lm&WQCi$LeYCWRn~R@ph>qooqOA=e",
+		"SS7/CiOS<MfEeXV*l9J_oa4?ireWo4Q!m+_2<tzKe%-hLx*QQji9jIw3_i#ej%ss#t6K_nv<yk-jdg1w",
+		"!CTQdoPdN~LgUzd*~67NWlE5hXEcsen8E/q/_KPZ104JP9Z$o3J1JbDd&4I-duG4iN%Py85F<K%wlH9G",
+		"uk3Ov8BE+=z=~z4xa@ZY5KLfP#7>->ry4d=9uq8590Y_?W%lIe<vwIOk3@&Xw$fUV5666K9d<N2d%ew0",
+		"%mUD#4y6Uh/&EwAo/D8Ags+UGZmC-G2fitmmGWz5kXESG0o$fYrJp!Xx!sZvj_Yi6o?SNZd*Wn~o$sh*",
+		"NQQYx?d*1S?QzA<!FScQto$NixmTWl-E3Q4j#/qxo#gWhRHn8K~CCYgu?Xren%+jbLHZOs>z5zDHy*_C",
+		"aU3Jtdimr7YRkBF3=%Sc8-nIj68S/Qo7v8wf^b2xNIYKaeT0AKbF>#QciBK5BBp9il=tyja=R6#e/58t",
+		"D~~rg2#WWO?G01RKs#LfB=FgMy#/X~M6KgU^OXT=I0FV0cCtr+gxJxwxc2rKc<ROSUl1o7o^&%m7*JN?",
+		"mx305U92B>p&N+NpMb%k76-MHyw3i1VF<kmAZpXMFkYJebuD*R1I&0+y%=u6guKSG0i%%I@ZAcG?xCPG",
+		"hjqN/$0Wz%JnL%cHQ5eg*Iev=mUoA0q_jtllDrDM=!Yhh?UtJ^gfU6kpL/e8wAL?S2S?$vu37ZrTJMn6",
+		"-W^5nM5+P2k?SYrCudL@37nhAhSDIFhI65*s3p-HR*QmLxeOkYTtVkvv#nl/a-=4Sg<nWDkNfa>N^&2d",
+		"Cy#AfdFWySr>/GtS_j/rd_F2V5ofOr@p%kXtY~2XLJvrMOOQhzcVLu-<2zzm^eZgN9teKIkQe6ia2OdQ",
+		"<8SDu_Y^>>o!z!Dg-c>Nb>!HU=^R%C0!@MY5wvdAfHeijLWQ*_FB&Fc7i1t2e?EMrt=#YA4c~62x/hSo",
+		"ez+Ej^%9Xp$K-iBsja2^3_f+PC$f7*gZO<3nm=y3p<^f_TOHXPqI=wPd-BxG5eM<NgE97<#2082CMT%7",
+		"MtqQ4tK1#Atf+I>T*=n0^H>>n>j/$13DeP*j7ECYKcMznwEu9^g&DR+1X&tL6aOWr4M>_?!l_2_pj1uj",
+		"i~N5aCchfjj9obOZIxr~p6EtY?yV*IporvuV0a+0<MXMymFz$YiXRg?1GB?RlP9RMP>tMvV!MwlX8JGl",
+		"32rQ4!$J*KqT$A/3+=QCyy7TIj3qrc9J?-&p%KJE>fHY98id1/gw2O/sMkU6ZL$RS/&%QM5yOh=u&ZdR",
+		"deU+_w+do/E%gd=kuv6qo0?Vd$fG04uZR$DZ$GqM*>i=DY=+&4C/ZZevk/Ww2!N#21bAN*cmtQlR0tEE",
+		"s8rOgVz>n+l1HSTm1Z_DzeDp+2idx0+KHjJm_4fEo4n6*fqsHA!VRh6UGlvoeIs=BjUDk3#-A4fc_m1^",
+		"!h1~mk-!4p3V@Q2DwDSf3^ydCnX4D95&Ay*r@zTbpIaT$mvdZMepTE3rF/xfmDCdo2m%mQrn3^6ppH&H",
+		"bZupC0CVl1%2qx0ov4wyVdS6=LaZ/LO9GIGz>a%Zg8vaoPbr68IxeRAHQClQa%GmudZ+dG-M^+V8-pVu",
+		"<!OPR*3d%+kAKF2tS-s~5+KkvEAW0MeA!Z?-zBQ=2$q#QsSXQ708=g4=2*SS=Jo@-dYBn7X59WKrVL0+",
+		"FPv<KS+>wWACV-~^M5D=^8yHctV*!-lz-WgF&Yo/sZt5gBVs0=mmcsLhCO!?rAetWfUY%zP0DjP6-%OK",
+		"TDLhL07d+odgO$>FlODm5BJySu2Y~$Tl7HCOIDL73a/Zdr!-OwC9Eb@1!M4ol#o<_ZeBE0g6L&3ouC7l",
+		"Oo2waS#lA7sfXfo~x*M=NTlHBm~5=6WTGfh0dfDl8-uR*a%~$hEu1%T<T2~u@Ut=YY05hX_l1hFVvT-B",
+		"j/+c%whSl^Mde-Ci74T~iic-Bop4h99M^9H*gu&rj#a=UwdJrK4Dx8J0-Wp!fL@Y!pupxjt6-<fit7p4",
+		"3>1@OdG!P6OU+@S<cm@L@B!n5sqwH~Ke^Q243>@3nfOlvkZv$~ueApS9CPqB&gRgP1sala9W8~W7E<@/",
+		"Ng1NA5m<L3tYD4+8NIx0fvQ~Bgp7T_@EyopmXJ=/nE$%0xuY1c8Xk=HhKQE^QBaGxMK%Ez&2hYkeNiBr",
+		"B+BcQd@QxYqCr7lsPq3N@T#6=b0bMs3+e2f*A3_dQ758Gl^&D6l3aTS5cc>F952s2bje%@nKO>!JyjbW",
+		"qjq@@?luw*XQ5#OE>M9-lYLDk3Ej!0ocaA+gL#PO7ta!g317An&G!NBb%xV3IXTya<#gW?g^/7mJ/eXc",
+		"lnY@WnC^-6PNa7cmbZ5DH@<~v7<$/D3TIMArZiwk2E_k2>>&9f@ssor_Oo7>x5KCqsLsKic1Q9=<lEp0",
+		"ZW%Fk=yUQ4rW#VcfXwQN~8PVa4m@-N=un$MWjtkJfw$UQZSC!aollJ9k=A24JN^xAA+Yb<@!xlcj=wpT",
+		"v-NqX5FLI$BaOVm$9Pov8X^/mDEQVf#zoPrJlpr+qEMyB2rn=Gn@X=txWfQ6+ho<=G!5DX6K@I^CE9Jx",
+		"s=n5I7zda_Rg0n5krB2JrlmrU?MZjE~330Fg?=kf_nPE7lL_<Cgr=9W9r<dYgxJNigeQBV$Mv~^pSh?~",
+		"yDojSb9>0<nBR@FjEu7<p+DZ?EAwm!2WaEiqrz>vUcwN_L7ScGh+1MGX5eb&GDqNE7PIvH2N%gVaW6HO",
+		"ToE?0gDBA+vc^%3w=YwAG2axFTUep@v=FhoaV$lcsn~Piqs$k*p==Z3CfW<Ua7S3!vdZ>TwE3V^Bz%<B",
+		"41e3TtCoruaO=Zkf%<I!1#~-N5Eaxn=eN9Aj=-xOGy_@KscMcY2I?CE-ZH58u~yOh!<NEJgC7wE0_4$_",
+		"b2%a/JVY?T^Pm9LQ4CT7gPC*%gcFo?-MwTOgLQw+6qTc<y%zUbq&TX&y-Yja*yCl*n@!z0+$ug++U0bE",
+		"S?RJR-Um=AyELAHk&Ii!AHFalIA-5s3V@cEK0NXm8OscUOna18^hCbID7HWxB4Ir0>*PHE$W8sP6BrHb",
+		"XyEt%LLJAdne3mcm10qyfAm/-_+L<$gylm17+ME3PyQEg#tt/Xk^yNBv_kxVRV~/Y2z^^oSp?8hfq#iv",
+		"tlOVq~fTbNmq7pxtkQe~8dq#*tAOY06$R8Lgu-MnkFFeOmw_g%i1Rjcxh0%VJnFsX3*lu&b=MxlE^JH@",
+		"3&u5oW~x<4^GNtko#YuU#X+3L&WN^Ygb5qgY0n*=4pX@uj<Y!ms2<HaqH?ZW0+8bBTqNN0ljO16xoH>I",
+		"!ppuG3mY3z?ngZwbERU^=>$_4A9W<UBf0nqLmnzfP_shD+m?=Af7h7!92S/=Tg1gmA&k9Nso*S_AhFtZ",
+		"iS_orVhVLg7g$57>&4~zUCrA7sR^Y*PIW?e9rBp4!ee%c%>TYS2QIQ4mpmS<PY>en%B?Oy>ojKH=r-IS",
+		"WnB1Xjy6myOnh-A4S&~mmHUN#kYItHs!X5Hcichu+u3OOduCi-wp7xHrDt/<dNMHsA_N7lsa487jh7Ic",
+		"7JO=*G#p?w18$HDe==nK-48t~NEFbl0s&_XcBcULa~UOn%7P^5j<mo8e&0J>hS@cO62h-mhrP$NV*dYp",
+		"WgEl#cb2bQk8nT&WZ~F^6ue6&#QYIypl34bUo9*SSsh0~bmSTocAh@F4<2HQ1kC^lWe=PwdqcWxLcM6g",
+		"mbH8LG^q~tct0Wo1XmP?F6ozAoGj@2XyY%<9f93Ggwm~O0KamIb!WOLc5&^cjADw_$D-xsIf3cQiB2dI",
+		"s-4g4e7SlKtJi~fJPHJB&&?D10U@&?hc7%Boklg9y%bVPZG2fn_XMb0cLPf=BgIm04iQ_v_tANZnqpP@",
+		"*3jzve4Wxf^GR6Zh!$hm9&NJhg~?_brL-j8SS+^38iFe>Yy6pghp7K3W*AVI$IvD3fs/G3hD4!x+j!@$",
+		"S8_R0c13T2pncO>L%s4Tb%xX7Zpehk7aIy2uIs1^sJGvEr@EQ_0YNFu+>MKg?Vaw4WS+lnoxMXHIwbKR",
+		"-r/x^p2v*nq>SNc5&KA=*%ab?o<j_-x_<^1NdUEY<<pn9V*o/@1TZAh-O-@Tkr9AukneXvsqlySycfIy",
+		"5OMv?7tFM132vkX00m#Y_2Gii-2S98#riWbQ~QpWYq<53csRzKi0JQqmGN<J/nORPkFc2FsCCU>t!Tf1",
+		"2nbvnb1pI+aZ*IoAIiY0k@/BW5<vzPRMOF*gaQx&a90<P8<P!moacS>OnKN&#W?c!*s#M-%I&nBpD+Hu",
+		"Y*=zSaW@uCo-?*NCM3@W81YwB21FEqyYZMa=IQ>^jIf1S!f!g8XKKFtwKBFUG4Z#M?viulQA0f@ZDFgF",
+		"1q6&bKFP6$MlXbD/k5*K8UgW7r6/psOwB@nNEMn8uWrYXnK6@_hw0w#MlizUzPH!rqd0865P>MFgRhL#",
+		"MnmTq6SRwZFBUTMahlrQv*2>fR9kH_bXZlVp<-Qqkru3c>zX0#7sAGyqG=_YP5Pg^jkaYEHzfQY#EYhq",
+		"8eetpf@OlOpJcU>w&lAgN=li1o3x_AvXM2aeQsC1sESgE@nlK@$0c@OdYrlgTv5DF?%^q9mR0RpR6<6k",
+		"s>/LW6LLj3r#D5g-X-eVwXDwIfz6Eu2uQgC2/ph-0nyek?@/i5ver&chH*?ND@T6BiIQv-w9gPY8xgBe",
+		"e>HMOa/sL#C*b_-6m@Ys?*Vf@wA!ZTfGV!ql?6?WFOZqfZSf#rCl6mUfGd!rc!y0y0yzKIONH93?%=a4",
+		"9d/SjkT4uPanXdmsU4aAoEbqU<>u#+zfF0Xh_l3X70*w~MQ@PQsPb9v5HtUN?0=+3fz@_t7dL@@lIxwz",
+		"Q3@Y_m#$ZW<XoqBmI@5oBf~@QtF_jUf7Yr07tZk-#V8I>sbi9VltSQ8?*cnfTGZsBGtsWkKfTq!rz7qO",
+		"Mv$M8$F8^w2=Mk@ht_2P<ZY_A=17?y>p~/@o2q=8L4s+=N3Ykui_k^-tA=ooJ/rOq0_Xcc3Qoqc2x=xr",
+		"VpVUOnf@jkbg74kMF@1E7&WgBMze68otA-2~?6Y&&pFF1awKr5b5Du9A/f-B4Fo3mpBuThgcf3LQNN3g",
+		"e=vup1MvDo$kKG8=oG*W<5oy&*I1kG3vZg>91?dXj7pP0ePst2&tvOHpsjEFs5vS+!#dEe0p?TC&=^JG",
+		"B&o=_UX~SW_%PPZJoW0!>0IItsXj&KgPMM!g?hpCRSj$hPmVWG_qH!lle_&xNKe<Lq&p>1yHwBzpQl+8",
+		"@~1112v@&~#HxKKpfUIQBaeG8u8AVpI<sZNFz%6X<Pyeo7~4h4XPELUbwVU-m#eGM2+x$Np6AWhr@*-Q",
+		"eH8Vpm&l7$%EfXHE@Zul1e1tJ&rgj/Vfjk^G4<j_WZ~#F2eADQNP7Mh$1CelB6Eg7QVB>96N1J&$8Q01",
+		"AF%ZU6BeJ@dZJlw6mUaFjmXs9%?D=xT0Z1#ax>Cduc7>YSN~84oC#B+3fngt3*L!rg5Hqf18ets&8nwk",
+		"S*~6B1@@ApKOMwpz%<w&g8Itt?TUx=ed<F8zVvQ!sU=H6q3lf~uy&4LlFdLFcrbFMQ<iaB6o^5@OITy<",
+		"MPtdx%Qw=zTrs*GaPZoip-9^CMr*Yy/K8hY&&4hGNM!D^so=l4lTU-0/S=Sw7igNidgCiI#@N9bjj~Mb",
+		"<S@0vpf!E=9iITtjH-z2s1>l118XUVh6fW@/RhNjd&ZSi_N5nuu$F#TbJcU-z@sA0mMf@1CYunJI2k6U",
+		"AEBj-s~f>qBOn%i#yE<xpxB_b#KVcvs<TEetd5X?o+b^_YTM7D86MGxfGD2N+!s_4<@bVxRuoX^d&MP4",
+		"IBd^>mCiak?U@bqkWnawo5MZE8zE*V2wA4~Th#rVpGC!o+m2RwlLOU>mZFU-?edxjmDY=gbrHB&yQv*t",
+		"b!KTCc2UQ$g-MCKSBNZT6kVPgAC6QEvjsUVl<U1IviG-BpUAB>5OQVEPQfJA1dGnXoKlgG0K+5k8rMG=",
+		"Q>@_*<*UM0HgLI2S&kgYd~f0XI+^h#9y=*#4/%4-sys<u@W#FF8yXl8?F*a=dWo@etJFYpsr_bnGRM?d",
+		"qD0#$@=NV!&yj4y<>&P0Y?*$twIap<PJ>&6zvmnkTy0c*2pEvMmm=Da~Yd<Teei2YfCY!Tnu^Tvk2O%=",
+		"ws5BMi*N%bd-ocy2HPx#^WMc77__Q=d2xN*n6wy8HeD3Yg&svZdh7CM70LyIs6qZ@=P%mmL&NW?O1dMc",
+		"^4!@&RM/bsLj2L4k9u$V>KMEoxo#DB1SU_SHK*?7Zu*^*bx%4krpp!MQr/S2r6ntw58yq<RS78E?*9z@",
+		"RJ@~^nh01zV$mM-oa4x90yAjI/wD-7qCAOI04TgAYs4KNHU&p/og<1wwf@b2yEHSgG/XAM5sRnPd0l&Y",
+		"4pc&6!&kCiAilzFpKZ$aht@fnHc7uWnXueO5lxj86Af08p5x#T$OmSfh1d!80mnC_rOX?/=vwT#+2uj3",
+		"=^M93LNi8y8qeZrvgg1/48PXYJpA-xY$vwC8u3k%@<mhEi4n0~ciI#e!KBwwpY^6D#3q!gCQUUl#!AXO",
+		"fGqNjQ!cqfmoQd5HBpm9d+!_i3#@q<UZC/TU-ZU9c$WOSKd<>18TT^6i=sC1E9%&4t>NSoK75KIng<OG",
+		"wHgbu>ttzPPkUVEEueFHjGuHSm=fkt8RlMnrI-9Ny2Rm*4DsaK%KC7jgBT_NjXT7%vcyqJQ2WzPj@UqC",
+		"o<-&ocfgRhu#Jo0fkwgM/DUfTtKXDl!^qj/nHezkkMURFSs-skaRqul56$%4f@NI~iw$AzCha&Sq9vkk",
+		"HiJ/q3If?C@ZmePllONChWeS9ouhf~_A62uhb*M>Mf8KyX6XXL9Sjfh/aEIY@8~UbF!ldYuR=Tx~KDWY",
+		"QTSU7uC$<zObQneKDN0~1l5wF-43yaV/!6kure~RT7jg%-gafqzzC1-pTq%PJA^wZ!Jj2wo!s6Hsoo#&",
+		"BCMk@j3S*^ntY2xh=9-ElCFzyKhSCL5Yb01~BC-U=F&ienu?@b-&RTA2!M?QYXd5dvUbUPcAG~8~@<F~",
+		"<&pPB~wQlshtfEPr7@>*q2uqUJ48H1ny$e@<Q&gnqNY$t7VSp-_VrmxA8LEcfPNY+F?#cKeApgkB*MC%",
+		"!baLauJ>8vpq+5@GEIqR7#J<J9dqGL%e<N~$P!R@j@-FW>Rt4l0Tu9EWI9yE3=5QYbDSTCt9i&-atfiB",
+		"1KDGM-!>k/uTPiS%tboH6%8=66Wgd8vRFgGgxQhgFI>qz!MqjnYxpZ=cS4Z==1g+p0I=yIHvSqnmX6!r",
+		"^9^WqM76ARl7Vy&bBEnE7M&bki1xFc0dk<a1l>J&uZ$Le?fkr?n0vosn?!?vATG?c2r>cx+#YBim9u20",
+		"jS9q&grT9Xa>JHv3W?vl/G~Nro9Nw5t=W16>/USsbLYekbG<v>lZy#vpqEZb*>!w!co54h2i>f5o$1Il",
+		"@=z?3qUEfvM$BEa!xK&*r9Z>$X+J$R6hshMJQVyIalHSHTvU#$>#+2X_DOO@<-!NgO6u#>3Qe=Qe434=",
+		"g5yKnMz$FuuFtIj!~d82&R+31mR#cgv3xX%rHg+/8+A0it&~R@pjxGMqeD#_gCdd*?sFMokLjPG69E$t",
+		"4E=FDmXOjR4QQh1F5kCSYJo!Cp9X*7EUM1O8L#wzmnKvz9ZxMf8Y/*ohylM4ry+AY1p=ogfx5q87=+~B",
+		"0=mgQJB94Y_w9yBraanb7FBUYdAGpPeZchfz~-v>gq2/gCd+LyfL?673M?Ehu7hN82UR8ZN_=6aav+9S",
+		"dR4BL4v%9HO70ed&_*D/idpr^h_l5T_vZX/i8U=9mB!xZlsO%VoGe?/oXG34t-=YoiTF-J9zt9y1cxQ#",
+		"aDq162l#gatd2&hfU9nP@-4iGt&hntCCGXaIld+$p3%kpz8AB0B9IfufrToVo>t<IbDi2Eg1odinBG=B",
+		"sRn%W-x>+RC$csJvpl@kpis7ni&k4HsXGwZc5Q~RcV&B>nr<_/5l?aUlX#/bq-1~~efLdA^jnkxd6=Eo",
+		"gM7ZK-Mi*JAj_C91b3ig<*>*$s=erm?=*NaV-_7fg~!wl1m7mobEQVGjDx18K27137jo<zdALZBdoft6",
+		"3Ikq5o4Wm2w=%xBnRJh$R!IDiD-7TV+JR?ZYayW7o<WeqP7=~Zldo4coNuYvfN8n%yX2Xtm%3<qx7BbU",
+		"9eX_IrugB<Nd9KEbt6?6HoRT^hu@Phh4C*GcxbVhSaxlP_gp9WdXWkymP9JKNN^sjjPozv7En2oi!0YD",
+		"O>S0Wp*8A4b$/~~sDd%-djI%9o2qhf>cXEJM2k^S8^9utH@Nt$3r3WljK2PWhQM0Z6Zai^sI&D=lDzxA",
+		"vTczP5>r!A0s57$~CpOzLLFf%yM9p6sP~EZi~X87&9hgSs9Q^*4fCeQlaMWp=sM8Uz#~TypVetkklv&V",
+		"!cnF1&%GX<9*JI&_zsPFr_v0@&iAA#sTJjC%yp0<<eao1nlAEhkx-d?Y&~0hpNh%Irq82+7m=<yYayre",
+		"7Q5gGq4TLG94T#CZbKT3c>1Rf<D09/Lyg3uGM=vwu9kBgfi6@_taM/C/0sqjNjVJ?*nFKzY9NIv4~P-0",
+		"%jLM1D<WZLvksB!phwaxcj@tyeBc>qt=E~9&OPZ_Csn>?d!+ZHvlCLE!Q>3OaAiqbgwDYfE>2JL-X*f8",
+		"FT0voDJWmA%Bcz!5PHyfh0jnrc1$/>!<t9H7FuOF@<U5m<3uH0QJCkutyAECNnn#lpPRY&bjsD9=f_?9",
+		"dNq?q62ZCP689VdxEaa-kq9nsc7GDk^Q&-aClQKYnI+I6BgZCHk2kdHkcwc7VPeSM>-+7zHhVnc-rZe3",
+		"c%_8WoL4*Ws>Jx97$sI1uK7cOnYbKn=n2yY3ev3eV7t5_>uXtWsP+6uv%t>Weoq1%$xKIWlpxkmv*Xxa",
+		"/-Wk?L=%wp%eAFQWK2r-#M-8CL0~i<4ixMid_K7y4yC0p9ky4U4M7sRex7TsOCdvaZ69cKex0ahM4der",
+		"LIss!7%-@YlhcQBky#>@0GMap>vUe&yC6eOlHh>QjDMSY5B^jO8Etj?x!IBitOt5mR~ly1621r$N5N~I",
+		"D_9k&7x$ix2hLYc71-5<H%xv!36pzFV_w0N-AfQ^gBD-AMnu%l4ZQuiYMxPo&cL~IPgaVWCrmm2AUKfl",
+		"lOaZmoo4>@6xO5@NE!V04Nvs5KwiBPf%X>OqB!Zbn#hqG3?v_Sg13KRZ1Niyj3<EYXMDg4ooe0^*gzp>",
+		"!-w2Lw-abkv5Ho-bl15$5&FrX&WFj1!YInK3wkdCGHAz@?a#l7aD#SPa8+Z&ZO!B&6T8H0RW-RO^>5c^",
+		"mL5_~tP8Nu82f1Zr9e2GeV!R1lM6uQXKroZ39Q3JyOIfIlL1COlkhO8y_8q/np2M1Pna0~qj~R@Elzs%",
+		"GJGSdQsLKnbK=E!EHjJo^w5Z*oL42tRa^le8GN!%=fn3W21UN@/x=caMtrm2aD~&S?#6Wi8O33rjN*pP",
+		"2b2<@txmQoDaPR@#K5nTaAkXvj5w64M&effzK9Z#B3V<Hq96ClrLTlWH?%RZIWFd9m#R<@?#dY5D>g=Z",
+		"Br!CRiI4mJtV#VsmOv/mH0cnXWfgAEO&?5$gR6f85#$BKjUGP!ZtRVMt9Cc7YO<6YvkIX3e$8z/HpyR^",
+		"oN<O2XNgsm0tz>erU5e$LQ3dW@P8F=I$Ci5e5/oQoYmp/JnK1=2eWr3h~NYeM-jgnj>Vz%HAPOhds2vx",
+		"dzS&^TT*TXAziP0u%k@%L**nyI!T83s%!Kmg6EdI^<j+<Mhfz%4DyH-lRqNN0H0CXMj~m6<wV~ccbkmA",
+		"3?rm=afvNOf!EQ=600%wNp4wLe&cyBahJ6AvRHE4%O?*lwCZC~Qzw!kUBUPWKMe&Tn>wd%02Oi9Vj8va",
+		"I4-ZhJD9Y3S$5VPc<p&Y89h7n-~@G*%5p$-dUAZ%h=kv+8gtk6Z$bbaeH48rWCf!61w>=E?QHh>lf1s%",
+		"FrPQc3iq+SyNgVQnuKpGYZ~umpvZpqw6r--jM#i!oLE?/W#&j*pV!1=/cGbJlMn5-d7^46TE^dBmt*mk",
+		"glS0rkZ9rTr3gh$2Bg<m^4_SXk_^ZQcx$F/cuOLNynv>mq!p9_YGxU68^hF@P=E?gTta-60aQwYxgfV<",
+		"esV6<RG~UVb>u?Nwsm1zo4xlR*yMM1rfr2/s@*b&gqoI&~emCIhT+fiwZF2mdlwdB+nCB55We+Na^sD8",
+		"5LeT>y>s#2iP?e=%Lbk_>Ym3l><CAB0JJALTICXl4K&#&>ui?-O6xaSigpX2s!9xF5h$gD1+v3&2O$V0",
+		"bd&Mi/cDVeWw5DYep?>qVb4#c5=V=*ra&p~y+@rwoA-IX1D7AoEEWt?*bUVWJV?n-qNij3jY7ZX3I9r0",
+		"E-f%@nYl4YswC4RFAXQ!5^C45Sg*Fl?-zNxEwEz9x<W9!1MIDL^%4J+%vpiMaZslC5gnAVw<XAf3!J+p",
+		"oeU?Q~wt6s*$AqEqq#2FBohu$=rjRiZz~jWtE2^pnh7%ysO<4iMu2r&mIW1fmPt>/p5b/=WCRxrct6O6",
+		"a%tlN6aWRG6y6MV5>%r>7s1VPX?9d!#Qah?iAVktkV+M#!Oi_^c_GzFis0q?ksUtJhy/3Q7a@~ld9qLC",
+		"tx2qoWqT>G*U0#+>A^ul*11dj&S&t%zm5oz9PRmj5wusYHVO!EA9Zz>fEK-cBSD/Kv3PsOOYCLa$8KxP",
+		"g/tG#f<Od%lWAWJ^>coglNCzEb9ka6y0-<RrG1@VWqD*+Lr8jcups2>0q7E-j9u#VgRKoEHU9lF@dv9k",
+		"S<~06eRMDLyW#HTBfbKHw40htNR%L<hhX@=ui8fPg<?x^cCa7&?W7/C9QG^=ozL_&U&YH#5b*NGa_mg@",
+		"@?9w7Q2vRydD<CFar$^-V9Z^hGLaC^~oVeHAYqF95oDjT7I_*E#w38+<N$xR&ftfs0QG&liGfy0lg<tg",
+		"yD+e3$h!+su//B#w>9HIsh+c$Xyo__lkJLA1e7p62fO@tf-zx~1E0_aVtF3?uWevW8X<R>ey9g00YV2G",
+		"89d++cW^?5pf+k04we&_m/5Wfqz0%W9t6m/b@fF#D&C8_eS#5%Z*XhZaX3PmmiYEL_XnyP/^fEZ3WCiS",
+		"hIYqLK/Vjxc<I96!p4axeM8x2%5rUL-_r5Wjm8SJpQX+gP2h7kn$b9v6j3*OpNFqx%0loMPjY+WE430M",
+		"dPUWz/T3Wls#y@CbZNVM0QJBL7qbZd7ZfKKHvjG#Ytvj*s%8XQlQ&2smNBJJ%X0AJ09mQ26d&Q/oa2or",
+		"?E1Jwvbv_kgF=H^B>oL_hxhkpa?YzusS8LHcx8t1D?q6@yhf>43z_f0tZz8T322*-VqPEs-?2eOi=76+",
+		"esPf$5xvAYgdEy8*/OwCcWq9KK-ahuoJZkW#RVr9Tud<&p6Vd3chm*lAO@k/k&p*~4oTMX9hg&jz&8RK",
+		"gMYy14I%LOnWx/ACj0y582%c<-6L$g@Q<P03x?UoENcemhq7gmbsbwKh$5r6kJ$pdMfD0uEY-6aszmDR",
+		"5T2mDsRdNUgE#mmqa?el3ZLt!26SVxbYG?q/5uHPL@7pz8R*fp2dFshduI#CR_seL11wXE6CWoS$cMi~",
+		"#*0IUv4WHtVLmdZV8f^@d^Wj=8!*ZOsqiiEG9<&~i1oy^8GXnu286gUwGBmzu=EBQ#5I^LlCU7ch+Ad1",
+		"e4*qBefneKGy%idfSs4$hpe*0s$sK_zSIW&O7>ilcSk&ii-74gM2wYWflX2~HfquZrd9^9#~>G79el29",
+		"Z~NQBst9X@kW8SOxw!%XFs#b8p?%xWI&9l>/M>_P~z3tt-6xazXygyCxyq9=D?gkp7~D1--Erws?EHdY",
+		"o7_49qlQ?kAMroM2!5=r!No+MFIKCHB!QsIKwfJi~NN#VaFO65n4bE$YDJ+DVYdx2>i8S?zQTrQVMC~8",
+		"cYHU66faRxuioZln8r8!&#GWg3#i0BiGD+^+<c<YpyzlV3E>/Tn>d>Gm=tK_kK&k-1PR!@4O*I-0CmIW",
+		"L$P$CR=1Kjqbczrvdu&TV=S=OXDqWn=y/BYxfg8bl-a%uxNahO%<S_QW?5pCyhg=gi^G=a4rAtAr&MVM",
+		"3LSIe1rJeU7O-o927y3j%N#WW2m6/-c#S%U7wpaI2+FmgA6#8_Hko^#fSkb@dydtOs9QwFmFaRli4pP0",
+		"dGU8TqC<PBzb<0=>UK2&Mm*ec~&>=%0d+erQ5DdXlPvZb10#-XkpBv3nrfWw7VuINgnj>^&o2EIC3G4Y",
+		"1aB*N$bIzOa3zr~?#XL*O~Y&4g_$KIFEjecc@eec5%XC14M5^&>tfDM3l^IpbJA/fWX^H=8G-eWEetJr",
+		"q&$Z8KbwIF?Ex~/Ovk9g<Oe5U_#MSAlXkCOdGX9OtJEldD6=mb7j5p/gRQim?3v%+=cKx1jRx2IkVJXh",
+		"QuPdhiaUejiZY$#ZI?G<zrgqF8k?!Mp?Kgj/$N1il~&5BT0cD#twbe4sx_Z?t_N#FaYaEM>oNij8L@ca",
+		"ZEZpvr$T9m^@oWmzF!>PbmJRTV1l27YpB_x81npCnv68Vk9L>beNoG4+5Hf1rl>Rk>~>j6Nbs!$%i4^<",
+		"=N_=c3AVrUH3_=Bt91e8PhUWDqy#/hg2BB_me-Z399Gp6X4QChJg2TX7o_$6#fPD8Ruq1-?~GHx1vcPg",
+		"~^7jzzVtM?+x2yRU?0R8+UnVzWz/O7qF/7V9@IjtuV7f^6y~4wIXPC<!w-DxD!r9i%YO7BAq0TO#/jqL",
+		"TtPVpYx@gP%Tnx-V6fXa08w8Jp?IBPog=w5mClsrl6drX/AOS#C@tm3dlxsZb#M+>a>/OQe3rz-&-9kj",
+		"e%F1NiywmvhufBw/0DKWTbEHVuCTc!l_$_5jCJBVqUCI<eAZ<3AAS-gApE^/-4KHR*sbILl6a$d#~Xv+",
+		"yVAFFYGAl8vj3u4V6fXa08w8Jp?IBPog=w5mCrBeiSgS&rG#2N+uOZmJ<-Jl03%ZU$bl*-5vfdl3q$aP",
+		"_!u>2nHI-ta=BO$Ljcz<bK%och>KN#!YEe0%GVoZdwN*Z5nHr~E33zBk?lFbCP!uFa3QG$$B8Vwa~Atl",
+		"1zp~Z_muDl~~_aUsz*Pzc+5wDM3Q*FlfaXB1WTs>vJe1ArNNiz3JeOx+$zrWb&mh1tj3W?crVQle-Sk^",
+		"rX%2^^~b&KjBqClXp_K443wk#iOId$C9tGj06UpV&i%rj79lxu_>3+BmpVRdMkvB26bE32gG!n!HjBUp",
+		"/TP@iBYDEEpHHIb/-BIMfoYmKH!OhO5DB!T_6aOSFB54aHY9RIasS0YagUm*g4j@nbiubeeAXphtW%&Y",
+		"Honu4f*nx4wb>t=4@qaM@=UkaXM1gdpGP6GbMFKFgZgdjp=N%JcI&mKKF5<HpmIwVT+21q~4ip>erm#9",
+		"vII<a!~ws?CN6p9Iy~0X*!Ew-iEBbHizF1RWFqg/uS~A_ipHMCWs%O4sA@CFYw#&28C/+h8FUJcbv@?K",
+		"gA5ADFdHoWA3apE6wm8ks#Ggfi_qbrnN7vg$BVluFJkG7&Ju^gz/9MC/2i!!IkV~<&b3lTCP_#br/8I<",
+		"t+R>EC>UVfqrKBg?m/cu%M!@f+ESa=j~1V#RB4&&v_x@S70DhjP0aKdr!lt~/WjbJA>Y&x-BL5Cu/Moy",
+		"53!yPqz+HC8XDaRi<n-J~PN4g&%eFD5bpy%G=?WdoSLY!s5Dy_nW%zB2NhAXHZ&#sZONx+oFiocn@^Rp",
+		"hIuI<rB8Xb1rV*S_Y8-Rn&!uIQ&Bs2sr5qGYSsk@-cl$-ONB4zj&/KFpt9QPrMSg@m/HKqHz=0EGIqT_",
+		"wx$f#4wTenFDTcRd3+Z1flBv40tf~9jN1G#Y^jxxM=IJ@jB^FG#zH3JNAC4~p0wf!jb_wR3?IrJo1q$P",
+		"KkpqoMQJknl/m<9VG1E5hO#P&>_mK@bW&ZX8d+^hmpXDbjXrzWyAuEE8$eSL*/v1i-Xt_*X!ts-CtESh",
+		"n$_0A8&~~Dgg9-/9?j5F7$bZO31/cAh7wHiDeP*t<&LQ8zcR2wg!@N-rBIzf4K~saSqJr&0D0M!tEuOK",
+		"jqGQVFah96j*YHU__#CpF<IZqodb36q-YAJiW4K7j9ULGg~v7_5E4caBBoR6k2%8voiS&h5W=2ciL%b0",
+		"i=rBhblYC23q+OhMn/l+AnFOEuDHWkx<#WFg#iBR#t>o0YWmci6MDPb&h~Pn7eV-tx==ReD2FMLeX^<_",
+		"=j7@vk7Jb1Gu%%O1aJ^uqKlh@4t#ZYrqc~QcKu9#mm8ZOJ5t4c#2X8G&Do&p6e@PaDLK~iEAr8O@UvPu",
+		"0CkapQR%rwfvZ^uhrX0un0cNRk%6Y*%cin3+Gs-jb2Y3V$Zg~ob2%yN!/#JlS$7!VSA5OSlo<2mvjUIM",
+		"bE1~@4%ueHFdj4xmef8FqBOMX2c~Cb2HUnn830DBckNR#0NsopayJW8D~#NMe_MK4&s7Gh*oSo1b0RFU",
+		"LijC_dM$Zd3K7xluy6tag~jX%tO#K9f&IM$ri2gHhs8_Hl~N<H-0UUE7dj2k0KQR!Tf~M+gzzAv/Pg49",
+		"$WTnQ6Z9GSL-A6^whW/H$PQo/1b4aR%+fxCs#+Pr&#6Yr!t#/Qra4E?9-8_+%@rejDZ@xs#TvC<gw<W*",
+		"fHeOXmzVQ>!OYQODsmXsXLIH-52*huFkiGd~iPRDZri<DpV0CSfU0V>fkHgFDjSE&mk69BqX7iciY#6C",
+		"Ejw!VxV!_2P!o4HsLbSv&uGW7R#DQJaQn7r6YLd14WuGfVAPSws6$3BqJZi@aY<7-+/GVzkVwC_5#@1Q",
+		"eX~ko7^bdzy#T^L8XmcptjiL-u@*Sh0ze6vnn^kse5OIuv^x~9oW/*0/QWLR*lROVEaRR<q&uBTgD=FT",
+		"TCC1j7?a-aaT?Isr4uUvhNZUCVJImy=e&898RHVygR~c+c+7jjoV-Vgbzy9QPoAyqE0rw8e49tsmXuQE",
+		"RroGgiLFI!qi1FKTTZ@hzGpMzCTDbU8k<?ZZ&aZ!0f-MshtN3Ynu/R3AZJ$GrK/z/C*Xu+j_<ut3!iRs",
+		"!a_V%6rY=g9%Ic2TyXy!hXVwz@U_Mon#zG$bLfWa78s+MHQKF8g2R3m5!Jelef1%MlSpsvp1%B0UsL4N",
+		"dX<&i5NcY16oVIe4@Ho*XhFkAhymS!$#Oy%JiLq6i0IM>3JVWNqa$+8$-yJq32%24=Tk=3dGdGjo7*d~",
+		"qC#=CZ9wnYuy5YD8@0lFh$H3ekr3?UM#_mIR/?nGo97?BQvqVZuWVz6z@UI$P^uN@9EBC$%4e#VtG>*G",
+		"!ntf*K$pATvdN>sLn98D3-v7UR4e8/e8sZ7jdkz#ugrrIm4A?uOne-GBclSk>UT1sr%GiGIsG+Ep>41a",
+		"OzF+c5CHvFrtK9*izWwESd5grDDf=!J_QV-cXNgAmWyT>oT*W=tb$Hbp-7RMsjt+3T4@_O*6U&v3T85+",
+		"7Gzs49vi%gno~&4Ojk/Z1pSllJfRI9rz4%+71P9-yz<V<MC6qRdSoEMVa0^L7pgwj5$NtOO&gAEgS-8W",
+		"!qtZ<cH~x9f&x3r89-W7FUGv/Q-dsvX3JzmtoYJFwhOOX~+y09ho2$BOr-tkr&z5mnP4<m?+PLek~$*/",
+		"8~&&&vGn-#lN*YVd@nlS5ZaxeT_hOa8Z@Bp^LN#GsM$?$8hrZ1Q/9_/!n4jb>SXz$S_Pb&Mb*m*bzR6N",
+		"ZVIbE8gWH~jbBgwVwumJ-eYThaXHSe3%5^zaSn&KNvA~RUipgq@NQ!P+xmDWsI/EFX@Lk4=m$gYx~gR5",
+		"mr<B2/W%Wb4-MTxNp/G5CmIRG<hZIsZ!o&+9*G/dZ/GFRcMn~!rB7YNe/$08~>j9@61HJFAeF85zbynx",
+		"$SzY/L9#62krfr<va3h-+3AU9cP+n&L~Qrw3hCWE3Z@nrJfOYYYsQ~r<3VH/uct3Tt1BF2SkSXrmbCD0",
+		"t#G-dS>yHR0nK_b?w8y/jVYRJn@oam3ajY%qxRSP-sxYwn@DGX6CXbc627/b2SAk0zFoDb&RpmtAeLmE",
+		"cAV?z?J$2faj9*PjPJfZ>TgqlrCrVvi@NE*fi$U?7Rj=?N=wzbx?iqblC9lUKM4&Rj06UykNzCKb3lk!",
+		"RUelH6UNxd3+hkJvbU6+WYcHso**85_DpZ=o3eJJ-fVq4YL2$&<!^rWdq@r75xa?~Tnm-qNuiQD6y+JT",
+		"UWxBS&aayvv&mbtt2gSdvIT_JluPmwA0%N@o9^SV<~fP8rG49D<doY<BtKZcirfzI>#2k*37^hVLh7Qc",
+		"g&f1~+n77GKS15bPyMd~mrPJtic2PyjxwGYFWT7+mbS$gEbPjWJCt-Efhng+pY5QZ$YXEZ8StQKe~5KN",
+		"%-DW*bMcv4_-r2xyJ03il4dpH4F<fr@Q_#j1OzV+XhzEnyp/!+lFLDLkA8QxG7uf16A%*4sGSs01=iT9",
+		"Fc?*Z^9$xwe9TdPkmFpzk~u4lSeN^sdp0c/^&@MIApxep>BosjOAoeLvd#MWZSYJG31Xg0l<xIyHi-7+",
+		"Y_6&b>/jNO8Ee_h0$AWG8M0o~5jX~Ahi&O9koFv6j~IqB6K&n^n-<$SO0jdq40JMXzW4FK1K4v5ui1c5",
+		"0cb$ven!&j_<k0b40#E3YPKVvt^K*~W^P*7qv!QZh/dwC?tQAYlg$%2/=to!-6eHHDZW4sC4c#Wh%~wf",
+		"KNdqEUop/zp2HQ0ar43hCrxB*0M->b+4RDIobV_L5!2o7>NJ8yt~!fprGKdfmx1JD?xR$I@wq0xsYiz*",
+		"YJeT*YPGNj_+NKR^8*r-o#!q1t^K*eW~Z-1_%~ip^8oFG?tQAYlg$%2/=to!-6eHH>6=_FQQjZx4k9OK",
+		"q<nY9u0HT8mnKNWe$IR0KD#mvtPEEb9f>rFAiw7CBfim2!0n0NkeMk!^fIu6wEhoP5!P&NL0>8o0EtWo",
+		"uaUoKjlkQacZB=y?1L&47JwO%rMPX*dW2#GD3Uk^d^XsC5lJGsrI~qkdp4k0jJM/dh0HcTu!lQq+pZ-x",
+		"zxU08>-Bdfg5gy^zEiJBI74IT/2f+b5R33%3gcgD6Pw_@24!bQpzchJ6AN-r965Q6KmFc&0>Wd$kIqlt",
+		"kZ!DfHzS76~D!$f^ig_?4TC!a_TF=uZ0J1@S$LD+xL%D=fpXs5#di!G&zDX%5W@r*sDxYk#@VcoOKHl!",
+		"TLGe*a<jMuc4X<-IsU>~0BqG%S=$oNn4da>3^LBfXIGMfOK?*2Ya1?ZXUMtJXd9ALe<~<B3q1%N$EYk/",
+		"@6S%h-RMKc5hRFElyS?kXNOOZ3vRx/9qlDcN/dSSEGfmc~hd#U@/IuM139JNQK<K8qA&F$?ENzS^bo<$",
+		"KB#fG5~+9k0ZVssY%tozws8lCvak_M3Jc$^q!_IBvj9ywsuO6hACIjeV??&$to>CPD4S&emMe8=-a_fp",
+		"QtxLB?bVVTFDApG_fm6IRy2daY#X9x!F!^b_TwUMa9dr1lB0DqWk#VBHfV9mmM>v/s1+xIh8UmX/4O^&",
+		"qIJ7QJGU5#/3Fw9By*aL2mf5=X9r*wO5KLItj6tt+Y<3_qM<csPg/-y9qon8irg<=P23>urrA=FVQ7uv",
+		"CvF>0ynGD8->of21rbljhAOXl5&zfCF%d_<422z<aWPX1Ujbd/?UDK2dB%4Gy5vn-vfeF5c+!TQTDN+A",
+		"eINiW49x/d!0-A/ubnXAA8ra<G9k5b_z4&iWgHNs5AfTH1$poc+IA7Xce5j9nzq6Wes5KM-!Z+ds<WjN",
+		"*iZgPJdacZcuY1y<Ne*Fl/TS$H^+FNjlVclq/kHa_mWF>4e4^=o7mRFlWQXDr85I-R5~aKBpgxY&?t>T",
+		"8zrM-Q+$1mrfMAaeqx@ZoWDWmKIXO^s&Mx/*P_kd#8_8Itc8IaqAW+60dJ!4lQOlTe#51d7A$?ey7mEo",
+		"Q^c&7egMK8pwGzstox61=ngok/QJpFz$pu_fUhuIqFwUL35MV172A/QBD3WB&PJgop^co9F~Mkg=vLlg",
+		"h9vBn7lPZQdc#BTjV/qlUpRKMm>m/%qcAT90t83emcP+C>Qhv@l=p*7m^00LoSm5A44W%gizvNc=OcQp",
+		"k#JBpD<fXP!0Y?INyaK<a_AbuxPFc2ihL+F9-2n-6Z>Ev3f8Qtok52%#KN7B36DXg0gn27otx4^sk@Q=",
+		"H!HC6BCq39kB=$dEL?=ii_M~k1sCD>cTCfH*@@r<p9E_#5qRz=1xrcp1DHDq3Y0E@siWy?7>~~fPc186",
+		"oYUVK1lYLE=?Gc=0q&as9q4l$HXJ-C7xmA~8*hu8u#fE81T^xQm4j%ikq/g>tGs>-3zuZu0bH#R3Ke5n",
+		"~NVHtnaaZgGvg7=m9uuRYq9tQ3rwb606~Wp~akzianQrZ!x*Ybp>sHDVi<V/#Z/~E5X#Y=rgY_KVpbBx",
+		"k1ZVbE/*tQ7wJ4cZG4%<lQuma5Vv6%^lcQsC6u32YOVuroe0-R-65RNU<J*NTQZmELg!MIBfdt$t42ka",
+		"!rmd$cCH%RvXu7x3^S^VvH184i&A8-l5m8IxDowJdq?Z2J<9409tlwnMHd+wp6?=4wYRaL@1SW7s+lHT",
+		"K7#&qFPdgf2rOLdh<jx<l95c+nk8n7gyYf58~*&S3zBxS>eNY+T%2QkHJqLhbM^AGNp0=m/GE7w=APlB",
+		"txoxAsd0RPh%ur__P!HQGVAHT~/wW<-z5D-ElhYqiCwC22u@!z=<ruDiPdz&AnDz5P_nkI2zTbB3JfPp",
+		"Fyi!Ao^Po<6#Y+As8WkuA*VeWj$<Bc%jj$/pOhQjT#fpc?a/-d_M!6K2kub_jaP/%j5j-pCS*U~1ZYcU",
+		"t*v7ossB2b$INCOr#Q*Q6R@J+0EXZs0IA<5YHbI5c*4Ete4Y+#5n<LbodS?$pselmvF@YCo>fOaIc29k",
+		"s_XLVE@L-6kUb$SMe<hf6u*@Ykr2a_G!&__8NkPi&CRzoNZic##H@&~!R31<kl~lN?0j9g$YT2$Sc7JQ",
+		"nnn@JuA!B~P%fw>l*giatfBnj5AnHis8$V><uNVg0dHSxaOS-q7nZwGiBFoXSo%iv31%M-=cnf#K^bsR",
+		"An6XA9E*QSVjFXq2fVEv2##^lmv#&nczd^bnyrQc5gniu8&jo^t?0E@9mGiCKK%qBH11lmc2Co@qZQWk",
+		"6Hn5#eePQL&5Ay98j-Wceg@f<jQYWT5Ux5f>SmFo3c~6%v/eqluFQv3A4POuxn4h@5dV-+0+Py8e<evE",
+		"tw4yAAaBbvTf_?ulpARk%CDZXgBKxJY~^PGeKYSd5P$E2*6T_ies1Fe9%F5%zb1e>sp2^sP9cGMrQi$+",
+		"nGxj6Je>8v3#CLT1&^Hf=32cF1jj^oAh63QC2T4X*VU>>87xG/eh%S#D&s@22I@?4g-k0/YNtm/EMG@^",
+		"c_<ZLivkL5$@6J?pPDUVyzIyir&f+uL5OD/l2zgm0?r_cq4Dg>0UyWbnQI%RBMbtLjM=0&jwWCw-v8wp",
+		"~VkU>6BE-xD87Vt=bATV/WR7N@rhR/l#W@vbQmwG%=U^~KIrOOc9ogn=%q^10f+!a+5G<1ZANPe8&NV*",
+		"g2U-&47y&wfr~p9WhI%fAE=XNgnd+wGXVItPLWf^rEDh^LP6BR23biklSz6U9Y7cRyv5W+>IeKqjlwN9",
+		"RxJ3G37qdaf142t2pGY408?SW6KTLT28xkHllC+&nLTYXIQQ/G3imAYig5m4Y=MWvVqi#eiEvF<_hX~K",
+		"LkDjBb~bbyatDshB/#OJ2zm11dab5&RSTayAlemF+Dtkb6$+mkmGW$<M^^@tJ>/oZxWcFVa^P7&nF#5e",
+		"z%TPqdjPE3t9nTt1EIP>ll<~>?cDrMl<D*5Upl==oOQKd8z>eFECC+vlt>*_a91F78GmLV7Fa^+bA-j8",
+		"uGh2%Q#g-v+?UKH?Zfcq?+Yo#V_^&D0IItY5LYpkKYGM3FLm@8#_nD~4WV5aYEkVc$REFdhwn^Q-j5Jk",
+		"An4s^9pi8TQ#M>gvQcQ@K_rcsg*th9hBiS1hEsxJ5hTYaVwz4a?1Y=JGd$vLRQB7DVLIzeyq9^f&LV~A",
+		"AnH24i!w5@rid@rh%Ky7!+IRBm=J&R420q>3O6!/59nBw4tiAW474Yx$aBpji%Ct8%tt*m9e@wV/6l0U",
+		"CFN*M54qtchHpvC11E~cvhPi%WcK+/AbV594h0Z*x%Gi_p3qt1lYCF#1nEk-$<f0jg4LfFC%4%4nbNe-",
+		"JyQ1/4=OAk@k*N!%!aRncc94fslu8zZ8kw!3_v15aKhkPCbdob1^L1AmW#%&N~H8p>PsTC2hvar3%12N",
+		"ktQOdN@44poRjZ%^yn9LY_vZzWHfBy-w^?ajsP@%Z3gWgC&N-<#6jQb~j$45ba%2UJCRb%RhfttqN@su",
+		"L9dKQ=hBGX<+s3slr3Mn99hg<f-ddrt=e!!8s^rXXwuG6d&P1?u3<DQbRtNqoUN1c1d_A#SRzdi!occ<",
+		"Xefn7jRHE+j0mkF~/W!Q+5Ctl?OtzeAGf5J7m$h+rU~xAk/ndpci%7bqcd3bk=qRh+?SVE@1F*8NxOtC",
+		"7&<XOmC$DC8Pl28319CfWcYlHjBNOcy-tsg-+7xLk3we=peXxw6&OROY</zW-*3@%riZnKNVIH%t&o@+",
+		"pQkX#b/~k9%xIv#bA-#w<%6nhljsf_8>7EMd7IQ0_#u4bDPgETQ91yJ-/&Wgl1X!0^lzJns>c&_dXw+c",
+		"no%3^SUEPPo1gz<$0KSp-1h6f03xxp_07^W5F2zBs!T>q&aB5$3D2&K1+xuW/GrD%#o6s1epV=-gXN0k",
+		"?!Y5ghPC7Kvk8OtdmPMGyl0GZI!CJ84w#28k#0IZ0+kNeRj5DvbiU5I5J#<kJvncm9s>Z/x?0swCjIKM",
+		"6~1hL@EP!56MDZfRED06F$W3Q~C%_jLdQ@E+R@Iwii<U?0#AZC0T~v0hY1*3wMJX~V8!uoc2<qbrzSls",
+		"hycbMOiAq=acG*3vjHI/*tz83QNrQP~MlaaOTz0hqRPZDiPsK=v082^dopxBh!B>e0cvbyftcrWx*Kr=",
+		"aI*431C5%E211ITi^^3F2DENdD#@xK0KYy2CBIhMd1EU8iQNiN0$x@kEJJ-#06Zc!eGW&Xh#xZ@lLGX$",
+		"6+KPDX0K9pL0LVGfnDoDl5KC>F=fr<!se@g5*@QDhfU9o_hfKHxgdDp>LS<<HY^XP8Dr#1tzpa%OXXKQ",
+		"ap8r_g*C~?MswbO+THH&7u98*yHy$W7IQ*o/*M0n$$9lECY4<nd56%^8knLjLuK5Z=RBJ>t^IA=dvLxi",
+		"sq>Td<sY/Vu1AwA*q=F0eG^@UO!u9-3G-~s-KZlVxDTmyb05W%rn*npZ$q-C1&F0^D#B=Dgn9/YhwqII",
+		"j/*@-wzUGa1F1X8oNkM<fC#EO!US!x8*zvR3+LO+MRQ2WT>$ymc@r+KgwZU/-oiCoo6?^glkxf6L2+xL",
+		"=Kh=EHiv*XpWzO$_XDnamHe?5czKF2fZ+k!8<Eki5XZi+n@XDjRw>rKZyV#SZ2R6+im@02ecETCzm=uO",
+		"b#XLRUHI*48mDDato^k3#6/a8B/!RCxY4t<NVAMImpmShq-VOP8@zy#Qnf^~@@x6LwE~^@p9siKTpoij",
+		"Ae#0DV139z~veVcpX8sm<qghRgFwqj5ZUG_9x@5XojRaGXX+Ntb!W+_p<gsBhlvmX6miqIX>AL*%?<1o",
+		"wS^Ud9jPcsomcFOr+S^I%%a$L4UNdYa=AIflUrY!u^1o>4h4kYblSBws^e-m1<U<if^zScn^WhF+S32r",
+		"uAk#Y>36KTGXhe#7DGmtDw5edi59!=nq-D<0z02n48C<bt/a%Skf2iFtHN@FhNjJ@42NdYB5IbC6M%fy",
+		"Wabw@_aT&5A9qvWj*R6sWbKbTjKA&#Po39v9csa7e!itI4qbW3QCHADgMp34Y##kBs^6CUovRrLvkPrh",
+		"XMvgOk9waA$ul$SU2z~icjN^Abs3G-U*L2G4v/=7aAA+3Z%uHh5!gj+?5x?NKkm5whnSDWhL~Vu!Eph8",
+		"E204mW2T<IKOs74PzQ&a9W5SIpRBm_I%*=rfshz!fCV5Y8s4j$rssg~/0sJgp6%c/h#=GGB~z#3dJLhz",
+		"8tSX!pUF~cmcn97wyq8p>hZTGQO=ctU~4=0cVNS9kdl=VSoa7&0vA-+HU*$cfbyh^y!TFt69WjS&QCyq",
+		"hq+DF%J<zNFZ^kmzASKZ%8JAT*B!5rZ4-1!u?po=xj1~7YL3hhiyq4=ZS77%Obf5/2mR9X2%L-9$Lq*m",
+		"slfBbKZV3-RFZiUrSD@zp?*OsX3ZteND7hLvq7fVXh<~2t9CEjXPtFdcQs0shL0/vs1yJPs9i6*p4W6E",
+		"/8cqjj4k3EqERgibnnO1e/QbLr^rncb~TwMcvhx!r5-iR2?krYXSc!OlRBcQ3rjholS3sNq_2PCrdCQ/",
+		"kvGTAoi*D%9*%#g8A<~zhM_Svcm2-7RrMe>YJPo3e/n^O7SVTrkPzukeQF>kOwV2R18#OC5Tgznw%1cs",
+		"BdPoV?DFL~JEKgvAz0<wwi03^uJc58~v*oNsGocC!M9wRBQxOZ&^P~sUS&VVBt5Qp?Uv8QF@6OQD7YLL",
+		"3QpI#a0@0Xzp6%71rj9Wt<cnmrJvH8jbds9+g+GV994jNmAw+JYm2=Ikewva1A%I4*LlFpg~>rG^#HUt",
+		"lMS?IKO$RA2v+8-yJ7&cG=3$>umtN^%U*<uv?g7F~HO/MounUq^8mch7^qQe5j&Q!^8mqUuQj?W>Yk#r",
+		"hEJwboB8LQ2!~&$efE#>&iMRW=DoRM1Y82250yY&szW@/q2A=Q95tu1PTkR=7Eo?w09Wo/px+vtEUx<b",
+		"/31VC5qnB/<*c$W9&yxppP_B_Xx9kxKL1MO8kXNQE0H_$e&vFgr<3sZ9JC1vOEsN2hRam6pNx7ms$P?c",
+		"9f6R=0uRc6EwQsVgSfgkPBK#~xSUoMF7Kq?_7J0%+sax?Gz%h<9kC7X_uD~K#kc%kS>lvf4Xl?DaNI@n",
+		"y_a9DU&kC#KJ4AXjqh0W?V#=DAX3QPHrHfJah6B+nxMcx>@L/7dA5P?kz8#%J8TgReW@^1lu$qAdZTze",
+		"IU6K#wci%9-Nv28nL+p~nw+58/M@P6T1GhbmPMJlnYGFtjo?zS=Qr?jVO0L1J6jvRTUl%9LAKO?biY<O",
+		"wU>dm+8@dS/cq#4mQTP/jD3>FB=<6SW+q<lz?Q=Gz<Om9iNBzMekH*~ev2?tu4-Pax*^-*u=AoNrJy!_",
+		"_FOtAs8TA^w*_UG29Vr$/?elKBJ_0MY=c^iEgIUZTt9CCeyTV!gY@Vh4<Y59MyuKCgfhl>$CpOcmjsq=",
+		"mU5rBt>H6/Hb?%m<H%-S0la69n9GETF@=r0gy7>qYHN0!buS7Z=AGF%8=EoC6s#a&YmtK$*PP^~v&dip",
+		"vczY=CQMaB&kk8DI5S_tlw=?HMcUX^6ag8b9CMbb8Fqqk2CmNO6553QtA7asp1v40k2X8v5^*g=3nCzr",
+		"r@Ogw_f5R8pp3I2G6NcBIzVyE4zhAD!JH2M-#f9gWh34IX!y!vG4_Pc/k7A971ZjIsu=!#A?pW01D&4l",
+		"QVrIeM3yGi4wjRRG<0h_Bbqy3qrO0/CIH~idyv1VQE%?9cg<gDngGjcQEi?qV^eQkv1M8>rvVit+^G3J",
+		"nUX##3BGfB9O6WJQ=5QBe1Zx+laSntHJ7%YK2lR/sUV_k6hso>&slt0+maSeKCxn&n5ryQ>@n1@17ibE",
+		"RfpGG?zx?TbcBbvvMZ~>tZ=rN1@RT&CLEW_QpX7F1+q/G9FA0hst6f2rdmSOk-/=aDXaTAo33qctMbEO",
+		"5acfmde^GxF/RG<qE=%z7sDw2>ko7O96#krwo9c#aZeNGS58gw=->LM4QE0oKVxUSBUF8YtYm&So>#>x",
+		"fxErsTN1Qmc92Z$P01Ti7cY$Jv7h@Fnq5~LjfBCs4z9rnsA7@8fJ^GNYO+ty3<RUA^&*&^N89Ig4t3Ap",
+		"66v~$>w!k9vol2f4V$l^eTE7GE2Btu@7=jGfX&O&iT5J506j&v5FbantyS_Eq-/QmdUf@_^RSvC7@a<w",
+		"IEsJaWghoXrfNbAP?REeHY#0PJ$-?EVb4&r0eumrwp3ji!7Wz9W-3QBtDvYWucP&7c0Nb&egB_Sr%+vn",
+		"Al8SgJ2W0XHylMicQSTi5WexkeI2HMYQLypXdIPyb-^gUnew%h!TPmrru=xAh$AwsC%AGEqpd6V*Wmp0",
+		"JAros8e8m7XCvp8tQKc&RdSeMjajk+BDG9Y5<1Am1tdVtSvQ~7@@eyD5d6RqeZZ~n/4SxD3!0P->YhhN",
+		"hM+D5rtX&TG^3rHnjZu+>hu&B?uqR@F&b9RqbQ+IAQ#!lfdvu$3^pDhnJl31h**qgq5a1*u0#7BJ7Xdz",
+		"iM1qY3bn5Fps$MkpjnBSq7OCgfkLz2bY0=loJ7_gcqjYxzgAe@Jo1gsiE33@Jtqa=V~D#bGx0NOE7zj6",
+		"k-v$kdx9oTs42auXxhaOo3E<y53ygqotYK1pmq2wyX9S-$JJ@BfC=jo7xf4Ocl?8AglFu38d4U^aRtm1",
+		"qy*#HB9bJL8-N@fWA9BU5F4@Y&pZc!<Q@gI25MlZ1~/k@m@4ql5MqMu?#6S_dvvHNr8L2Vfw>G*5sq-a",
+		"5vfW4DL+c$2M<5scDeBv*k=dI~y7H9wY2y_aq0wUOwFM2hs_#=g$1X#-nvbXXrrufjVu2MBz4!v_OS5Q",
+		"TcrxKimHnf~J1G=gQW-z&>rYYh6-IJpfUUH5e<fA1!7g8P!@VY#<!L&d/Y<<gff?S0Z^Jl_jThy~O1rr",
+		"?1!ho1C/oM9mM~jYp2R!iaDxIHPl!Wrj$x~~zu8OC$E9cX#z?k4oL21CLRbc-OSA83BCZ2DIGl7e$73R",
+		"<a!RCv*@pdz>_L<!^3t>8hMeXfb-u3~>2R+ge>sJStHiso~7W5eEm&qOt~bd2Cho&quZ?joAVNbKEkU$",
+		"fcH>8rmm3*mYsgL2%gD=sSMJxsfY@D8_XnMLy-DmK>zsA+XEpO9hEk_0T#bjj+_*>txBBMfP7^wxlNbg",
+		"~9$ffjUV&vu#kY4GYh~M558<UtAWRyABLnggyVaXh1OU#q&TU?tphP^nP9JafV*%hdyO4AqAYWt=kA+!",
+		"dhbDdWTDMjlvPhc9Cch0LDx4GDS@<*=zZF2oMn8vu!0ha9XiIpmuJb&S!CGRzS6hHmx~3$z$tJCr_!Qz",
+		"m#c*i3Lgm0V6W2ozc=BA1!s9Rd7DkAG#UqZ*7InM<WNOx$#^TjnXtCw5e=lt!T5x^#zK>Q5qlc8bJ-Lw",
+		"zHSP@ufaA?RGu99Syv1H&*Ram5INya7x/mk_Z6%93I8_V_8@G6kzyyKsUZ>nTQXx!2l+cfWv8R40=~9g",
+		"MH<qZtdQI?R/CbE?^hG35&!WbiEuf81+$jxf?tFdwMLFzh+r#LWYH=UU$32VuaF$_fKAv#exD7Lv1<SC",
+		"ApsUyI&&<@HylMimXeLK5&SBUeI2F6YQLypXdIPyc7_pNnew%V!TPmrru=xAh$y8/C%AIGqpd6V*Wmp0",
+		"JAtL%8e8m7XCvp8tQKc&RdSeMjajk+B#~mJ5<1Am1tdVtSvQ~7@*WuL5d6RqeZZ~n/4SxD3I~G^>YhhN",
+		"hM/!GrtX&TG^3rHnjZu+>hsH0?uqR@F&b9RqbQ+IAQ#!lfdvu$XlZ6/3wuu8zJL?nMINm$vv$8neV8uY",
+		"!9<2Idzl&e!-MyOcJIwST5_CKjam*G!@*yUxzvK~?L9S4MKet-b8Bhner-i<iMVP*5$1Xsvtz-cmR@&M",
+		"ftw_/sDy%KhoWA37S1dKv4wk>oPgEAl8~x>aA2b^PcjVh_>vyi12N^<mmtRv3qU8#Tica5J%X0wzAx74",
+		"uPi?zRH$dwE1iA653r~XIYBUWcy<vOr*QLb=zWVxmx<D43VU7BtTOW2$7+?B/S51TsPwBUtldYyC>O^9",
+		"U!EdVq0T4/Gfmk&mhmrCZTE6SSmFNEGgBM%3P5s/6Jq=?//<JcuiuElzQkn@wfEX=!u4h@w*L/ttpgrN",
+		"51X^13F<_GYFp-&0*gD?+/@$tSd=_IlIxy*vy!jMoR&$txjub*o>!RE9/9isSb$7dt8EuNNNwp2#xYjp",
+		"L@pQWyCL%7^g<jL+KLUwIc5-M6X#3ya^?iGtYr$/&t7VZ0CRP+A#H>XnYJzhpP?Uf&~#y2th9aZyM%5T",
+		"DwyxYm~JX$?ku@bCIYnZ7Be%=&WMXTau=>T+Vp/lyd9/wMUIiDG0SjARtqxr^10BIX^S*WnChM8dY4@U",
+		"4Tmw03D^*lW$wz~oLl6S9fWG$0RRFPsg$Z7_?AQeh=q4#?tQz@=P1ut/=to!-6eHHDZW3oC46_RApEVm",
+		"Uo#krYMM9UqRokpvy*F32#dtB3iHWKEgl_e4*d5HzRd=f?k91K=GE25t7y!uF_lbR1-zhzO^^X^kzq+J",
+		"1F7~veEBs<%Vae*dhrlNaBRwXt_7-=sd784h!XE8m?~K2?tT7c=M/tk/=tnZyM^Z^DZW3oCcL2eApy<@",
+		"!l8qCYGC/nW#&2-+Em^Kb+L#jv=F63~D+bZ6uD?L$0I28bAwd7$khSYd8^yWixut$girn!dvYwmhIHu1",
+		"?#X<>peMLa0M%$e_zF57n3thW2h&6Mr%7s^YlL1bemVV>>Qj5XM!o3Kf-#djhwmWNil@lhnR?o>DFNnR",
+		"9QGAO4Q~E*W>Quna@?-lQMN?>9@DTEh3XvyW~fSAJFXydQIF5-+hv--cL=N&J3eZ_IW_T9j5SuGHPr@W",
+		"jPWYxG0@B05_fh5ZfGqu3!>*2Ke#vaQX3VM#*A7@9To#4BIvAe%6lOm&IYIXHnZ^YSR^Um26OUwHtYSW",
+		"lIAoM8+WVAdhYfA$HwxCZl<SVEwIWMcIYr%mW8@nv7gYdNP5*!Zh2!i1m_Y<l^!4ljcmb1v7*yWLm4X7",
+		"9-qK4dK2oznD3-yUn%Kg6WX~ok-NsWwGOtte@sUtEjHP%4wi$Mi/bYHdI=PNsTRSp?TaaCEVe3ulH5g8",
+		"weo<WW2=ch#J^~ElH?F<p0CL/hGE*8Rba!Cu$5rov3hGZTzED~akM#nd~ouay1N-5PYcD+i79%UPI%uT",
+		"/uADjj=Q9<7YKr$v6*BHsL>v6u59BkljuSKM<A$MKL>>@zaK*&HoXfqMujHbrM91Xc%WtOPoxxEcFZ^e",
+		"lpeL*lt3DqHVvWOw+c$q62uD-^E-twh6ctIt<8~Tgo+1PyUbBhI=p*jjnA~Ap@I@vluHxmar+N<jkM6d",
+		"9o5bPe~nDkkCkGQ#%K3om!+gi<<7~&qPHMRA9ZIWThC!fqm6xozuJqU?%eq*8GUyJ#0NDYW!eNV*8/7R",
+		"dp<pxbVAZOO0Y=~ck!!>3qB3WF6_N!s07Yj8t*0ja/2FMRsc0qf/2@aFheIjyudPz66aGY4ju@A%%3nM",
+		"A#qpao_ar0rG=bsyQjmhtdBt3w+^7QB9aQkqS@gnJteJ5mRQ%8RLv$omGAmxd8~R5G/f8ns9o>ktGM9s",
+		"8l4p^81JX=%zgFwO=LpG$&pKO?_v>&GcBoUwbb3/b$6Zbm2Ys/#wI8S%?x%e?UJxc~=@>?fKqr63KsO!",
+		"vpLxu1EZnZewI#~8u=aeyZRvIKsvOYM%UrAcRmT?oS>5gR3wA&dbL=?O9Q$lRS?u@7E_ktEtzO-m@3F1",
+		"1iYHUU^yLm9SBgeqoIq/zZ2?Xi+yRCW+HeJ1F%aI6?PeHqfMdfuf2MxSirSTLM$laOQ>d#c2IVxHloP-",
+		"q$KX~9Tw3zksQ8BRqPxQViQ~Z6CleQbncqqukIlMPw9j0Q#Mkx>zELdizeCiQZNOV1&kF=r29T$/fFb0",
+		"dO0^ZT%mHx=?S4^WFw!WmTxn-fWz<C3qQ8ahA7vP9ztfEVCinyMrZ9~e8?Vlg/EEypq?/hP+#wCjN3g>",
+		"lD*ZJNJ8=#6%<mKopGkRT7I*@u&e3Xs31a0t>FlY!I2$CmjmWfWstV~bso-b7^j2UDe_rbnTLMR7$5lh",
+		"c3sr!SRAd%feNkR2Oi>wqh<NDoq1M6nlEq=puYABJEF4ocD^%#fkg<1lGOcaoQmaV-oETlymgC#3xXCG",
+		"shk*j&*L33nPdWM6a4K_lUa%m2htrO+wl!=5mfnBc2Y>0iGfB<pY$jIl*M^F<yB*zYZB$Ygwc_nj3FkC",
+		"91WveehmZ_KZYoR0kmFuPosw^aWrIy$NXQW7>wezt#-*<E49&%4VXlqbj$vAZCgX&j3>Y^aXIshoCCdz",
+		"3q*+cA^qSQHhy>if%?c?QdDGQ5m+DpGy2C5kk>slgiNM_xUe~h4YIhWcOas7j59upfg6<Oydk8U8S-rp",
+		"lk~=%wX>KJrjxUB&MLiLlhs&u1yx8L5tk_8k*$J?36P-~c5c09-=H8ljL~QbdbAhLqXZ1t1i6<5>&$<R",
+		"Gx#aQfYSN/@p#4tD3>l&WnWv^bwV2@Wtfjpq>_8h?5O8at+3R*jLjLG/=/&bD=?IwDZW3o=Er1HApBFq",
+		"TlbQ+YGC/nvj3u4V6fXa08w8Jp?IBP9v92T9ysUUUp-vq=eTx&n3e@MOTOq^a=IEnCuFFGWwS03PXPNF",
+		"qU9T@l0s?kd^ODh0upId4^XOW4OGkJJ<j6@tU%*mzUmaE9WpK-bsZ3eh2x<lZD86h%+ITzV0r-iTlT!S",
+		"YHI4+Yx_&3%Tnx-V6fXakTt/Vp?IBPog=w5mClqCoAaCCn40KlcFq@p6Tw8_Q<7o/+?zX4VEo17tQe=a",
+		"V6D>WlG!CZHy2tZPJ55R5%gY~3qBsr<uR&-0CkRAaQvmS4?<v0ZO8c@tGFHX23OROwVrQNjy1J3lhSbG",
+		"jM_Odt+FG9v=5lN#8$#KJHCRV?>PKm^MVK+kg8=ZERAVGRS/8aFS4mZem8/cb=>kn9#0!ipEzE%qKya-",
+		"EKRpDv0w>QyHtYA5de18YDrLP!Y~t^3uzw3@<!&Ik_O5N42oZWrGnK*qAw_y56Ko5o<VUX1@n1&<Pr#0",
+		"k49?c+<BH<b+-j7slqQCi?0!fRSI0ib/Greh$2N72aZUl3E>^7aKMl>to^V1d^4fqZS-Td@K_GGj5<We",
+		"J+udougYifuiGM3lxOjEEI~F0bN5Ae1gk7Vh1br3nS^L!j<GLRQ$WTd208No*!xS2U!p%6IYIeoq*Wz7",
+		"q$mrb9t2-6o_z~kV17o+#WA_L^B!oDn~rGY&0IUGO-&#Zd+_LW%OTKsj8o&Uf/o/=#z8E>SmT5&mG$>W",
+		"g<@5W9w**m84%Hc5TwFIl#qfgTU0WNrSAU6=9g&MgbI4L1zhNBe!B-~/~FJN5uAUTc1UC8>y%zepSr2S",
+		"9!P#O8X8dxyA2+25-5cUK0MZY6DtxUjLucQ_u*B5W1B8maxchj%N&p_YJB@U1H&J!8YV$mt_nwy?6<C9",
+		"ev~U+!BHEX^OjT/f_5q0hPz1R6=4^rss_^yl9wmy-fUe-<61RBehQJJCEhUHrV*vN?hB1!60ugjkOOUJ",
+		"aihoGj3qNa/NyrtQ1tsTj~~0#ZD?oq2>kiG5Q4rn=^MNxcefm~cdUuFgz>kOc/?4hsz1H7r!^y3wxRCE",
+		"+0/ikcI8d@@$0f8NAnsPonl~u/HIrQYFrLR~FW9jr*b5Tb_M&Qjn_7ue9~M-m0AA-c?Oq>okxlspg5>L",
+		"Qh0YImXQPhoWEA_tkbFRBM#vGAz=eaFwC<*1_fP*a=my?8?4*w^Ceu?04g%Kh@^3*zka&7v%=rO0$7yC",
+		"2kGY^~VNngVen6H9aNoqwM?lSi9rg5eQJwMtmK_&8>n~ycU$g4tAm~&*8LcTe0LFV0q#rj*+13i?V-!o",
+		"5$GvXf^HV!44fDgOtUlUW<O<vIKbN2Jm&n2_8Dtj%EgZej-gIXx+&tQ6g^qMfa4D7g*XNhFn*-QHISx=",
+		"n?4x75U9%6eeu>0fyMy=u0xpTuiTo~loRs1R11e99#C41YH$sT9+KwKst6YsI2&*1e^h_-fQcWpn2&Q8",
+		"*8-&&1sIbIvo^nAfx~F5Z%4^6k$+%6Fd38qIPgvgSf#hRy9n-*QDVg84pLb#pFW6Hg/t6*00KBvqRH3k",
+		"V?#_+1?XvB9YX9&T~b$frlFeW!hbbZLqeMU+9z=sNBh3E=zeZ!?E=qJtg~rUAGlpQntyfH@Raxs6M&27",
+		"%Ovg~v8^VXlEOq%khw&EejQaSrmbTHS%vrTebfZzq>UU^gNF^<uPPv^SFL1X~W7SPc1lig5yMbR658<j",
+		"K<It~^YoL?6AP_@>myYf6a?~^osKn?2S$3n^4j~kh/R??ln3gy!iXvCnBSW95tB$wpXa54wX&6s#@QIV",
+		"k~*jTPh>T_~-e*IjiOgtsmefKhb!A0-JRc@mN~GjpWba<W7+v6h<bGb1PtvkjSRC$VGG6R&/l+Wl^G3I",
+		"*#%s&gp6vAU%-i=NYF4Rn<sdSMus@Mu_RePfuLcVAb6/hBPRi?9SVjCvcM7/8huh03>L5TBCW7#TeUXn",
+		"5uq%xVcK8n#2hHPfPnM2^mF*$wqY>C>^hgvnCq_LzIyyd?r0oYK>g/DdHP9ik_Liupdhg39P3Axas5O5",
+		"~4VwLlsLrUST5G3M!N+pkJYd=DpTFCduKRm37#EG!rFyS8yRh$#J6/9iHhkkf7wqJ=pmv*8xmQklE-Tx",
+		"0EZPhp9g*<su&5iDvHGc52gneN=~F>FdNa8lYU04fTwTSDx4aOaG@0rhe_!j%6~HHhGP<#Y@KVCnQ4Iv",
+		"w4@>Boc-0gpaYtafHchDDmGg+jNRL%~VSpBBL%h~DY0*wWKf_ctmhoO1K-#QoVKtOq*32+Q$gy7+Emsu",
+		"uYCEzdDktMg*XPmh~qUU?P5IDWfMM^8X$s+kxlA%k@u/npQSn0*C2~Q4H&FyRz3tY^TP$MaJiQ@ZQ3!i",
+		"&liHNkn9%GpJZeMfn$YRCZ@KUa!D%nZ$qbO1%QZN7<FVk4e%IVhcY^&b*2=I?NOQ?w6p=uiS3WT7%%CI",
+		"2^v8jjbww2r0h!$eKc9hNdXnitk<+!sh3TkztYAP19quS*PERQT7Y0JecMJ^4hRI$EL55phOj$AB4/wM",
+		"nzIx0?2vy1#U6XK^Px-Qr5fxKGN64NhBP%kRNyTk0onmgwJgIMOc>$kM/0&8cnhc<oyX6_qx0lPv%76g",
+		"p4p_Af=4hp0pPYIgp0+lk^3=7s42*qY0iar&-i_ygbithx#AARk9S4Ok23AR7a?&%^l_lu/&zMWuzC$g",
+		"b-vuC?xQzWiFi3oEs_NdtarVHhaklPy!*M-tUvelTH0zTm#CH_S~+!0DPfzdH6@U^Cw%FSBcUv@*A05A",
+		"9PRhc2$~qL$XX/*X52PEr7ZV3odJC-%=m5d8hGU?vqodYl3xqoRfLa+UPzr#z7nYir6o~sS=q*oJ<r3?",
+		"6^a6pHFz!C~-d>06A_X_uF@Cjfh?trdi41NoX>IPB!!oo88X~hEcx/l3FfHIR^iz+&57^xm4W9yfW!S&",
+		"cSxzK7&@5Hn5h1=5d#aLtp$xAp09sa6N$<nhyDOXbl*fX$zWTkq9D#*z$xGTF1w&exUS%YuHywI3#3U~",
+		"1KG~&8Ic<19A*BUlsU/T%/6^~<bi-b_u64wP2z/Li$y>D=5zeok&tm+1>$UTq^dFbD+ajx4M7_2+0*>5",
+		"ymt4jU79_Ir3Ec=GdSUFH91r=f=I$+F+XqheHqMAyKwS#KXlFbH4yx$0g~f3V&9r-L0nfjRo+t_j!Nxx",
+		"<r2kLj2B&q@EqaOX1yKz0LJc>dQNqSm6gH+_&o_8ijR0xxo@l4pKVM1jbI^=q55-dvhiI!U6hW0?#OyV",
+		"jG6xWWgn>gxnvPeRI4J&1Ce2MA#lq_h?<bL!g<y+dAue8BC?KI/Paw<%R6W7nfWk38Kl4Tayr*1srYTi",
+		"^R+QG7<+43?#rt&c>v7m1FysUv#vi/ip>5CDHx3lG6qHm6ArgPpW=5^j<JlAd$o?U=ds$YkZ-h%T$j^!",
+		"M7NS?P4>S7>2Iv?r$0BP7lF+m4gplB#ab$=_yzd1@KsX_r!XM75-cOV$_&M8!IHaCl0sqw#_5?x9Tp-v",
+		"3wh8e5fmb?>S76Ek*VQU9p8xbqeW+Jc9yr=biX@VTV+1wg8tj!8IIM+xi/B7?p_BBquFu_3Q@u#V<jZ#",
+		"uoZ2#z6/l~fWBPBd1u~N0k>uIjOIQtO<nm$#+578tE/Zu9*%De6fYkIf>49wz_/AlplQiNmk&OF#>uFH",
+		"Vo8#bgHjlaLAx6=6^y6ftQ=>Asz@lt<c3Ok9ws1?Ql&H@7sRXKose6wso9?EkuK5-jpND1B^ch/Ko4-l",
+		"7hxZwkR#^Q8jCMxJ4z@t2E/O^kCsOQJ%PdBP~&n%ip5IpPgpKk3B/-WkS<7+ncUyNlz7DR5Eh5JvGWNR",
+		"a1w34l!!E^!*Df7vdiZ&PAxc6gQbNT-U+r?b8oI~v3^FvWqcydOv8MLhlMdx2-zu~0h=_O7u7feUx^vl",
+		"DEw+7B~/bTd~>R5snut$@wUBtcp/5JXW2M8ea031%aSDQ4~xY/w0WfBI2fZrA!w=H5&$0vX5Syx/w1SN",
+		"py%zyt5Bom3GjOv>L@AdJ<&Q^kCU+%avpX/9NNG?2^wQ*q8qXsE*CQ8g25I1=s@4qLIC_^0_S-GOkCR7",
+		"kpRL-^eu7?D5CWrmT4e<52/lDjvd!&aR02jMcRQDeFpizmhKDz=rc3dJM_Id7CDw38sUCAlA~H3$cp^@",
+		"Fj%PkhXe1aoPxGo8ev6At!eJeqoj-7@U-VVtcE%Q5fHN_b?EWUr24pRrsKq-hDO_cbCHFuHhQ>bOj%Av",
+		"@Q*GfMrjY*fMu<EV9MPJWoBytH8xQL0w^Tv^RDZ7OuMfp8gkunJs?%Yiuh539NJSjwH1uF1>XkJEYEvc",
+		"4apWauBY9uqfF%c5Y?60PYAdU^If!FDDh0u0+9>An3FYO%j=Q/uZ+$RuAbgzgsPO&7k06wBgjm#uQ4^x",
+		"yV5o@v8_e_?*TsQOcq=D3Fe!rROmFGUh3x--mnJPqSS~?14Dokq57xbjyt9mozky#7nU<$tCgZu6FG$S",
+		"BbMu-cYPFN/j&2B_bO7ay<=l&cpClOa%!w3SqQ59gd-zi%tcFDqPt>P=XQ=0_5ySAdhnb_iJ3o3n!28<",
+		"v6C4TnVnE+eaMB%ofkDzA<@%0ud~z=^v#0$xb+7r4tEez$%54$$~J^PZ$NPG1jk!+SbPJ!ub1P&H~hlM",
+		"3LeEEn#yD~=4ZOqp861^gZren1-~D1*6e^Zmov@Afy859Py+%1P^LqVY+cM<Pkvow>5593jUnz8DZ0JV",
+		"7rj1TDrUZ@&J<K-u-cuvYcRkN9OQrLl<4Iwiq<<wwH/%ed&l*B&Q+NrsCU0IlzlODpw7cFmWH>nZTd$N",
+		"F<Mj-hl#y7#qa^/9%6xNeXzFTtQPks2j*&Mxqz~-wwC>t**7V#pG~@~pB~_Fb+l4u2wasi28el2BRhgM",
+		"oBS/+5&kC0-rQwVHv+#<cc~Cj8WfGII#_yWXjC@fN-A!j1jvGvoYh@5u-Dum8%k+@$ilZx~kCPjRub1Q",
+		"UdrnXcIU<_l0w/tS%VJQdkz/$l#myYD<mnySm9BRwS^5/t@19f?+H5cFVswIhyBF>jR*?Qek=5A>FjCH",
+		"43/oh^*n@S7U*Kmr0I=/2InN22NuP3i5zcmGbrQ@pzwSNbX_m9hTdgf%uhyL$>zL_Ty3&+jT>TxRgS-M",
+		"9RJrDNuvL!HogdDsFpBed2+Y392FCIKG7WBe#ex&?Gtn4x2u6Zif3zrY=DNb<n&#vYR&css&k&K4wl+U",
+		"df!+~tc^t>mBRbn@n~V%4f#roKzlonk8YUk2t2jz0Og>9gN^$2J2@-8e#QZ3i%7>_huMm4jYT3QoD9R8",
+		"0j-^B756e^mFd<Gol*H<a4U/7FAuY0u2%paj?W/Cdrw6~8*uip3POH#bPuk+rh=5oiYtdUl@Ykj5&k&K",
+		"/J/mrpp8#xoR7Ha!5vED4#Wn8r!h#qsOB5q8prHKbjiEx83#D46ahBjCu^+L>/uOR1n2BYb_UB?2$TPV",
+		"iqH@*S2B2HzT?swftHCM_z@9k1hs8#aM8B86ni<^4G+u2pH9u#jtPL8S4-a3iBrUjc9U=9JR216^xCpr",
+		"a_g5Ch2yZfo$taL79g%Bhd9deVcYb/jXfrDXCFrJv?iE-5IJq3CEIyH9@*WX#S2OHmV6FXb8jfXPF9Op",
+		"CTyt997F*KEvaCNve>TeDxQxm8LF*mYD5oAsK!<l^pNj_2L@hH!?OO?459-qDmTogzJ6pHc^mO9@S7gA",
+		"$n=s5pN8TbNks@?ihZ#arg4w7WxUFZ/<lljd<AVGEoq=N=rCusZF@B5~q+bUg!d/yi1*FHGSt_2pA@Mz",
+		"JLPv!1Sh3Z3H&-30Qj~vjb6sVr#MIGZklFB&fGRATUP+@nl4lnzp%s7RxY0u4#@#vBmKZGewDa3+$6p8",
+		"BcODpzydOKh2u?ZQLK#dgeqHspcPj-od8&cDU^P>BebpU#vBgMT3UrqMg6zF2Z4yDLP<MN1dTvVeLWVh",
+		"Q5cXH-xT5Cza/nc7pWz1_bFtarzeI^&=0yhQ<Zmlvyxw/7~oiJl<lvZE=ydgnts>wgaWCiZ!h~y8!E^Z",
+		"kz9s%vfhnHi&^r$4$s-84nxbnkXN&t3Z51j3&#6so2StDGLJl4s995A8wj&C9Jp1d!IHm8DiUi<4F~Mv",
+		"A0@%oMD6~Gv>IgK^InA*l6KXpk0phXCkhGEQ68=r3gx~-mTNYgo78naxs@-&2#a?XbCo5Fnd=Zg^_v8?",
+		"wlOOz8$tP/7vSVrBpBKtp$+PzDzrG6iT>SWDBR7+p3*70k3>M%q7Gz71=&4u7v/v!C^6E$y~1A4MMKKw",
+		"+rZWL7xxgQSiBO-97G1AcuSb5tqVS^9<tsYV^8AsZg0Nj>y>Q*o&PQppv~bZAN18M236_i=bnIN+SpWW",
+		"@qq?HQ2^x-kS45lRl$wlme1>H3Ng1X<8Wxo0hSb$>7f8mZmE9aqjiJzdmV=MKx2tHJiyirZy71ZsRFwy",
+		"tS=_nOzlnRJBBzn5Jq>X1_w!HHjJ9?YqicvlDBmla34P*NvUVJ#gmT@5GxBvt+EV/EPspfgOguKgfmHL",
+		"7~sFz4tvWYR7vWMwi=US2GX$Xgfd4Xu^kHLrwaFsfJMV>4Ct4!cofc796qQ&Gu1qNqg^PDG^iyDbe!K5",
+		"gFX6ToNMv4*WSha6tp@#QnCZgh/r-<ivKs+jCV~B3AWc-%BUf>-k~zG_$C&0adFLBlLq-8P$Nd><rRzM",
+		"=dV$>d9Z^5G0DUOHe>kM*GaK<flsPms=^-dj2Keclc^uGYNQ#9sM/g9dawagq3BzjQ>qms6Zz&AZrS5Z",
+		"gy4p76ql0^1_5jAau$gWHueY8scN681JUHs#9>FB@DA<&54gg5X-_%ng5$iqW@xn8jsG#9wW%gg8CkNy",
+		"bfKYGkod^X>To5#0$4WWzCx@T2zVYyFd%TtNw%J%yAcPXRJ_fQiq^sUGZO4M9Da9GQ!7!XyNi^kgs9yj",
+		"x_7*-pu=3/XoZmn^TC4>0-yKu^oZN61kKF-ikCr7ny-1xjYtv7kG#K@0jSd@cs$$g2Y7@8RDzI_=F8^C",
+		"7pviei4/E9C~k-m3s~kp91+2nY&-1I9s5SUd#r_QGsRhTtfv4VmJ*OfHRq!X9QqCEDfNVMglH7yn++iR",
+		"mkZsS4L5sJ_@D8h9!pn#miND&dMWCjxQ7>t*X=Kr6eF4q2Ti3<~hM$6bWtA<X#rZ8to=X<o4b~PJkH^a",
+		"De6s@d/vh21HU-c4W7nF2VqHNHoQknD/f@A~Z7qqoQx~!71>athVlVxuasSuuVAIQPr=AcbK5IS_~rjv",
+		"rEvGZ-f&LpK3?L9!EKHzr^*Yy8$**$9Md1b_ckdMsCNfi08jDApIgF=?!+JzlDVVrcLy&1mEprCqNEvX",
+		"A1x8OeEU~8wyGJPJ1J$df55^8s0p1akxmtxqe~%rG#PiP#q/wd!PqV_uOaVUk!0Vx2&t+L+F1slJp^*/",
+		"N6N~@9JIZheDe~bFhF@@Zu<Pq6u7NVroXu=+Vca_99<Zy4dNiwuyA0tK=rCpSdeM~dLY3X8IdMpCOZwL",
+		"iTT<h4N?Yree>Mb24NHfudj6UgwacY58w#5!j56t6nlce+K?<9rTYq2ZG+I0xPIM4231^U94Xx/clf%Z",
+		">?8t%*%qXXboLWI/Ui>K6gwXuDutytolCRoZT~0!pb$dh$e@6*LUQz/=4z>TB5Fab$ba3w0a-zmCzlrf",
+		"dHTX5fTi5XqkLvb7!8vob$jB691BHx%fws#TJN2I!TF+Wr@$sjAcWvGJ+YtXbMlYlVkq-w*FZPLyp%k?",
+		"qtNa<gVRc7*Kj5UMm^+71!=eHt7P?#i#oC-6R1Xzhxl%18$f~m=_<p&qLBfLj!r3mhM0SFI!?nN0A2u&",
+		"kAqlFR32v0NXtl8ZHTg4b1WUvtB79<!Go-Zum81=tjUtedNvz61PmpecGUAk^6eYiUT_Vg/$oWoTDFMj",
+		"HTN2f0SI0EsO?1M&v1++b_i76TLudMhSVLIeM!TPgjqd=$FkKGiCrVxBW%9J!kkMsEdQq>viRf51arC<",
+		"rH/>F!prVEIeIB_q&xRRij2N_giZD4GTw<%$Oi&%5apEA8Jla-0+U+aWRAKEO7w0CXPDAo%tBMJhNIjp",
+		"#E%*I%F&0Q2Gry/*dB+E7h~V&zO2wv*eqNUwGoP@suU^GUz?>Wrg61h#0?627W1D7F=LRNS9&@Nlhr9c",
+		"yB7<+jp+8#q5yKI5P!!vtaDMm*y<YybXeD&iS>4#!3vMx6t=hvwePb*<AD&m<Ku$1Jtp82e?gziTRyr$",
+		"=xSa=B&PuNZ9AYc4U>SlA8M2lmPP%CntW$+cP6n@AWslIn6DK#p#sO=+*&oa/DL0/#@ORbnd>We6bNgm",
+		"i~@c>a/$R4sbSmX62WbLLHgo^t2sX0EoOK4ckQf3PrtZrdnFle9<4TIj8wYB8iEQ%R@M=8_agc_x9h*U",
+		"B9GtB7zw$x0R8p_/b7pLmdl<3zZ<DUBm5TtpZ5+b@cK+K9hMF0NutmaK!*0ylVPUdmqBtv6M/>p7DCzK",
+		"+HOe5jZG>a6L3vZe&5_Yk?Xgtwt2TODRc1*?a2rDIHAfNb@sxm=z4*?0p~ck9s$@c@Pp8ZhZ_wMRMLO<",
+		"Fg?gvt%eu5hi>N$@4cSkwl*!8XbGihep4pJRp/>*1m92#$S<mtZWz%0y=^*/p1<?!eSp//Wba=o%_^rk",
+		"@!t5MD0Ov0~YE<n8ieJ^j?$cD%shlyC-7KfT=e_-ltbGnlTFVlX/m4AB-Bn+5^To&OrU&MlSV4noU!If",
+		"Bi68I_Y=WumibAVgS^oNu!sOJqq~50epn4es?VzDKzPB8KMLoVX~rD~t6GYDz!B?iO$ueybYK##pyBir",
+		"qbKhufoa*>L@LzU*Qxjt6Kwd7+3>R!zIq^OtER2YO63$GaOn@B8o4YE/~GVJSHTtij3_RVUW1R2cWm*<",
+		"P*J8z#%QzerIMf4EwISU9%zTop7JI^2V*~/jqdB$+vyPVfMrCYjn_%Xi<KCp1N/x+AFff@PsMZdX?La1",
+		"CtWpCl&HhdkTA-3s>$0pPMKc!UqS_p$K@QM8Br?yycjrG$&bvQTR~Ck0!&Y?EGrNB^@zhdAItSS3qJuO",
+		"_A=HPrLc5zn-e6lqXhS9X1*4n3NLr-^HSG_i%r4sa*jD4!t2AOaQgBAS7N@&W>q0qv2>^mhrN^T?<zbb",
+		"5&6l1Iu#&Ts0fkXX_zCGLiz*Y$lh1__O=BqG*bCfbh~Z@OYrq$20fb2QZ=i4l!U$B&Lb<wzj3kAo#kI%",
+		"1rcpjlKevgmicG^1%t$H28hVXPFV2YTtxNArYR0k-^Rk2fhtSFKDHEvJiM8H&<dyP&ir0akdVY>lTOyS",
+		"ladqlUun&7tnJy_h!M2$*j<9~i+UtFiY_WzCbBt#U^l-dcIRtaOn-G^e*>OkB?~W^QhZ2dhPD%3zi4dF",
+		"bv$rT6#30MCT?/8RYC3*c0sFH=0x<3qNe8gp3ZNkjH*$1mg=TQ1Mb$<>Iu-q10AZk5K0qh8Gfq3dKz&-",
+		"a852saZP</YhKLhU=Gypc<j@0^3*k$kxF-6NPMPZNViRM/%d?zce2AV56+ITdMpkR7VJ@w-a!v2SJJ@2",
+		"AgEuAC8uZHgzLtbj4z7XUC>pnga$x+#C>PSGJrLxguMYD$LF&d8Y/fzBRAKZCq7W+MfE_NFXlCf9eR#-",
+		"cK?^WF?g9Pg6plRY6u4*kcnM6H*qzkKeM&Dw&0nn>Sne-os*u/P~pPGquN9d-TXOx*@YehlDdXn_cwAu",
+		"nCz<xJa*C1wp6Cd1bXcGJd%MH55QH1osj/b##07P-hBe*MkW7Q8~*jiIn@8Z-lC%=s<-PFI/xiAMKuAL",
+		"<fRP7NdQSu#yOgFofLuNJXfBq32b7t24GJQCnt=csA6z<rgkFXTx=0o6wM^$JEt&TG>m-V7v1ax7/VU3",
+		"u_B69kMnfbm>ErV/*$SuM$SA*mEBJ^!Dz^pkKzGIvyKhTMufOcp7i+cc+t!@_x=A!sb6SA&+DfY>O$^@",
+		"9xMzMk$Vbn715DaX&tv>Bu>L67qn+Z1_=R1Wmufi*qKpLcilc#XBhA-jcO1n5r+RLn8yyT~X%C42B/S6",
+		"-XFjZH0@&yh6bQUZ!IVI8c@*Kd-dt6WjDfK~Tl7Y0*bR@3OG@SsV0a/EXX6ymT1WVve-AB2bQn2+D_El",
+		"B~%S!A&5T6^M~x-FEFgu*BSd4Z=RsLoJ$lg3k&Eoq7vrOMkMT1jbl6Y!aVwwP5uh#EChjYkYmqw05CVE",
+		"_$5LU^Z+nrVJ8A__z0~TsBaft^SHh^9_3KJm_*g%g+tyD~!lh+qbnu>zyM-Ys3am07yc$ForkPLb82ns",
+		"J5f!=48gbneDp=P7tX_qn%#~A*FFEH0kJlatS0bqff2qAx32y#p<fW-I/jsboINyHr!aKfqtGjfN2@NO",
+		"r*UkoSfLAFWi!89ilmBOHz>tVn@TMZLPbP#N9oz3E*++J5W?bmdzhg9S=@r$UWc8h7YebOmG!ISAQenj",
+		"7SU/6Jr!?-+RVmx9A/n=0cX4cF<Pu2T%-8j80WgYuMTK?x@_w<AhW_Qi#m&A=74n4PYIkT*gBle9cO=z",
+		"AzVhbM~OGj6_bFEs!&Ecu@7%#3CKjy0XSXMrU5ysrNZ8kmg<-01AVS&%~7K1p>?w_Pby131mdXnb4xz!",
+		"kXjh%84k*9/x^@Z6Eo<T/MJXl33#fV@uvmP_RTl@#D31pmZX@1*YSIPhEjAXPIavPfNudiwEePWYv8%t",
+		"DH?ZzfhIIoh9*9Jo#==fW^~=g9!S%-jeq#G+?L<$2cm@$Hyi&-&*_8_LpTUY4+/@2wo7yB$o~jNxC_^N",
+		"5u<*3S+s0JFR!MPPR=eteev$CSl10schep_XvvndEtU0E/jc#@6pft#YY@Sms/c!VtK%9fN*3tB6~9mA",
+		"-gBI#c$SXP7!g-_$BzPkh_HSStgM7!xXXtyMEXW$m3TB7iDWHZ0w_pMcgjO6FwG+_tP/Y%lbaM*vo<?<",
+		"n40~gZHr#vvwg~AwxH1v0aO$9e9#$g9syt8i9DTLX_nZEhYm4Z#j<<O+GTnw/+HkJk/we8J@epP6iFeF",
+		"&EqG~ze5uosv#ilpWs+I2S9Ge7b8y!FbpVj+F~EZC=n2bfJD75oLR985v*U9Ra53&6~E~G^6YulQ6Va6",
+		"2o~fk6Xn^Vh#8okO01K0ts@cjA9rx<hfCvJ4KK7vnqUvySp#V$V0<+3V/k*R/g@+ArRjD?5HG_SJp@X7",
+		"8!VN+>OxAp9X~<40yK4YHL?WrV^edG_bqBH8M21<R%2A5M6H+E4Ok7*ta$qM#l/j4R^LG6oQH6qOKwiJ",
+		"Kpy?zrRHa7jsRAc7nrV1qTSXu8-eQ7tUSU51ovLf!Gl<HetZ8w*6iKKnJe*&sqGa=-g!kt<69S%o2y%k",
+		"-dedgtY>QHpgayJQE&UB9H=u<EHx6v_kt@dXrl4H%t6kS4syqO5^=a!RboIptq7=B+@GHm3N26<Tc08y",
+		"S~#Wmde#%@pA/P5i975QoN9EwBp0unr+6pl+d8WGJf4oGAGgVghX58fv7zz5jZZKxOpMX*u?xZ>mhg#1",
+		"qmU!<>z%8atd$kP41n_E+&@$Jke!I#6YWAUeCHMn$=%DlW/7+_bR0@nOYGT9n#v2NMw2ZX1s#O7u$7Xw",
+		"FK~5&6i165sh*IW3FuQc+$Rh=YXzZBb3ySu070FBm!ayXCE@FrAE*n$*SH+4-G%F2>i&tVp!Kaqqz4ey",
+		"sfbLflmi7#lR~g<8!I<#iXL^/TBgphN0tL#ZX-?sPg/w+NpJiW&ipAY_L+h&_M/k5Y1_t~vFp0ur>iy9",
+		"_8>vFr/$J/Y33BB=z3a7ArkA25mv_G>Hh-Z<D!<H-x439&LXB8bh/kcRMmHTggN9fl~2EEeLO3?GF4b$",
+		"#opPjuTTvQF-iLp+V_wFSqWNb>o06>8_husHoYF>9/y~7<Lu^Wkl/NcGJJym0o<L/S2ca7nmppM9N4b5",
+		"c^VALvl*tGovZY-s3$JcKAF9Vr!cdSQU+o2y@SUz%I%X#YRVfFbKG&-8L^&hb@De0y_R%U~0kf>bBdk9",
+		"wJ5K^oLI*O4M^tQq0/SG<DOL/9eztE%p3O=hR--rLo>@+*ZV6>r8DB?hf6/a=i<RHiCj$IjlITzskSYn",
+		"9>ovMbLaa5h!l1?qbVIF+d>/_ZifI$yA?oMc</PSR2mD/eSQ$8tL&f<68E8&rvkJwcjZC?d7khsDTbsf",
+		"3+tI%Yw5#>yTr@x@y9F4D^CO?mUsoIpp/pXf/iOn<m5znJz-XK2VLvV8ICo??PkMX>wf@N0zq29tg21K",
+		"8joTmymBZ~3ReLB@qkG!3wt2p/0oWD65Zf97wYG3=CqUq~13*-astNAiqFZdr4j@NARE~~fw<pUo4ZkZ",
+		"5a=ULYf<8AB>mhPu0uN&g>xpUlKG_<e3jZ3iS53qyXenW~aJmiaT>z2!tS@bsnk++t#Qiz3MJ6<$7%Hd",
+		"<VXkFs4VegdhcO%VYyT#5k%Qj4jqI6agsRA7YCZmH*jtKcu*4BbVU~m5/OAsHyAYzLX7J%#L_N&/<BHQ",
+		"67OkZl3eeSkh43WX$D&^n>4N7KGZ/oAffr$jrrkMcmZoI^=$xAv*>ik$o@tdupK/%D*E~*4%88%l=RHu",
+		"empG&6qQS1kO@lU%>^juP*Kvni#=pkbh0Lf^I-~k_+a62g=p9EJdnjCi%9p/KH6n4F-4>v7!YbD5l<Z!",
+		"MwqXosW+R+mMoW68skL<F#%gW5Io/GRjywcuM2WT812-Z_Na#Qc1g*^d01VvsN!X*1tlQXp$8i8kru$@",
+		"bQsQb?*<M$h_eRhr*metFFvfOtu<n~!o6+%c$L@vUh3NSyiWs1m-MDhH/Dm2CU$mJ5Q8Q9q+?vaIeAT?",
+		"B%6dx4HJeqKFH/wt*Pgx8vOWFY=e@FBohKQ3H0khxw+vd-yQF1BF4ZBMS2x31Or?~4UJ>j%3Jh-tR8c2",
+		"c8@OP=/WwNr0BNtW?uS=qFUr=_Up&yn&D*e$4rhQcH+TS3RjRCS==iAnO#dUdSe#q>2QGaiGX8p1uvKE",
+		"Mg+8gdxbQr6McsUZj8gO$w5hZ!fZb0ax%X!KNZPIMaes2X6fwW=JoNXxrI+Je$KsxjYbrKqXC@IF_xe4",
+		"y$hb-3M3r*oHj$Y64~r2Hbvzm2iIVaVc+/m1R*K3gCWl9jqt11^-iN#AqGI36=tT$!aENu^mP4#!5Yd5",
+		"8?IK<=T2V485b^T%Qv$U@eSyb0nTuDTnj%@aKboiHK/Z_V7k5TsTBl5qsp<A9yx9he#M0iy1qe5%g%no",
+		"0my+1zsI9<zG<WO?G+=%AodXcB@0=putAW#isOdtGW^+ah!w5/^/@<eo/CopCxoSw<sU6_7ldgR/sCm?",
+		"sBTaGqvckI1n5t~#pC$+C@3kZlYmVt9=/Gn5j0GhJ&>q!<6GyYDmC4*1M*X-jq#rv/OG1We+KLU<MFOY",
+		"MUe=v?0^7wci~szK<kkt6wUjEf3NNK5vSXW3uR2p/&d0!47hRvioT~Fhg4~!UBnYiK=qV2tRMbS2dYyS",
+		"opt!sR8NJaAmgnw0qDV87vz0XavQTytoKgkaMpA_o9AV$8^6p6evYp32!68+jKsCSkO&ORrb2wkWR>Yh",
+		"A>a/tlMDFvufZ%2CobI-a/CB^kd*x3gK%bbSF%HrP~Tc~p8p9ojix&c8l#nTkzQD*s&9KP#VzKY708Dw",
+		"I7mJK4n>U=h+~hC%*XzOiwil2bgSN7WQUP6c$wyGHksC3kal5&4T5IOtU5T3wiqY<roAfPJoz0blJ0d%",
+		"kggVhe-2@ZpmyQ6^?In/f^p%xmbe>s-&t#_q5B?C!?_u+m>ZcKMTwbR=Nz8D+EBvWYQOjPZvwD<d76rI",
+		"S-=nClq_Z0+b0O<qd5Iv?GU7Bz3wgS1L0iRo0U&$b=uVXUrFIdI-TCWoa4TzV+2BVqio2q68/8%+jsAF",
+		"bJu^NZpIUJv@jv~gJ?2woIIBUd1vax6l0D-4TFwS1EYKy40>#ic~vsWY!DE8kpA_S/WTxbx%*zevtkVd",
+		"KhRn+pEa=uFcDC9slx*Dd+SSwei?C#Y3GGBs7b1P@@NzHeJPvGlA4h#ko9Q#-rCRSi_ce$ZulSEdX#J7",
+		"AVf^j#WfX9LF+NLgmebo@j2slu6*TJ4B7Qs&#_A8h1GccS3qQKjR@LVk>K?%=a?6@fc5RWt9cwaor*u0",
+		"@pt<#>$x^_5B#0*K_/IsdpgU!qLZn=WamA0U=E$2ZtB$#b0tzfb-?BHL~j-^1k8l*q~5qkFF?z1rF^M%",
+		"sP8~tMZoi5cf+$%0<wN--6lYY~jvVq?_~hKpu1r0xfa@&aMXZ7Sx#rfN0Iep~H@~+q0<!fW=Zyoiy%=r",
+		"1?w/leH^!k@^UMoa*!SqyFiUAobehJH7*!lIzxXndX5*X19i0@HO0S7rt1bS2MXp%s@6ywABIS5~~Q=F",
+		"u3lJ40<Ti-r220vXn%+18KF>?_tY4p=CFICV08QL#Rza2wJi!idmQvmhAt3u2!!m96OfA3mApiMf/_+#",
+		"</G#h7Z8JDC2!HK3Q-EX2_phci?+=%Di7F@p4Ch2O&xfZ8jS3aSe=_5NeMx+3=w^UeaS?0lf%8-5!NUn",
+		"zar_G1Yrcunx!*0#ge8fTG=9fg5NNLy~y>!6_xy?hJE!e+=ARa5xGM@VCl0@<Z!@UplPlFT-VjRhOVfZ",
+		"Mnf=YsOQ-nHuvZJp8u*JIA7I0Tz>QQir2>+Y_00Y!gYX5%jw8BS*leg_~aT6FaW=3KBQ<nk$d*=gsgrb",
+		"u5oS<FouJZsK>v/egkXI-~iDnkb%x#50415eiNkcf2CuOhl47cY5Tfx1+yDset%dJ!EgH>rzDXqOju<Q",
+		"wqJmbn~Pcnji-8C5BrYR&9tD6W_ap^vf#1XsE-?iVvsw+Oh8qb5pRcENY0bu3T6#LcDYZn/<!9b>gJ>s",
+		"FYDBY4d3990RW5LPQ$p<_^-v+d%8cci%$>-36%z@riHt5ISh!$^E8A>cb4ZX11SiG%^2*4L!Dthy3>aS",
+		"$9^y$D#71&$p<?1<bgbx2HE<K?+<Iup*D1A+U4+u_k6ANIcU%~i<u8j6R$ESmmRvhim~8Z%ptp$$GEK=",
+		"_RBQU%zns!gRV!7>XJHv954@lowqzxE!nVTxr--45$wy0hKfhF1cbFY_-7B/onZ&60E>&Y58KLzm3?Cp",
+		"v#o7quHWa96V<M1GS9*Pd*6y*zMpp~TMW-_cESKI0tgTA+JQ+9bWE!*3XKFI==+0IKA+GY7tj+5h5KOQ",
+		"v>$VLXGJ?UVIGQpq2M@q5okZe<SrNz0brLnsSZEZhYAO2UuFPpj~G-Lxzt@4%<?bnd_YgI5Zu4ss0byo",
+		"4Uh70IJkF5P*iD9@HCrA*0x!5ctqYl^k8DoaAaay6e0SDb1ELyfk@tYog9@p#b<=Q96L?7azAvb/+pX-",
+		"anSi9ip_C_VQcjNkggIf@63<qXesDdbSxH/^G^lPjpqkZkvcj+sVr?O2PWcII+ceZzuc$v3vkWJp20qc",
+		"2QA5%kVeb9>/*/>U~ZxWk333OeNI^EL4c2DfwGv/sOE4aska?XUothnUbuAxv*mONmQ#ssZ>1@vbKg0O",
+		"7caT+jSY!e24yIP09^NVJMIu&tvIIN~#drki!UYcrz?fV5S5ooo+E~1zMyR&R$/Bt1ShQTbb=?@xs2KR",
+		"I$$_m5aDJFF7G<Td4_~jNUUn8imvs&dDI6kr^61Qb8g6Z>5~cx<2v8DMh$F!nwPqf_^Mne2jV%R~md02",
+		"qhqMCb6Svf9~Zd7NvW+3ZVZ?o7%C5Dl!KZ/VVF>%/YA3Ikpr2vln6ieO=!vJ?iogEf?=T+UC/bgSsZ#z",
+		"~$lLXdoR?6mneM*o?zaLIz$<5f5<IX_UJ*XRhad2i~i1KQ<gCAut7XGyVek<BoVW#Su-St3CHGCDnSY9",
+		"MJ0zgaQthxVw+V&NoI%Fn8EpZGx5qy9Aq?6r9RM#qLZUdL*Ec_PfQXqdW2D4kDTV/*FVu@eTU/QSs$WT",
+		"oLJ*E4Y$tQ0U$+Ac*VPc@aedH%Su=qDu&iG4T=c11iruTPkLxXm90#ggyei6g6~sOlse7ijW!ehENarB",
+		"7sd##6>gsm8ZFfoiML7z5E7C7@%K+u$*xc=c5lA!mHB3/9TUk>rU-tRq+!/>2D6X%b$=cVsCqLv#hbiA",
+		"g^-bfUBuc&LSWGC^TL4&+8_yHr0R@K<v1~UmlM6&M9xTWK>w?FmRdCY%Ps73&61?gWx=ao&cAJeea>iq",
+		"c7h<Bnn!1yI@s-7TFS^>iJ#jB1@$HUIcjpnE*fjn1Ln%>iRJz1bIyG21CM&GlRv%fsl~xmID7va3&3@W",
+		"qZK1g%I+5-!Wo!40^JJd2KiW2x3A94n0y32D9cC4f*S+Xr~9P5*sj8tJAYe338+*=i+FQZ=0%z>FTk6P",
+		"tUrZ94Zmtsq$O2uHkXrthEanm*RwVj/OTich4TMwzcbsrivq#9u=#AkTJ5a8Iw<I+luxoQOyyoF>Z&3>",
+		"ZF/Pyk5lkb7U6YLlcq&Dc7U4ahQp%8CM$7?dCv=M7kX~J!nM&^m=hl92sMYGl9N<f94q8VD1sTcq039r",
+		"ftGKz0CS~~4ElHeGtIVW7kAoTqbpqN_W<$5%fW<SjOjCxU*+T2j1Osm/_0SHoa4ULl<1g~zfz*e7EJCo",
+		"j~eQT%Bb=UNOL4m7iu70zcfYoKp2rBpB9VMppQvMCvJ#/5F/-x0_v-UAPqQ9jC74TcpGXq7M_gG4$>w6",
+		"jCM4Ab~*z>MZOp~FQULfgd1Xn_DZDv6HR*bCu?BGMmlXMt4QK4k#<CWXxq%f++tUSjWBH5i28_Gz09P=",
+		"x<UX%*O3!Xa7eT_3U%^ZGYLtQo8lqzj+A^L@S4~om?4fxkQY-$2-bb>umkp-DKe+=+yVdF6GUm/~aw/~",
+		"n#v2&U>u&#0Jry9i$A^?2Lt5cc4SfWM*0J/pgj~dc=&2&X/yj@qceRZa~a-FklM!0k8uyDuhX@3X>x@5",
+		"cuD6TrcxSvr+7nGX0JEeG/*jpGHvB$ds2!^1-HFkf^e09AYTwobMjCHWzh709_70s8wlq!q~@GP26hVP",
+		"WAZ0/9nypJR#F*K_KWPlVtoJJHZHgkHSEeiqj2q7#Rt^~s~sK_e%5JDb0XVIuDF<#SuO8~pEVvaO1IBp",
+		"jH+jyj7bv~Y@6ljA_dAcA8YHs=iT1mv#<aE6l_>TiYxR7zpH!O^Bx4eYd&8e!0BFZX01-Fbq3=2a6bH6",
+		"9Fm_+wHqFYp1qVUfgadDaHt/KV3wr+/l&??UHGFoNLVvil<$I/b%fu@5-i&je6Aa>71Tp$c^^#mI>f=2",
+		">sGmqb!<8VfCpySKFXT/H?Am=3Xe_4fo2+jJWaOJoLJD07a-+-eW/h_%FAcUTmb%nt%LoZ1Vxok2d6oX",
+		"mD#Olu$reQfhpae7gB>5%^Fjl+gQeo4sTo$SRv$1>S/ec0pp7/lqpL8agSEy4PDmk4c=Q4o2?/Os81<q",
+		"iI%LL9LYPS?uC8my*/m*EHey=v3R-^lXfUh^!!?mn<et/OGt7wb1q9teQWhpd~8J93gEVoFwM>K3bChy",
+		"$jLWFTozI!5wY/+2~$hf2Y6!Z%h@g!0CB5#u2h19c0@H#QH=B^3e^wyC-jS>clXYckIZK8<lglElvg/4",
+		"rpSp#t*Q3RVA23C?w^+<x+CMw@^5xvI*13B-N=E9i!xDzWLwY61X6N31VYpblcY5f3#rXDwEjMX#Y0m8",
+		"h2GRR$pPpI4au<EvhUm!Nsio7k*@#$kyvsUK_l1V=LG/k9^=Lyu<iwqgnV1zuZ_@23M^aJ+kg8tubK5$",
+		"Mux!6?cg~!ccW>1U2Bx%dTyl0/%M-Blu/vg$>~I@KJVU-N^i2JNpSeeVlOMK91_i6&Xeh~4A*N$lWFbL",
+		"gyny~d@DwrJqC13t7Tcnor&t4m_G6D2Lhz6?X19A-hT1w>G-ckpUfrg34/jl<3$b_39>IG*q_lGwHDIa",
+		"5P1QJS8Zz42?Wg6oxU_>UD=>v_/2MTQe?cIkRgCriWw<%FC1VV93vGE~U#k$qo@<chgmiqg1Vl!etJL=",
+		"q1Bv$bKsqVs74SLbvuY?o??NafUR#Tyg!lt5*y%#FS=hp4m?Jza9tKq8b%/Nl%sQn#q8wIe0af80UIY=",
+		"t=v0wjm6C-FMJm*BTaBzN2/uEV*zq^0L!U?gC6=At+A!SLQ7JEL_2FOJO>Wg1Z7t*NW6doo7a&WL8W/0",
+		"rb%Zxn*mN8Zu=!sOFHvTZ4?ZvYgJJ8QIA-r2HnCS2oyh%LwxzPn3<YjEiun_4U=6It+Jpw$cUYqb=74+",
+		"?<~qiJ=dIUur?VOslR@KMOkXs9C6BNdI<?Wi%gQcy!?^$uaVvyp~dEC>_=S*$$RtL5/X8WyPmoCet*Mu",
+		"8G-+u=Mg7CaU*_62Vq#<LElKP6OoQecGxOv/va_wg!$/%4<>jJfx7$9A5?BL1xtFGyfVxBae*RH/dZXI",
+		"7<@Te8@Ve<p-6prC@&#O^uOULDdi#-%n3M8rVhIL^44DeaTF6l3XQCZ^Wg~@M&qEb#!0Ly9sTpd0!_t4",
+		"gt2%swY5GvXP#rqmc8W^aZK?Pij>B7R&6~6Rom>u75_Z8A!qs-jsnz!mL!qOk*hDwD7RxGiXTeWgvEwh",
+		"W#Yrg6LY28=BmZlwL!8lena9$Q=JhE^P*=/b+>NA2?/2dDn52twA4tZ9C-9-W~N*1PA#&ANmyPVxoEE2",
+		"2KJumH#yjlj&z_v=FGhXs@=MDXTsQzGjrA1o_N-C>a~BUVt^^C59H7^wc#mo6?7$z-SO1frw-3mxyrJ=",
+		"@=ic6caghh4F=lhNcRCX+/!O%$_muTAUJHjj_juMO=A~tRLu&@2Wo^07G^E%4fm&0tN<u*4WKewgB5wh",
+		"EN!~usS&sx8uZKLs2^aGnfT0g=4P8dtAJVs*>d?&W$4aQAWglWfue_x#O3Sf>IW-MFvu-TzytCpUM0x7",
+		"mnEI!aO?smWbcE6oRgH&4D<8L3XnyDgT9K>omRzeE+gZ#enn@Prypnpc*jc1QB-^$qsb_Wk~Jj9<gtmj",
+		"m?doJ^IGzba!R#xuMB>1zYCV2+=rhys&4pdZYQZ0l<0L4=kt&kc>9Lm1pE_JHyO&F&8IcdmGIg-Yk3dz",
+		"0Qviwb%6LVLSf02un>wiH^KZ/pF_g3raJCD1L1dH7/RC!namIfCeXNKT6QJcf1/hATpafZRohM_n6dDO",
+		"+oK+Gv69jti%ybXMyE=U-O9=Bf5Nf!9hZbRpUM84N+Ezw#IEt?44HcL%322kSTy-5h%^QZk!D1acJ#%v",
+		"9ev45QL^uSmw@tv/7hT1#=leKp@m<-^*oiidkA__GVHh+5Fj5Kc$=evxD@F^3YX0r2fvg>M>liW1!d~~",
+		"9^gVUmuBQq~Qecc8VVO@xu$kcYVrVns8i14Gc2i5jcVV=e*$!+V@<Y0d+qWjkVOS6MxwI?k4l8^1lRdv",
+		"-sOCJr6$1^luDU2zRqcxk@T*&h>s#jdfTLoIXPPD*=D!G5o6bWMk=rHl%/Jfc_ilg!~7L/Uy@tt-EbDf",
+		"7uWfST-Cn08qI0of/%>ma&>yu2%y-2gD+RR4<*kG/O+BLenjs2iFjP3HL59$ajz!icO#xrraQ#@Bn-Mv",
+		"sY2eOwjB7Q71<KCFcsWR4mDdAtw6jaGM6gYDsaOHdCAj0f8-ApO@Fd/=Aklg69v1A2Syts=R~azd765Y",
+		"VMwo+Rha1qmKWeO@rd25/4rziL8r=@04b?T1m53SNLN1#KPo%Xx^Hi*nZE$-kFzlGXYo&>?Q#&v&cCbO",
+		"PKK#o0<TCF05S&bogxa11x^L-74rvl!Hbd&#sKTNdg_k2t+P1^#H+iwv$-7FP?%VE?=oUceXyT!pjr%I",
+		"qrkmC$kA=i_0CKA~dT30YZcYtiO1U@q1j-#upE~Wgj-76cc!DUbp3=gnVwkRS5#fRoXc8?1*&1?=sMo<",
+		"bFbFS3&SUu+CV0s#Onn2nBK#GJzR38ulWN-u<+m6wTz1l08O7C-h-o3mGm*$/mO/zow1Hz7Zhmmr-aZ<",
+		"7RvhinJhX1DJMuYHX8lgWI$L^BCEWiz/x-puBivr8zUfGOs?Cj5YaW!W_er@CyMN<oz7K^@@Zo+kEu3E",
+		"j&^i+$7y1hfps=0WoqdtwQlFE+QoHB0GuxyRfR-U_giTDFKwV&m5F9ayBeK_oNhtm2*^JHCoVN&A>~xr",
+		"rEOmdg_$+y+dnVR0JRhXH@~yRt>m<J69Mhkb5#vu9!hf%v3!P/1DLQruOy6^7#*U!aKP%9$udHU_4a@s",
+		"rq%HAwA1m#y>g1sTdkIYN>#6y#_7tjfDGjx/5j>OfuSoozY?o4eTiqm0agg0OL+/R1raW0YQQj1Hf-g^",
+		"F*lQCF!jV/Mf>#&JIXg^BTrCBikgIN4bZlE&6_~9rlvMUn1-IXhurVd72Yn9fpIK+i$eqnbTjwh9wt%L",
+		"lRia8m*Mf8>Xp9+MUdX4-V6Wxna-+Vy+uh+mMxFj8Jj?#J<-+wvVO&Glr-7dxmjZxZgojUR%O6QBqjPb",
+		"pTV4m1cWa-Y8tOd$*P/Gp/Kvl8YBE$*q&oep?efJOQdLhMpOpeshxU~OiI2Ao+KQgc@EXfsTejy^p$Kt",
+		"465pQ5AIO@<P+4Ngn_=+h8%bWym*h!_we4aJf#VuPS%18bl4D#MTBh!Nb0x0J4rngk_Ge/6y21Wq_Eu^",
+		"0+F?1eSDWF67@l89r#/up?hmGet9g%>iEoXVmbQ6faUG!^wfe!R4tSDUC2kgi3GH_nObG/~+I64N>g_y",
+		"yL#POGOv<jazn!>6J5rKQMSlZ@-77k9KK8/^!fw/i%y7hND79XcjRz~mB6f?DC=#W%>GS%y8Pa>cXA^Q",
+		"yYnk^6HEOZmNIl#pTV^aTzP1hpY_A94wfv+<L%Xs6urMS8xekYK2#4xNMTt=FE6r>L$z?Tg-p@Il0BmE",
+		"BS2n7Fu5n!4MrNBZ@1<t>4EoS<*j0+uA!%Thx~*=nAr8Z&KX$tu+C<j+i2#gf9reE+MnoQ$X%^u22JNs",
+		"PM$RY_ttA0<2!RfFUg3&gD1njkYyDQX0sosB%@/Dmf_VXNinIiVocuTaOW_tca0lM8dRk!7TYSY%+gc_",
+		"2DMMjP-FCExKJ_AkX1zWadtv!Uz$7NfvcI9qovcwh&/r?jcocn8mXg5DCwYHxFPaq74mybgktKWl^48x",
+		"Eb$x$+D>iPkVD9@zny7Da%A%zxqtX2=u#1ZXNaz0@r#/NqsXtapT4fHEsWuDph!~E*l<YhF-N^YkVF^~",
+		"dmcH6Ak05Jf*hg#Gx59$D5KX8G<XUmv4x^3xU0va^qIE<rTtG&5p3SBCQ4_*3WBU/*PXVa=$v%vBzm!M",
+		"jeyf^Z/OYMlk/eGc~rGA8jlGNVwICB6G#+iWOZ54uw1A<e8%%lfz/$XnQ$1F^MCE*cmZ+Gi$l#MhC*wX",
+		"fLMc*I@Rm%T>IqYLW?tqWE>+H>H-pVhfRD14=@6Em6n>3p?N6z8P1LFbZDXpdrySOt4vjO/Mem?zcuS&",
+		"ktR&<WeK_aa>Es%3Xqgf4#R<TCmkZ!b/LGvTfc>io>u!lj>hmc~!y3j&U&_9RFW448uu9khoS>2slWgp",
+		"qJ!i*C9>Wj3c%&dgsJ%i4Qq04Wn&8Cc!S7GHsK#izjOaMgRPzja!2C1OCBC=iwU$WAn28ZtCtqY7<F55",
+		"9&ROMs=MZ=b?DZD@GixRjvNV7m7CIA&j/?Ugi!RhpIM4lmu^WG58M4nNAg$viy0rRk/bJF2G50kNP!zm",
+		"oNsYB@~T>~j90WS/5KDT+1icU#X1%CX4JokCZUvhOQr@KNMmQ=ot#UyE=Bvl^qSxAvEBBOsJPNV7dEFC",
+		"tNHm@RSHo1lp%OI*X@Y3IrU3cs0LOO*vLniz_eOlf^t*@s46ia$k$~%An0?qeEP7-@54R^v>-xOmFY2U",
+		"i!VsL2oy29Kfz-Rv_PC2cKs?rMKWgrPGjSi4*vXtMv9/zH/D*ivAFu4cdi-V!Ghj#3xE#a5yz/-g=n7a",
+		"0ZiXH>!Vje-7kVR4>Ye*pz6>gbi8RXQ7YAU0jK7o1UD0y%NnrM77^D%gkbypdFM9+$H5J*KMP%w5RXJC",
+		"oj6g?jRG1ni~s#?d&o+>p=>=#9L-L~six5PiWjSib8no@diUwQu=$M5qn_M^+CO^etIRb1CrHGunbJi%",
+		"-Eu?Z7SN=g8iUSkTNec?4mdKF^WZR^jg-b+36<@Jjj4*hF/RhivML2/^T1K9Qtt/je>8UYp*1kapFf#?",
+		"+_PYcd2i7wkXcgh1zk#SDWYFfV<s~vV_N~pVsA8@3Zlw-y<ILXfIhzUf+pWcMsO~Hsgv/jl~HTyS&4T%",
+		"1Kk!0U&hA?gJKhK=cV=u0ijQ/$2Www/N@z23RY<_%K+cBX=GX-Q6uC%d2=lXmBOPKav!fXsN4fDbH2vD",
+		"vI5sN?Oo5Z5CIW^8--=!<wWvV_8IH>uc?8f<ppyOxBv!Ki<mY@Sqf^pMV8G0w1Zq51tTZmd#9I2*l^^B",
+		"k&lmcs-eO*1z&h5BHjgZ9Z&xDffC6C=49c+_/1Op>=>LeAf^7mw>*pOB^fA_5Pk1Sg=rfO7^uw8*UKMW",
+		"s=_yRBhU/OisBMpzTErzHj9Lv7pW9zv10cvMHsl2j2PxaZPZc6Kcn>05%LB7N_IV+5K>5e417/<i4bPc",
+		"cl6cyu!Jn?Kdr+AO3JT0V>_>Pt^$6UKwSmGBq@tFc_y-n5uGuAdbDnBh_ewiyEsWchHqAbO>9uUN&JXw",
+		"&=S1>%_u7?&@+T~G4xj+4Z%FN8X1J-qo4sZuEoSAx0LZlp^7yY7zw@2x>iBthQUaSj4Ec-ev8$Tb7uum",
+		"FtyGvt>MCn2ezCR0-Yze0oG<g0HmiMNsTnkt@_2pf8l&fVkG9Ti&uqV#_P>I/V1B*XRpatrpT0=k&BNC",
+		"4x$wzKeTa4DJ-cs&^A49%sIFo#8%7A3Q#MivS*aIaGuqRlIu=!F/45/IG=lRu8yXuxbPPJ%e=QT8@*/$",
+		"?bchT9ZD=1Bl+%5@Ai2_hQ5v9u&e&m5^_PiC/vEmW4DZc0?sZ^$@$63uhX>b0QX<-7vYgqLBF7*cGzpE",
+		"Tv*oqUT<*p=l>hCUJBTd9#^?jEQQ@S8ag&U-KZVK$bh$G*hi3$g?ywJNS!p_I7e6C*#pUne*uNAuiXm<",
+		"3Tin5S!Ud78swFx0aSzADfu>X$+4k%pO2D/sxHOpIwMeZtPCN%cO*sdTci7sn$j&+if3~SrF@X-j%hyc",
+		"uHxm17WXpVds5*YAL-mAXSw2ccGX-TVz1o/LLZuLKWjdV44Nyhaq>8~9b~yV0>#nMQ?Yl_gq67a3XrGa",
+		"rC!^BJ961aHN<l!eU_Qd0wHRAc^>v>Uoj3d<X<!3-g4lLrIDbOev%l+y94VO6x%k@r/^Y1ADr@SKo7DC",
+		"I6PW~x5D~C7Opp&Y=*dkahLRC5~Be7p_hYwe7YiMA0!b7u4IMGS=rDhYw/3rn&sfmnK?TrLhfer8_eYI",
+		"tX2_&6CDkOm*q+8R#yr-o^PIoD8N=yzn@~3hU3<U3~vwctj62jskBoZ3#qr-1?-4QC2x!KJIWh7_=<IA",
+		"yxOS!OSgDklVgmQiNrVc%JzkI/xhD7P>A4/nbwCpo/h6e<A2BGuhk#AriSX+gf7ki?L#-+6NaYU-7fY*",
+		"q4C?>ML&Tqg1nGpH<_oZSQ*#<HO&4ermWbFy%Z#?ZdMLkcmf*YioKu$D+USJ%cY3nrNjLtiEmqKmgQCV",
+		"lE040Oc9KbxpOkh@QWxc=I-Dfj7o*!t</qqa4ZX%DB9m9uZkbak*iF0MZ#Ct8TuJ/tSEfDhJAm26_RU/",
+		"j1EyAmBtSIo9zjR8=OWH8cCCGrLf/Bmw&RunFIVH<Ln2pR~gLh&mA-V7c<hp%Yj#o7@x3/rDxc@&GYMz",
+		"T_M/nzjhi0auX747@qC+Y#CsGLIsY=y0&U@_J@9nocBe^j5w/1+/1fq6NTAwm4$?e7*jIIrexfbi#+$q",
+		"ehWg5+KmPsecYMek>=cN2wju<s6smzs/hO5k6?K*7TBWBg<>m^Q^r^d6y+E0$$7U>aqTEe?kA=HUO8yM",
+		"8>q?H+Jx**tcjnNT2KYJy#Gy-yHu$WscTrV611Y-VRmyJT549>wl0hpPl/5p7c9w/ztjlLr+qIa6Wu@J",
+		"l-V38luE9pJeBRs>2^FE2BUV@YtIij2bh^Czrj52BT@ey=9TkWjE3l00e>@<qu9-AgZ-Hu0fd2!eB-q$",
+		"l>v2<aU9l/WBQpx?UN5>1hRL=25Zc<yjMC?5VWimxEzNrfYs>y^1bt7^Hdcg<jWkz*GEtXYNSdokf=E0",
+		"0t8WpF63_I!zxVKu?<$eou#Wj=Do$e6!=0a^9A?qdJ~!gq=U0Jp99ut/ISnk~?-wz_uFM84wurdmNu^Y",
+		"&5?0F0rSn2lvv$@n_im/0j@*9s07E5X3@ViyyXpSyBxhb8%@K#tzWdtp%rd!h7i48Y/88jC=M?drgbf0",
+		"gz$oO4eM=n&_4YMHy71x1rVjfv=n#3!e2B6Egs#UACRk~eak8EIZA@#jJfYof3d~@&D%qb^yWZFdh^=N",
+		"K+n7wG?mZztAwbG_0+y!b$s9x4G~gTYa>UJEv8sojfcdBxPA86kv6=ELWiMj7d0F&5Kj?&UQnx<Ks3Np",
+		"PLIIcX7e2K0UZxSoNqR9wNr@j8ObJUF2?1Ylo?X68^cBrn>UOs2^KO/hm$$T$=G<9a$hIYrJns!eE?Se",
+		"iQVE=1K-uSc5k~_+vXdYyk?#%YElTpe6F%FPQ%pm#Yq=H9A!-gv53-Xq4%irjP_tw3#bbn!6>&x57gJF",
+		"HmdSqxQO#vz?mqJiZulX31V1=v!Cy0tm0_seM=M/xMGzsH2EQ7_N^y95O2=HbVW31~q8KAZfA%w@ma?2",
+		"hnIk52A8B763$@meA07l5pMf%hV1VCeaK6MdB7?8i4h7o<b64y9AHUnEVP^khTU7ZVSm>jxb0G2I_b1G",
+		"r1laik^<^/jPfyCsOs7L9fYSatPJ/>7da1vjNmgWd/opTn3<U7hKZ<sjKUz8hXFR+*A6dN%%^Z/#~!2A",
+		"!tRPGo/S&RWl?V1E/ZYKNEo$go5Cye>d<_<gi>$toJ8o$o2aS#XV_bum_5lS9?ndB5OEe20JPjmoYWiT",
+		"!4M!$exUyDfmSKLc#XmDzLpdfaGkP-f*0jEm#-Xwqk1#hhoD*^seRz/jKUz8!x<TM*A6dN%%^Z/#~!2A",
+		"a%_2W9g&1M7Ce@25EVI1x^S^Dx<ewq8fmicHyY>Xr0!VLA^7!+-KP0qLZ-49LQll#g/!JQWOcR6g4raH",
+		"lwL=Yz1KsPtd6+EgzC1ye6@?$U40Z&ze-h=7#F<rkP7WNp&YnMtd->8gC$B/W6O=LuGW!TepV?%e@oSN",
+		"ide_MDER2xHjhWEFksQKddW8ybyI5U*8XF@pMo$&jTNa_jE3CpbtnAznn/bueJSFQGzc*FxbFv+8%ext",
+		"B<S8Ie~+3dDX8eZaWJk-t5CAp_4VMfkb1Cl1zdl3*Z75Fdi>rH0n>Ehihrm5a7r*We8rx&CbNX+cnLt=",
+		"sZWA0%^>pIDf7zD3#Xn_cLEl_S7QxDhA512U^VS#ix~6NMF_*Kt^xiy@6Tn3h>v/K#R5G#qV9u~<-TEp",
+		"itO$0n-V@~fmF4zm0i67R#VbDA+8q/Z=qD_g1OVrL1ZZF7QPL$Ca#QSh_zh4sZFVcjN#qf1g>-9M&p!v",
+		"7c>f^%Sa!l8n-6*c3P+NrhHl&r&k^K3x%xPL6nL*fh#c_s&wEzv%5#?AuXUwaoz8a2s6YA0Or#=7?&HZ",
+		"q-otldc~kQPbKmZ7&cqrPKt<2KYD?oj+ibATeR08mxAAm0rxLnQPUK=gow36AoiNs00U/72RDR9~<B#M",
+		"hND9lUuDE#ZVTE6R?KOq#@1Wvk?q$pyU&~Ga3BkxhR8J@83NRGLYsxEE^kQrC7jw>/Y^KRoGnDtCowpX",
+		"ywU%OpJsCgSNT+t@__Z/kDn$O5SLVh/pM3739mYqs?PxX/vI9pA>7/#mso!Ke-21rjrC3CRrZNZdcl7!",
+		"tV$9vUDEf+pbj&gky!PkCKNCLLTmF~sj=ScrdlCPn~^t?2xMu&/GUo/2L%GGr2oIbba8e+owv1=<uOSx",
+		"UHaN/qfhZ5AYq+8x@jAYm-NhObI7iGG+z8>ejo*>oz/m+^ze&AXCsCHDL>qBR=eHP_DhObMuIrcpv<Fp",
+		"l=$Htkp<v$qbfwmnIzWSl=a+ff?OVadHKl%bRF36*1%hmP@LoH!Wya+rDHiTuAQj3Z<Of0rQv3QteTgJ",
+		"7nCw>9G6=cHHt@2wLYiy_0tx&6t7^SLx9k353&2F%@aGD3C@x1pW?*!Xhd08rLPJ@Nl/QK$*^iHE7fH+",
+		"4Jm^!@X^OXVA!yC1or_$cyZjDle%^&D3v&V<u@Tt9*Uji$$gcO5x&ZmyU0B+#C4!skfRVOaAIDLgz-?~",
+		"fkT^$Y=$bG@H-Lup+3D8tujk&GU^m8!g4QlzC3wg9z-RX~3N%vjs~oF+b^%0rNfa*!V2ZAxckdT!2xBJ",
+		"sT^5M9g#Jq>Jj~/7bM~iP$X<LbKxP!/%U/~%nyj^$zoY6?*>f#2riIKGmF1YX~DJIv5+U?JRJCFj#N/@",
+		"eUFsomsj~6kPgo7^YZkSFiNuq?ZRkf7$^P2cSE&G^Pu>>7zRPa?_ns8cDtp*1Z$/hlPN92+V5/iXnmtS",
+		"NB_JgVO=ct56ylbuEb0i?Nu6dCs96iK6$6+s5FPy6*zt@Y#piE9--4yhY-eXlk25Z4gG_8gb8uc5h9V*",
+		"Dj1l>>Da>qFlmz$u-RossY*MKjavptJZgbVqeauTz@jvKK%lpYil<ei$bv0loli**YGN+$xfe9^x_X=%",
+		"s9d1CE-FhQhVR3u<&H1?t/zk*Y/2NA%/KRNacp8E2urCDfDH@=v2H^z8dv>8/@ZF92F~6kc9xrYRUc~1",
+		"y*I@42kZjM*naj#f9d3VZjm0Ibzmw*o4uU$oyB2d283Io3P&ZCjxjYsxEgRGZF-zRVH~FtS$Kr4>@S2T",
+		"t=2nT&gJ9Fh6>mx19jJDU@=#Tyn0=s3Z&nY7HjAiQDA0o!f7-Esxw07Varn7wK>EdiC1gopwxol7XPEF",
+		"7A1fv3-DGDkxky#jjNNx8w-L~Ac0ELmOgUN#&*zWu_jqGiwLP*f^-X5n*ue<7XBe?n*rNvvmjrEa3$%t",
+		"rJ5iDu1uxf0RJ8g?tiWO3@<1u~O==-o7fMenRD7R?_$~WozOZvgxZKo90!YAIp3T@3z5HBx7$M93%-sH",
+		"l<Jq_atXhReJ!eDnkY<C1L$F5O<Gp2a4e1Uh$9bosBWU^m-^DMyYPQAzHhWW-P7ZnqAdgZ!brM_pkdzW",
+		"#0~H<Ar$_uV3tH_SPVpFrG+wt9Dz-ejk^5doIiH3Ufa~=Ktjun^OO=+aI0X!nc>iX2nge^?L8!ZTwGiO",
+		"c4bN9cw?LwngnD>ln%jC10SFbp/aDBpkgTec8VhIC753&iB$gCv?J=Tl7rdr&3$F7lMImbZRDtKA&cIP",
+		"aca=?XtGx4POh&C>rkHKKh3KWUYc/NHqhe?1nWqNw9u3gpy+Bb$O%%4kfvb?O?0Ax5#jaH0Wch/9O^*@",
+		"=?VFD6u&Gflfew_WcsqMm&>vRJ*O^Rngt5pGu6xitn9fVR!k&^a9>mAdv$rc!y_F2BS10h_3Z7%DBfB8",
+		"jYOr?4r_ISnR?shgyazW0Gz>iN@OnI8Y2f~f5De+^1BgE?0@U+SXOZctr?^l*jJkC%Uz-8ktuQHGHks/",
+		"_=H%$bm-1Fc$0IxJonnYh<IXkgQM+xpPz4l-B$5^IlWoM0Op@hbw-&9x40hLNiU&-@IeD9ecxgpRHu2_",
+		"nt&E#rTdP%v&u4TYir5R2rqOBdVtxZrl=THnj?&=aK1WT9TMVIE%ev*b#LUE~95=Lbm*o!VBWPuPAQE5",
+		"!uM-g_3s$@y19v3ahS+#d01v7&C8ju?0QI-^hH**bUyr8HVFcYQUj8r$CZdkdAJ+Ue?a^sUOS#qh%DLg",
+		"e#j//Q-vUZ=1Yi42f*Q-_y~PA7U00alN0t0s0p<RB5-zS>YqWsI4d-AMvawtZ1++N1DVT%EaXk2=#F1%",
+		"mA%9mnbGhZqW=!W4x&livFe^P>W7xdSHiFh0jl-s8ocJd*jA>uoW<*_s/g~mFiyy9%c*@kgzdVtqggQe",
+		"j^g-oc9y-8fyMXZ>pkMcvXvziD6V1^8*n+53xFxn+t-H3s/Z9hn6~?*bG/Mr>ZNyV94H>bw_%D0dYZya",
+		"=eE#YnJG6LdI<9Wt!KkdPkJR-j!eRL>5KEJ5zK5&02O748/loH6iZSn5#PUimoc+It2pYp!Cq2%7yFrY",
+		"%*DNPkp3$2@f6YLn@BMAjFoK?DS~7%LW#NFkx9mIE9!s~aTop~evIUPk4=V10a921uYU>LN^^>50V!2b",
+		"Zol=r5?f*P+TwH7sLR0prglc~<d26*0VcoM^Usn5u#7M@nrvGolvDeJ~T3o9k54O$kVb4z3xY<hE4sh4",
+		"5tfXGMLwr!/?brZ2&8=_^!>9@RJ4E~9xPM11BJ1Joa0r$3gEhd1EPAvcUJYxnX88Giqez+tvS*Y8!4Qn",
+		"LIF!H-Mdw86ZyH_Q24-UD*Fr2NJO#H3/avl_CQ1ve8~DPmmzWJT0lvIBv@lJTmix+9Tq#jNFOBcDwm/x",
+		"@M-_h99!sGei3uy@w!HGi8Ud0qg$l7@D_3I6Lm=!u0*lhC$j-LTX8+*BtENL#0OPT6~>d!p91Yco1V?4",
+		"o!H&qXBv8-f9e8ji~iSA@Nk2y~4N/H22!T$P1ISQbtpW15fCcIt2E/A&#ZkP3*$+3eD@~X0<K7L5Uw=P",
+		"7?NLh9J8AcD*eJQYdmBNY320C8c-EqaRRwEsI!k5RMwxKm~/*TeKsorkbxN4!nR>HavO#hrKza3^WUYS",
+		"43hj14?7a8d1aapam+bmIG22&QWSR>%N%?!Xeml-~WKoh#zMRWF?1VNyh/3FOPTucgoj?os9t$HcoMQh",
+		"l_V0*3z6Bg7y>&mXJyxo?@n@ui#?tY*!Olov3WB080>el$KKpfX*=CTZQRzWdb?1S=VJB-q_=<536fl-",
+		"AORA9V8h6L61oUi4m~q2M~gh?sqoZB#C@YdcC0vxI5~hPNwJ!=ZGN98?e<COO2y2ec<WuXpHbZqg=2N2",
+		"X4&b<AIjtp@r>1CLBz/</up2?@uW$/8y_+9f$0bvyznA#*N-7pJN9y!0!BURKi7W+b6&3q@G#rYkJ!G!",
+		"dveM<$eu-7gRm$+Pix+En^&naoi=wvaGVd!pKOz61%B<bu!1PHch0+N1_nx9#RnmNOEX5H>M74dlcF_9",
+		"mZYjr%6_KTwzUz1a%zgm92n*$AmUVmV5_qzpjmWwc%tn#lS6@H0vCZiM7T^Q!v<=yVX=$VF%da_0?HbG",
+		"D4YXC0<MMQe_Wk+i-on#HwNJHl&be-5Wi-fc0469m+iol7=Clas94<c3dob9xD$!KaGmQQq7zh1tY*r~",
+		"+#p1T$hen6#~Ju$<N8NVu$+I*4*&PpkMUjsauREJQ%otbp$0ArCd2PtGsT$j?BZ%CJSv?CrpmWdp#Hk7",
+		"qet++iQxWTi4~nkoO1VflCMNedy_1^*rWPu0fi!57AY/u~_?qr3ykOlpd91/u^UBwK3ykPs9yRAs*#TI",
+		"%fqPTgf%zshsVbN0h~2EyOC41hw0x^LuAUjktmFXYp<<hdPNR7Y5wby$5Gl5/Xy&yl11XZ3y_fnel@$C",
+		"i6-*QF>p5P@jH_md$<%yog=lC08VVbSP+wjpL?SOac+Q/C&k>~8zV>jppF0IgUO+AsyhH?LuqcmB-ezH",
+		"mcF+3i~jpCKSkODH-<3Vocpl!D?PYW7~4XUNNo7m1%F1BrMYvfx-xzie=KKf0lhKS5zhk+RLgbt#LzDn",
+		"m8hn=b7gY#_/O68zz?BRweb-weaaaZe*ERE^#N$YXmwSM2i9g1oRAH!AS<Gwd2sL9m9m07CpPZzf#0AP",
+		"EeUGbdEj$=o/HoQZ5ZK+nuykef?N$8o+L&*jx~P$dabSn1/o_I$lZIRQcqvHHYMi3*G*h!c&9BAH8oal",
+		"p%@ZotK!wq>f7j^tq~c0A%JMhZxX8TL71xncw7^Ct1xHbqZMJ&>/ZL>>qrKL*MzvbkrtzXde6Om3hDA$",
+		"Wm8qzj?ZpQt*ehzX<jJ-Mhnarp6gC2XgRi4-hV4IqNE^9BH&BSp!bW#05%#K7v3_fC2Y1gqo~iix~YQu",
+		"*^po*gJmhUe7$cr7G?@yqX=~@aljKGS#bNI5NW_l6EZ#9l/>~vynw#&xzd%*NwleTd#7zTUOEy?brlz<",
+		"H=+l7fB*zCGC4NR*anaIlJpm$IvJYQu?Ghfo9W-$9H-DQXf!kEoWL#_lfPnKD=7ZH$1daqV$rn^6-tU-",
+		"oL>$v>=dJJ@QIrGaOB=/kPe?Lz#_qV3~gL4pLgIo403P^2l6IFso4GX3qz0N%6YUgRF-wHGsrWAAC7oL",
+		"&*#u>CV>$X/4Z&#naVO$&6p5iQ=S_mVMrFH1/m?N8~g&@pJ5x*aPtQf@HAKDsbJ>XeH<_p1~5fMiqGH*",
+		"Ff7EAgNuQzSMx+xo0^AX2S2oL!sNa6NAdw0Xgk>U9DOV&XM=CgfPT6*6kM1pqZ0W3d6LK=j?8en>lcVb",
+		"6/uwL-E>e1e1oknkQi?&ulAtRy-f<Gc@jPh7UVJwgb2>vwlcZ3AhEgRx%yDErIcXVpc?UWp%RoWCdtoe",
+		"FrmwWt$KngFO0I4g3ERQ<K*-Fn/e*?qr31Jnh$i7fErvfK3>>r0$+vXa<i7Vr@@=53#AcGR6/>V?G_5/",
+		"0edF43-b0Wg?GA<220wPq3&XuUq6Pi@b@LRmygtnoC+0CznyP!*zv0YpY_4&LfMYmaT9l*bb^1WA#cwX",
+		"foT*D%VD=X#r#$kjiI*z!H&x/roG^jfew@6tRIMf2HBKnDmEk+QAPJrEvwQuimn8Q00?PWjsoR_jr@Jh",
+		"dH~aPu4g~j8vOY3bWC-7TL3Cwx/3A1jl!V>8@V6&+*op=mX!CU9W$TwhtGWB7tAttqhrjEaH8nIbfsmV",
+		"~wj^Rk1AcK$o-OW?v?T-^2raHd<AtzWP/QIjjBnsY4qM5UkpOAqxfn*k0CkIg*p7#9x=de+cDe6@>g69",
+		"hBhGc4erqRUsYrIfK^U!W7FC$g%e&c=!ek^kyO$n9vo+N$DVNa=z9x9Bwa%/tjPIFcKT6Ruy85I84y3Q",
+		"aQ_SKk5EJBs%4qXi*k?NRdj5Mh?Zl1P@Tj<ch*%-9>O?m5pISw+m28vV8Odan#ye?8P8iIaMV~Ms?ZLZ",
+		"kAO<qzN5xH*uyT6oY~ExG=K<_%JFecXSlb+?Zz2mDEP#1mL_u3lNl2wkSLZJOUQ+<cG8I%jcvcpyv6@j",
+		"%&5c^npvw@9@C0tDpj0Wi2a6Ec-ayLe1LSAYYO8PFVd%T&EJPC^</nQi^hK#>~@5vRA%wgMxQNycyS1t",
+		"gz+VE4%l->kzNJ*IVhx_hO2jLV=pFWl6$@n0s*nXCtuvF2mdfwtV74z42U3Hx9@p3S-pYatR-QG+hnG%",
+		"7tFU!j/LL~h99Ga0lIe?x<U++yMvwfLSA1R?L^$RAtIHq6+96yq/V0/aANXpuVotCnz!ct!YWyJY<t-?",
+		"6XSW_=-=AyfovjH6recisR%Ba68OM!4&^o<tSIjS!KcS8d3&UOb^8^d3hmcJR10#a/FW>*yEk*yo0Pma",
+		"28II6s5uyWr1YUdjIItqM?~icV+^L0saPTpmSo+ebzrVa&bc~hhaAF&*Wn7dhL*J/#3E4y$/8#ioE=H7",
+		"Sf2ID9o$kg1qrq=<MN0!wsv*Q5u8IB0*9g5Y$%/5s~Jwhe7jp69So=4fPIJV-Wo_iY3Y9wuWtgRga+aA",
+		"69Y>Q$cr_*Mkdm<C4$*Ha$cpt<Qhpl8ug=id#jJofQX$tk^=N7jD=peRmwp1lfG@dQX9Sin0yOwz4J&h",
+		"kubMmTyAO@sLxkH5MwMFgC0AOFyYh7d7^Z5QE?==5Ahdx55DvUaJFxYdS<or6aAZs1y_m4XBg@Vejygt",
+		"F44VT20!0~^zVXKvd0gS5^eYMC^^-CmJB^nM=U+Hs^pc+=mSH!hgaC2+KirK1Lv1ApNa+kgsE+gr$r94",
+		"uE9-Gri_ie*2Y_Rk9$gsal0>AQ84p=kj3lRhqvhfwj=>4t$uo4mEs=-WYD^*YN/TJukx?*DVMmhHprG1",
+		"_VGNzfz53lR7wo<u>28ufZj#0ltNl1fs47om_Cq>a^0P8&vcZYC6ns/4LZ47xG-SnbBvT8e9-oT$SVSp",
+		"0u#WmxYpYu%BtV=lB+XA3O!l8#ou#ghoX?qjax5qhjU8^rXrQ?%5@d@g0??TkY3qE^a%4s==qu7H67No",
+		"tV7D2d2N3_~<3&F++R!K7HA7-ctz82i43gIp8Mjs/51b/kA91y03g+A!&wdt_2jb6Yung?64@IXqkjZV",
+		"oIlHNj/NlA#qTciAySm_mz7lw5J<1zx5pJt9~zL?ke_ROc1A63z~-Bj2e@MBi0<q^sEG=-Z-v0Ooak>u",
+		"@-9~HM8GAZlIEhB#9wTEslhBFNKan!3Nnp*k/f5nba!<gcjQG03iAlw4V_<^cns2fjotrXnFNw7=*Wm_",
+		"2n?p41CIzk9PiW@oc~~U*i3=reNx&W5l9+V7<P72@3^V20fkwF9K2C7^SdQ3h*I4Nr=r+>>f=*&O?$>Y",
+		"9UC<QHaB%/^m*Y7nP&mj2/w&Nvy6qCh_MiQ1h<~Eo*Km*m<J@z%FG%X&l4LLuea!d/Ky9?*hZc&3kC>z",
+		"9QSf/fSJ=G3!DITIuofefY^-T8$L^qu2wXgxtLD_n+CXeovcLj9apUA^=B^Xjhuzf?=x#^q=xrLr5!7W",
+		"tZXHs99x2W+el0aAX2vToFK!NK/sC&Z53p3&QBO^@E7F!hGfxAzq7>ze+WjJkW=SoD-@^WbYflokSKXr",
+		"dYuuUM/X8$oRcXpz~1PtcAAHY!i%A/u!Ye=8!vj88z/uVt0sDljOS&EcNrI3VjPqNm6HtJtrK-H-_I#9",
+		"W<O9ZlTY^D#!U4wv/lc@ruoR#1B6Qp>RRGX>$919d5n#C+dl$_Opx#>d~4UEn+LPUa^c1r+xxKbmTGHE",
+		"rPdeaxXSo+kLq8L40W%F3^K=U7rkud1MK#2o_Hg$g1DNE9UXCTMSfod6kxeiGrM~!r*DddvL+1Hq@TSo",
+		"yanT=IK5azY+YRPduSi~sld#@/%zslP1qyYU0jAXlcN2/l#P_#gAb5^VM5w9nyHxjM!7pjuo3+?gr#ar",
+		"8jb+SP$VlCMenL#a&UP2l^PBxtXT4clyZ5JKq>BVu~^&2s/y/B0-dzH8vudhtUqB3>J1dQDn/Qknc#oB",
+		"#p+*_121Bd4S5AbU+f#HmVPqTq=eW3zp_vqqfW1glKCctm~ON5kyKa$&+9zXa!0^cr&LS<Ww4Ta>M@fP",
+		"g/ZOMDTYrHb8HX_8idsM1zu1GD_pKBon7bN=nVMyG/2m/RDMhSM=H*pp>y*zfIsiL>vrZtWX5=arxMUL",
+		"SLYL8hxg?q+*/?WN36mUY1z^5#l-94BrQBOIA=3k%akY8GoQS=Fo>FfdZ^e*x+?vwlnZr-&wO5b3#lGi",
+		"?E$gLo2C/M4%DlH4Kclnx$Nv<hV4-3dUmM^fr%2e6UaCG6$Z?Y0Q3U=P<cCQw<0PTP@yw8KtH@&DLE=u",
+		"7%aGUJVKIVcSH&COaO<Z&CMr-hhDwJ7N>~v>TzMwGkAh~nhA3esIDHeGHNTehZ_3*6kvl*rlJ5p<W6+!",
+		"jb$1QMVLUE4>PEs54X@7ig!/H8G+TMntPD81Q5W$qpZ>Gb!CQ<6JmwjdlHoWNju_Fqsy%ieyu=>C!Owt",
+		">!cqot*4a#Cnw#^I%ZPm!rkLMEAh/W5-P3$6E*J_Zbus1V@Aw1e0T=Ac1Bid%wvQSscbU&*jcF>0K0@C",
+		"@qtpR7tmHqbk^M!b98tKMEK1UIS_$0smI=r3UGEYe+~3rD7c2q+zd94-_1?X%Cc_#h!EhJI/Q//v#@b3",
+		"jsgQ>1qRxwv$PsdaJc_ddw4u#7B81^$RKHO/P6@1pZpre6KG/l3KCRp+$zvaON/aOlK4SP3<~xquz~Xe",
+		"nbVg4yg21vG6y0?5MU5&1k9VyadCij9mbN/Cvik&o=$Fbq2+0K26MMNquNDHIoUKfdbCxvC+R/U5HS6A",
+		"M/JJj7k-Uc_BnvQcN%18GW?EFrmh0URiARa1e*G@bhbk~d8t1!n-k&??y6ysy&ZNHbu8jBa7TKkfS1cF",
+		"KL_tR@<*wufKS5wc$KL3*mNs8UuZxiWY6Fica_Uj+IMN##DXsx2w-1*I2OD7o>1O98=670KorSMncVUx",
+		"qnw@BxW8gh3LZs-u_Fw1~0i0hNwn>!T6y+FXnnf%6mjl2ky9YDvQ*o8dZhs*01?Xz>MP#<rGk$>TG8EJ",
+		"3l3C97_TECPM~8xz$^a^y<6NNr/!@-gz^25_GZxEuKO_bg6*/R70Za7g*4VM/h5E#nY@XIiC12V&1ojj",
+		"jj754<Z&*S5dJ<sG*iUVfuPd=sqOmcV^eZ*oLWe<6q?/zp!l1kuMw%9epu_D<ySEkq%ZPdd~W2s!QyN5",
+		"hy&*_<#>yhB#KBpJ6uIP0-xPB7V>CRc@AYA#@@~Ol^mm5i%wK6&u!G#9a*~EPL4JI1AQDASatAQ#^%_8",
+		"wZ9lAn8%zh#zR?zizu!db*~i+go$Ncj1BvWfkDJheYl!bjtUp7~LTr*HOCL3SpF51wLN4BkkZ?#r3XdN",
+		"VsQ4?HGVov~G@A=Lh#beBpt?yE<4/$kv6B6JNNCXldPbhE**w!RQI&/gNnHVOkMksoQ6^/cY1IbrnBBJ",
+		"76w#Mww?pEfD<fMh^*ZPmLN?qVxw7!W+b~!J/Eg+hV4wVXH=ASvaR6rUiIE9J1nAy<xP@W9mXb5%g7b+",
+		"L_tbZA!Ul?#eH4AcW5K8V+Dg1K*6W8BQ03FpN@*O&sqoB9l<mPd6LI%j$veeg$?o!s^wyDfi&13w0%el",
+		"p65Ebjdu<=>v4mAf8U*guDYPZYQB?DW~/l-$MwN2<G5wRFx!!QieIAY1Sk<Uq^chi=zz4Of1SuYmsQV1",
+		"ovqt/6kC5?prmOI4WH/ijH*5ad1+@@pI&rP@mHgYnJ0lrt=1pEM3XU=I#3RB?vWYbJTMZ<R_Qp1i8Bnh",
+		"d-0bve4Tx=fbUWW>+9F+$wVs*60Q=xZ9#eX4h#ggtqSDOva*d5sGUq_la>RokeWtvK=vw<*6n7D8%=bn",
+		"cKQJb%Lye$7E+?wD>EQucNo1G_$VUoaH5>3RUw$FPrz>5tuZ#Ooj~YR501faSeXE~*<2rRqZ3Pyq1jd*",
+		"rF$d-7N@LZmk$M!cYx$^zUDHS2Sc$Qor-sY4NeY1wX%ZFef6*57yMMp78ja-Zz?fIq7R!wqhH%&MO1EG",
+		"?@<oZ?bUq^OdoDztWGTj2esF!0nn^IrV#ZWimMhI6FOB4dSAUF&kxZJkSoGd9goxZ#1UTDrho%NO0!hJ",
+		"%$$7OsQZ&$y__QPe&/kQ8CX4o1<rAGPC2yrO*?87@kw6XAJU6DMG/_j0kBD&+#tc1<<m9e5-ai@=F!HJ",
+		"9O<BJ+vfpxc5=LIj$vVFLHmyu5+ycl3H+uT#=WKWp5Lwdps@Jz+w+Mt8&tAkDJV=$dJK%qqG#l>rFj2j",
+		"$KR2&pd>d/bu!F7+TMzCo@&5pA9slB>?mcii9%LA+fv~!haNh&nKyMF=$e8$37OL7g0cmK&EdEdl/z4R",
+		"Gk$?wA4-M=<OyY!7i8mF+=82EA%>?bt_3ceBY>8eWjKXf!~ZHFb~O0x5EXm7_C~I5IUA37qyFGB2ObFP",
+		"7aZwbs78T&1UI$eaY#>2-iKquPWcG=UWuRjEUF9jy7JO=AxdEsBm=y#kWbxK38LuQD562s>tg~SDL$j_",
+		"Sw70V98A<ATi_^~a+PO5p>mb<E8zbkZ%7Ttl3<O72tGa1f#<mq0^b6ZjYeMZqoS4p1I@as_SOcY4+gJV",
+		"13yRT#e_v7f6>-h#>nj0kfqZ039zntk4qrV2S%6o8AnTgJ$_SR5MiSx4@uyY=04o07d@CHos=&R5#uau",
+		"Mv80JUgrjN%V?=~G*m+>D~Y43fi^2^zaaVYngkA/sZ^kk4cAyzvjv&~pFmCLsSl!5XQrzA^=7yd6IEB%",
+		"+$vC@pPFT2iSfYoQ4f>4%~>Qj^DPd&s7WbFrx~LiWfwzK9K@sSS2S#x!tnMiF3_zHmdAJ~F36X<eT0XE",
+		"4/mXE=TU2-d*Ml<q4u^^h7VcbjYIk51~+1LWjFH?7*Tz=4rvTTnDS??bLLDPlrqbgt<mH6+%@8ZEy#W7",
+		"n>>VkJRB%29BWl!lJG?YB>7Dk0gzgENHBtuMk87!IXblctx$_n6Knxf~wn>zAne!j7-^vZs6%cH&8Nlz",
+		"fnId!SFN88c=KJi<g5Br~5vcI>/4GUwond0M7mYBIRcaY>Bhq2~^6cKM>?d29#JBJ3bfUCkfN=mjb+y0",
+		"r#j40s5RJ@b~V1$U3oI+lp0i1kz-/13N>r&^_2TDR@zK66l6DP5fPupwE-s>/Xjg+hkyR2~u^8d=>ZMW",
+		"W7xW/=s^N?+?A0nYqS>Cqi&t~7~QY=jdQ4085bIe0~usaf<6O->-Jb&n_D<YNOAv4fd0j1yDg%DYo9!/",
+		"juCjY!DtLWnIH?gynFjKOsy>_1X5N%IGrI>hV*#jE2^i+-79Rom6@#C9$^uZgG5tF&Y+b<sB3fU^IcJW",
+		"ie~=+E@AJF%3yagXp8p6%eV3>1INjz/&9LOp_qdfl!8_*rg5YVEpr=G29fZJX~&PIf_GkR<@Z!I$_X_j",
+		"-#Fypuv641yl2lX4~lj6sF/Yhs*h#QFJuW#NwSg*!cQqC@5$sQ/hL&k?-II#l?4jUPAu$EykI~2sOdLE",
+		"l8b#>rvpGKv1yudk~E903dX*$W@40P0zOrSL?TRzaviNwZ$wzMZnpca*2P-M6Kglmc#l2Y3Yv%xV75D-",
+		"J^xaablqgG5vsPqrt1SoYSckW+oNEGE~FvK1KcCLvPgEtO*@u<bd9_QeqkEFtz1Dn92#ism2nU?C/3dr",
+		"q>A%dpXZXUJ!B/^6Mw^e@H2%W8?#l5u_ogrDsMKT#q#_oj/cmc9sUz>hj66rC6RiqN-&>ka<fAGUho2>",
+		"MBJK@JIwOd?-3WS3pc9qd#o$47~o_F3jS+99v7juI9r0riySdRl*rtU4~UVYcC0ry*Fy<6Z_f^vngm5P",
+		"466AQ8/gy0ju7m1ru7bXdIxh!oWuKm27EnL9HDZW>l>6^kA?YUrE%C6@_CB8bWxqDe#EcqHtfy6S-mu+",
+		"#+eR-IxwEKr=kk&d~A8BZl?!?cRsX%3WcLHN$alGfSc<>>ZnfHb#4@k8p9LVxc#V/3g<j<5szZSvvZoP",
+		"~c32appQ*5@/#%F1nAgsHz9NHDtA#$VU-7@!sc%xd_4o8+KfCJ6^XkV2eMDfi/0^_&>98s@#1QDmQne7",
+		"APEW1bdEs9qfk8qs^~u73qRi~IPUOuex1^^-p==!O=eqIv5L#sbzTvqH~+siDgIYnsdXD/wONv/_dhJN",
+		"c%3l=wGPX@rg4#tj/Vk6mxNpDez!3+gpWWN_C6Jf48lk$5P9nYumG-VA_oQTVo9B=3m%OmhvSvZ/uTab",
+		"sR295Q!=Z^*=zIxs_6^47iVtb%S1K7McpPt9Czf7d7ErLR~WCWiICkw9qcUN9-E>_n2qrSsn>nDgfgXm",
+		"kAl6g7QkQt^ntPYNM8ml2IkOY$LcB&T2+0YcUnvPCfeXAYC5LIQnmHYiW~J-0m16U*rlH?n-#oBpCybw",
+		"BE-ce5ycnX6CA1SJA<5X6PbWehqPXGKvphL+Bqbo3RUfEl1#c$hF4jp!Fswsn3qeem$X=r9_xrzq2W%K",
+		"v3^sg8~p9=t>zI+l*URNhg+>lD@@mu?3^L~ApdTxhbnot8ZgeZbn59Kpw-bpWJ*dJ8JEgv~rx*66Sqyl",
+		"SzX=gv$ms0UaF_l22NSEp=$a/yM3EIkWbC+>^lFMg$BF_1?#/MZ5~wI#^2l%>d?J7cSTUL/7OHPhM_jg",
+		"1I<auj1Oo8a~08~rQ8Ld*9^eYmJ2L~9JB4hNMcOmeH7W0ny_t4O+~LzsGF<tdEp#hnN&2U8!8OIMT$aV",
+		"AQ0h#d>KU40L5H=8?PYl*D$SXcJadQEO&I@jR?O*!39lCj07Hx31Be7OkBTNeBoFzRwMIg7^-Vjt-Ri$",
+		"2MlQQo>8#4p3RlHRZNiI4wjfy79DX0du5RD5QiNfFiR2ZRF0+YWXvo*qn7fy2MNAM-k4cnz1FDd7v7!>",
+		"5E4Sav^zJcl9>pmfDSxgq^bHs1LV7B0pk=rOAb1DQ8^6/pVdZD2@2n~8UO+SWu!*yRM^*XX8uwa$Ad>$",
+		"P+rX18^=vM3esqyuPuocDqdu+7R%z!b0I/JsG~RvB?NTMSzn>CCg3LAndjRa^o!D%ls4aP%XHus6MVmW",
+		"e0v3<gw+m3s63O4!fq^wvd<XmMJ5e$Ip!fnf=SViV*ly-qaHSn~NlXsNCGri3+64+mYX_aw<9q<_jN~E",
+		"og%/kl^u7B~RG-jJD>%s1MUpAC#^3T6mehk5m%&0LCC29l6lBY84Vlp9WMK&E=TwN4Ql@!QXo-37X^rv",
+		"Ljjgst*Oo&2/X&b~F3x~/-18KtfL>vZJ8m1snD#MH/m5K~s+b<M#MW%irmKjjboU>JRcc?78U0C^Ui/C",
+		"^Fj2TWac~v5$?Ot!xn^~CucDUwA5Vf@pqOS?sygV3w&>$NMqzEr-3uWpEx+Wd@VH?^Qb8i6ixov83~xB",
+		"9~*>DmTYQGr55^OCt+!uJ!@$xTNjpe5=PvJ31=X7rt*CB1dvMB3LfgY_BQRg7@lk/2u*xeo*@e=xx9$z",
+		"hDjeIW>1amdV!CT!8*pLhInaJtjU~$eF115iiI%NkQUPXGA?Ruh3Up8j#KVDi5MHrq*X$=rp3!>E=wq=",
+		"l2UD=D#ycDq0O&KR_1!<TOAA4D^7@/F%uud!nYaFwwIj%o_frEEOLCqt$=RSt/!T>r+E>6ou7SBg9KV6",
+		"o0NN2X?9~K0Xc%qre3g2~<l2ahZPu8T2Gdinw-z4fwWU%ezrpohI_cZk/0yHWHo#lwWTTasotJ8fal^<",
+		"BD3UKg9GY3JnrzB$wVXXog2dYed<3fmjeoe-d8#X_4acCabDwbsEh>jWFbEcnxX3BR9589uBKmnXp<ck",
+		"!zIb+umlvl99H1TyMUsyvD^9o8fc_3<PX6q/tGdz+PBZa8v?#jrk6yRM$B<>3uks+LMKYqdgv~4hm1/6",
+		"t%o49cs?G@*4cqyf6#31vRqH0ZmJL>+~_7Lf&QGD9Bzeb24IFJ3KpTHnaeUA~&%godiws9p=u>Kbrgz7",
+		"CQKz1JOOBugt~*Bsaclc11_B&UEqH2E!snUkD2wesvt_w^VwT!^<3=oecdhyhP0SnJ^=ZL-iL&m4$#W7",
+		"ix_qSaBMr0xGz3$O38HcTlS7hfs!y7*F95MEgO=aX-rn%SI-u%tqFawzJWUpeYfAY>umo+&AbGE65+W5",
+		"9?99gWKA~_qj>yPw7=u~k0QVf1bF!GRPVL3uxa>p=N0jfj-e~yl~~4=bY3D1l#IMMwN^H@aF=9?4p5e-",
+		"@q-zF0^u0TG5xr!mzba8-lTks0Xd4Go@&!8gl6INmDpLSB!MBynU%SVn*B3l8y9sgO@<^u6^9<uf/b5f",
+		"+yNN~8DOv_nwl/yqeCHnX=7Gi?M=7*8KO&g1Y8&KH9Kktjd^i8VbZKv2g4jIvkpRHpq<B9y3ev>6eJ21",
+		"ufx?P0%AAEd*nhbm4$VZoN87p3nNA=7>taBGLEo4c3/qboRAaAZt>y>n?&xA<ZdDCjDltQa-nMJ/0~W7",
+		"*n_&y/TYA/2aDRT<3#J8ua*5m=K$c-O6xAXG0NHZPKBwL$Tg4F@mMGxpm0/2j=iG1ce?IoqQ6$L4!ALJ",
+		"l%=2kpopDrb2zLEgvHb55>*5Ao63uw=U2UZvSL7u^jq6#hU=X5ivfBTbaNyhhYjHHvh!4pwcqmguBg*r",
+		"1KuVwq1w<PMiO*n78&5ppgxJRa#ueVkVNO8NZgXqZx7qqTJ5Qfe5b->o_+~%C#Dw0g8qc@3h3g%9yuM-",
+		"t&-yh0!*cGLrdt#@k6aFDG$AlTFbfvuD-P!9*co/bA8-nm3u*LaY4H$%36xarSEBD_>78uosdFA8Np5E",
+		"7PDQ72-$&bvtj#*muNu9k%-^4m4Qq/S~gai#dc>7&5mcgvT%kQkwQ$M+nq=yDD#TDbg~FSoSP7t#$f4I",
+		"h<zsumfIc5^_6U%tGsm~V0Hx_scIEmsio#3tvHpE!0$-88S=gXetl!l4$idQcjPhQL?h0ie0G?b59ob^",
+		"K/SLe0-$RPVWcj4BDOHNoeT^p1zlRr3~38Pk+OU/SXh7HzpZjM/rcn0o$CBYFqp6D^&_@F1nPDiS@DnY",
+		"nvYh^&X^1n=*BS^Nt3<9usp*=uEG^~b8m#BpKMkxoyvCw&3A#&^Wvm7c/!3sM>qnTbLEaVLtE^j#hOKl",
+		"b%Re-k+75sp*?e$0GrGkzBiU3KS=-?ph&&@hV<cdG6^XAHdZ@HkJ4fNR=Fld9#k=siWDneqXxZa$44v+",
+		"HPF=bJZA=!JTktCqMPq~qey+Vj*j-M*/xIOrl~ybdZJ99UlPDCB1s8MpNs~?YwH9*Y38=TL*l5nkZqGh",
+		"75S0/uC2<Lsov2prXJrkb4_dRmNj2P6Dffu^H9l<d@iwlqBRxE=rpK%ppzKZlSW3~4+f^O58RceiMK97",
+		"L5XA>pfmcuX31vbAj_-cko+nB4^BpVEPs4tP+vXGbvV5w-TU^pkPxv~LrTNbNQRtt*4V1n<k?#3DR?WW",
+		"&XZwkvnCB>o#8z^uI%#YS*O>gaP>E#rao-?e3_TxiGxb+ngb=S00g/%UM>T?4Pw8OhPrYdx/CK7Mb>@v",
+		"h%-tJqNzK@uwVq%A8rRbn^9_A2OBgI6jsGT1p1Jj+Jand41<>>fBt<+&FKlkUU6-wXzj<lh!k&1zu-Bx",
+		"a8#DN1SXhy7jJKjsB3R8=dHpdwr/?=SO@<V&z@!9quLIBE%~QFgIk%9N#+/oGxPoR60A<0pP*YOrja-K",
+		"Ah>eJ0LDrEx+bgk1dyG~#wP#H4z9*1zVPpz1j=b4vbQ7i5&vLUqARXrd~Mt>a^?QtlSOX@<+ZPXtlPCu",
+		"i2xRagnL02$awp7IhvsjL09lmey&Y#j#K_8J>3mmM+^1WxDNoHnTl-^%As<?rTr40aznYOtv<<F^8AK^",
+		"oULg?4/c*M_y$_TIQ_j<ugm-&2Y-##F6IbuN@AMOVq-JpzZ~LQqzS<?6Ak%Hp^hkjs!BMJR/&mmePsOR",
+		"vdfVIrWg0axXogL6T/s#%eYO!_+UnIbwDx9X@iSvkAeT!tO54Jad5QkMn*$a8J$PR/z7QS7dgl#hIr3g",
+		"@~W8A/rcDy3D<ruCBF1C-dUW-r2@H08l^N+Q1#i~u=_q07csihc?HiRj%ynFh&EdEet7R8OwBGmevfr5",
+		"90ZrFz/EJ2*dl+Kg=8ihqLf?p+3um-fb6<i5RtG!dz+S4jCabV8n5iNTN5R4>9G/65+2m&^KD?11D1?W",
+		"!Tm+z6SU9QH^sRP3aVgQPfftI6$m2y9R^OC2Yr=oFRvUn4_Yg_m3WDu#XOY!w?~RB$ZU5v9jYXIfRmkQ",
+		"Hq9QMD@Z%~#<Lc*qbY61u_OnGffQBRtNmcLfmmcb$=JoWj0WLQlfv8jI*F9o24<XGGCS51>0Dp>bNKjY",
+		"PDC2d?c&6A7r~pGub4Bv1M3PcosjYp2qNqbDVA~jeQYd0Es2Qfit>XIaqn??iSRal*XmAl4gHQHg=UWM",
+		"6AqYP3e&NjAFupChNDp0Rm4wSaGL5GgVV5$2uFC26~C6Ix3TAw8x%sj*bCf*L^$Ko~6!bYFw0lco0kE6",
+		"rB66mHdZK7tBe=TaYrpvni0O@99TsSG?+WfKz/RoD0F2*1ri~0gXe^qD0<my@hS!AGJkTfjA6Zuu~V$b",
+		"2ui!kkEiYQaB=X67*6h>!XUK>852q?6$zy7kEJ+YuT^S@l^PwHSR6McW*Qe2G9952Y8D4X60KgtvhCrZ",
+		"t7iaG6C?WFXq/I%15NScfA/2$_Vtn%g3N>^D_Gh4OQrQDVgwG5qwM1hF7d&Mo/o1/#Iw_CI#%am4X4Ig",
+		"N/VHZSQ1Xu5rKeMraPjksj85mYZ5t>Wja837>LGtBg0X?zR!U$b0*3H_3n/-?4Sr/f#~fH2k-@8a6aSl",
+		"n@>k=4McVOfrTmn6hG%ssvzLbg/H>7Ob6=iq7QfNyWy8cNzdz^QP_zK8uSNc!Bc?8yml7Wi<7--b$px-",
+		"%b@dPS_$!2kxl%rp8fA~eyC5RTo<Oygbr?XgMBaOh8A63N?Yx7u83qNlOiRldp-@kC*/VUaPfSxUP=?5",
+		"8=3N!x$d&~3@w%iy>Exn33hStXS=VsuW+x+7wb*i40dgOd=PA1L?HFDAx3Z>QAu4R~iRcj23Dn6Nvgf+",
+		"p1$a+Gzw&2-bBdi2?h/%V#ofosTUbHzZQL!NKJYNL%WxAo!zqB6U/U6RM0?@F+d_4s#A7QcmG6V>SUdQ",
+		"d>YVs@^uPJrPP1il%DQDrx98WE@7Yg<n<aX6a+<9Y-Mty0QW9+R<&JlM~nr31~<yG+_+rho2fSJYpQ&&",
+		"kb?kGDLw2G7WYRg~IVwOYKnTrv>8wX@pn7gdoCGUbI#~hFc0A5YQ6*O34&_Q1saitmH3xDPTwIV8WEw$",
+		"o%tV&COHeIvYqP=C5%HmF7x&Ca#lQ=@IBsT!5QSvWQqBcGTStUWPmiqO13s8a%~YLiNjR$2lhWDcz?YX",
+		"jryRdZq-#Yv4EJ$FYl7S8UPWijy5JU+Z4v3l^Ch6=9GGFeUHlz*?TPYlI#eZtxytG6BM&q0Ru&qcS+-o",
+		"+UH31YEaJkPmgGi&~pPk%p!-ZtW#94oUlj30Gt6feSqzHv=glE&/%-xmSgtx6Vlsq+cnlSuq_9IK-haU",
+		"C4FbqI~ezX6V1ugu$#~5OYzBD75NGek3*@BdKbjKOabbcY&LE=~y&d_gAotdl3iDM28Vgzb1u4P4vkDP",
+		"<!VYTqaVN-@RfsIXXt%NJZFKOGhp1J7K!eOWdhPGvCB&7u2@RGd_E>7j~0wZ4@#f8cIYgV6r-1AiZgo*",
+		"pj>~y-R2m&7Bu=!iDOI+c<T/<2RpgsjHwxX526v@fE?T=/Wadje=oEuS-^A!8$nZ44SJS/e+3r~j&1a1",
+		"NxNkGM6mLO0x-9ch+gP35fJAi#Qc36rp5$A!yjr@!l*Benylf#4_!B-rNFqidy1F0gtr@4odB2!3mKwa",
+		"%ppr4g!BP6hXrPbO3LKGHt@XX4Z5Kv1dlfzeZ3jq1c+en2Q41uvT+>07fPh?xK969j-u9sjsf^&0Z=-$",
+		"cr+&4>fOs^akrpL7~W?=i%#d~gY+r^kACYOrQ^-%+3f#V3Ydb3jv%Vfa7cngo~uExbN!j*^lMCZf>Ud3",
+		"9bo--2k3Hl6sByNEbTkY#%q1BbRHZaa3O2Gp_$rsZWPi99GU!sh?f6J3pzqrxKzPjbw%b@@Y1bBd2Elz",
+		"7v!TEl@bLsF<5cc4E5!&?aK&rar?cfnUbc/e5R@^MAT2and8H=vZR=00WCU1d%5E*/BVGy=RyL<pGGV-",
+		"h1g21psjxraB^%Wd0To1$0exGZq@3l-AkzeeIvRMMC6*J-wtx4TZUrQ!Vr6TkK0Ae+Cmfbv92?psG-n<",
+		"=ehVElVJ*o2^s@%o98OqEKt@Ip=F_Tl/X#MrMD6V*j+G^qJ%Ta3R%sYp2r-r0^rQ6e#+SZkRv4892luv",
+		"yVpY0UDBhS16p~?HlE!pUbH0QD=N?28>gZ4Hx2FE$0yO-Y?<<^DaSaf_Qji?cLSUE1zH/vJ%lsdVbqBG",
+		"XBAuYqKQ*Kd*I69GlRL%Rq6z%iTAdY6c&28eUa~C==H/siAQ?b/00wklh6_in8?033ha&za96V>pvsbC",
+		"i3EzP5bLMU2n>Ygsxo*mFr7lI1&959G42FXktcTMbu7qYbWOmloiq-^tRFI8P>wGpMVVFblAe$HW3lt/",
+		"kmsK&H+Qu~tY&jp0O2!YqMt!on%KJ%3dqWlp1B7TuLf!#>wuTdu2HnGiQ_s4/nmVyR<$*59G-%j_1GCC",
+		"6u_WujxQAK9Pk*Gnd0q*pQ3+E@VXyQZzAquIT6m/2MDgO19bM3hOy+IM^=Ik5pXX9<SI#igVVk~yET1^",
+		"za!9k5_4PZfhuJp8$*O@g23QBG9_18hilo7k4Ev#qiYT#MgSzP>b!N59XWOiugwguAR=1tt@wk_=-Ffq",
+		"2_#kWj$U^3g9JEmt5aTX&~z=p9%_LUL!w&w8@6~^eUgFUa*s4ukaIUM=_&H^Pj?>gvmnktiSED9>aj-7",
+		"Zc/q>+VZ#F7TDx*fynv=8W_!+83$G=6YdPc_*!nqoq!a^rXg+$aH$l_VKYES/Nh&65HugT$Syk@VOP5@",
+		"7/7>14&W#8ROP9QZrOGj7ZZN6fUa^N0M%qf8uqAqp8zOem5udscgPsT$+!BKErBOr07o87tC^tMQv7al",
+		"b5Jx61sXdwWT/PF81QB_cq?dC3Et9Lq7>Bx21nod657h37%lD7s<nF_b~MHN+i~Kwab^ZjA3JKbPn*Bz",
+		"97h~R7uXio5V@*eTH0KzoVupat^K+L7A6jwqv!Qd^g*gu?tQz@lg$%2/=to!-6eHHD=YMKl^^9eh~6_Q",
+		"izP%ho^ZGZ$Z*7K2i@nxd1Fi0vRqPS?FqnRpVH+^rQ2saSyt7#Wh9lo!lMHvee!3u%-ar~cJ8~tcR7Ft",
+		"!ldKl98p^cetOIf5XG-z4ayDFt^K+Lsi?#1qEnSy2A6Nc0_M//gT=mzr35C$b7XkMo&!U~iTtBX8IiUm",
+		"oKtDhng0lvE0ry4kE*=184a3Ns&9!9fZpHz5=v35CLq<75*K+@<hiQzudFN05cHY1w%vuMq3Cm0k%I!r",
+		"X%bA0oSVG@5Jae#HnJOm#tHkr0B+GTNpc!5thD4EeW%eKci0z4Rl=^B#>eXUhS2f#lZIqyk72-s/RL-P",
+		"+$WT<XB6$y4@Sh*1>Ehfm9/5t@dy^J^tt@=lP/-61j/xBg/Bi64%>8R7o%p?0^VI+Nrl5bA3XC!L3yrH",
+		"Z%YGCh+44vFQqnFKhUcxinF>@>X5LjuOCf9OSR-8w^Vw*HgDcTiSXXkdNE&I8LMP/VOn<_3btUCih3?g",
+		"g<xNGv5ZZ3eMdl2N=Jw~#5@2Sr?F0YH/fuPUp9$aqu2D7-37FJnI+bL#j+DsnrARJ@=>D3!+/%RWMp-!",
+		"~xVvptTR0X0Dpe@lQAP^9%u&A3Spf?5ja@dL%#>*+RfRYy1#QQM-HtGmDJaP24N_lPuK@T&?dW9L7ZT~",
+		"lGuGMq03#7^IrwR$5ib$pA!_ofpAsrGT4*T_mO<hnM7?9#71gUWKJ+sk4M_9F%@^Cb0CSxo7CY01HIsW",
+		"#l-&<69mRJ5?eeqX$D--teRamu<LgQoYIp<n@=a^hdG2/mx8$b0YXp!cYQZX*yRG3Xk7bv%6@o=10J2B",
+		"@Q*ffc=*$!aRts@CA@78TRc<F$Z?55bl_7Y0QbR?@?zFfc6_a492~Lr4ruYkbHkraLKd5Ck!lW9WJVpe",
+		"xA$G=KD4lC2%9#Qa6+5DSIlYqswM^!gXIH3sqAd570V?5A^TENzJ9!9lepk0YnDmr#cQZi%U&n<Qk&Oh",
+		"k=#nyPk-+EE*C2GLe9lY7ebi-iwECGlK7b_efj1teR%f%M2azIM#RMZ5#iMY6Wfz8/K^KlrS+!NCXy38",
+		"uW9hvID+vIavG41vhM0bHS8hoz^4dgNfQ>Z2Li-*?Ww7u9BC3eow9m4b/s/Hr$G>%5dR%?3auOAK%h9w",
+		"iS$74Uab/DkAR=fsk<sI&49FSGDDPEnwp9Awd2O<08Z-44pyQzi4dJzaszBgc-Oc0/V?!Lb4YHoO<0Dl",
+		"t*UUna/XJ+n074u%&thRcp3eNZ1_2O@oI8y+$@rwPI+n#4LJFgPNcHUnM/5JkgA8sa#n3wYaD+_XL%&O",
+		"6L7dxs^3aZdbk0SN8TY8-xT&Eu?N-<m&Tufl1K/xHNG-fnY%Nki!nr>>^ujEpgJ0rptZz*XwGe3ksxo/",
+		"/dvBEha_lKu?Y<l#Ey~rl%HjLT@0<d9Wff<U/K55obj%H4YTfKDnhF%rzr-J8jwLlSF$C+rx*9hGEK$9",
+		"3qF?=S_SCSSfS#ssLaJIQ&1gx4qc2~y2F>dlCrI97QNbt73YORYDLrXl~UV7Kn=677FWa9b4DpXo4xBv",
+		"E2ZhEO$Qu1IZShr%bL37pTQUBkalzil+9KM7_sp-Z<qWlbtLZ#CKm~~@MNBA>=xJ7=WQOkr5rP^2ifr#",
+		"oH#@N28$6xCDM$Uo0gK?s4=0/Np~RZmv!qr#V&Al9/tDx^!nk!^%EBw+A8BEmU%f&a1f^UW8!7Ne^Urb",
+		"19~~dz7vG1uITNkS01%Kh/g#e6XhAu+#sM^T!91$sI<Y59oFpMkkVIwgBqFGS6hs/ls#3vdAr<Z0-b59",
+		"fmCT1wAet>~/udxeD0ywkQy7MPVz<5fQYTZ0ZCX2_rP3TwgjM0u9!#WCOJZd3EGYNnWtOdieKqg%TUGF",
+		"n_-MG$>_<i38S1aoMJC#m*&^dHIB@gnH~0h4?0+Bm9EfI@BZhTRCy2H>y$y~uf7sTqt_?XPHp<^oR9Tp",
+		"24Km>_wln_o^drN1yH*&yxxvQx<MGzesB1?cC3LF<^?veaLx#$~Awx>hp5c6i?a%eOQL-fJqp@xM0Cyu",
+		"uKDl88NC1n-mQHh^QH%xihlq*fO$>Wiact&zW3quZT^fwAl1K3^fChKf=2f7ea~-uqq~LqfA6s-p/LcU",
+		">5h=FT0M~QcUVy/kfz~Ql0c_p/xZX<U5@+enN!mT+7wc1c#pU3c9DKA6^<o!agPJTl3_>rcq/CSZ7GvS",
+		"r5b~q0dJ*=kctX=qF8F%/>6wPj-foH+4PsH~w0Qf$4Bby>l>-8tCczwou8XtmMx@4GZu*-Bo!sAtRS<m",
+		"u#bR3iD@wFhh<pf3P#<x5d$t6~>MwwhjaoBTaSQE%?mj^YoViv-tvL?R<C!gYzBfd*6BUQ4b*T$8+hbh",
+		"jQ_m8fZEDZa@B5x6%NdQOp0=sjXvLkIIghNlf3c848#2h~1dVtetN8XcO%5#*N>4rfvJa&=9Ikx1YxFx",
+		"iiQ0cj5JPCq<y6Rcg8lpvvRjz9XH%R1LxSd5X_KBdHIp#1tgVah>ODRg9jea8_9tjdvn8Kit=kt_3lWn",
+		"=3SteqO%^5cxyf1OWp_1r#Wu/6edSuI?LH22>9ge#xKdJ2W@#4a<bpdBGiGLZp9UKb6>ZRef$L0A=mnP",
+		"oB4~6itcK@985qZRoIannsmI&6_YyJfH7XekLySI0oRPbSoyIGs9iVhcTOr8Noc4pa$#HD5V*daRey_q",
+		"/sjL&k=fm83>@ksX-*LsLCj2v1L8CSGHR^ZJ-_zx0ha?e^PUPfp5>-c@$0lsnTe%1DR07kmQI5EdD<%z",
+		"j?kK/4GK=S1zrQ&CvavNVH%~+6cLm/o9dVJaAhg_ZZ5T*aO~k!<z@T6^6E#Bt29z<XKsPJvN/FW-SQr@",
+		"-dLPu$oNg^tEbRN8QgUcreuu-EsJPb3*j=3nLN~9hFXlI%ngO%Ta?ds>7#Ff>Et4h#IO$!0seXTtP&u%",
+		"T^*4Yg>fVSsuL$wLL0q^Qg*^47-6=Kd64>pu<JzfgLb?MeEHERUu$oAmUw&Yx1pb1H-jD9_WeXTk_DLe",
+		"W8Zodq<J*B25dG$rB~S@u*OISGmBZd0F~B#ug#7ypQInPq~Ih+9lU<~L_!jUazpERv45hA#4~WvDDvLR",
+		"9Q-lWW_oK<Z9lLrgwS9Wrn*hMCHgCA8Ir?5okW^04m%^9%pqnebFHw$<eb*!u@0xh=owBra_lt<JugKL",
+		"8vAbV3RPUak_j-!55ckqqFPBOU&Lf_on#C*3<7JisQ6O<q#uq9LQH$&jNt*r4S$Jv~b$QjK?St0mySZx",
+		"N-D?!J&xV^lRBN@0/R^euRledEiECH*6UwH0k@wOCx@Q1^SDslu!2PaNtha1&8tJEi>5wuo98^O6XAQA",
+		"<6I1MM_@c2Ma+jrrhZGG5LG4kvpK2vqxbjXR$X7Z+udH955Gu50zniX2BiS8p3/pDfTLis^KVocX?<M=",
+		"0tE3U?FG_IxTVb/74rJqrwd_GNou__lmOUgO?c<r%97Kaqy-BNvJ^kvcWQbT&fFz@rRli3=LPf=@cUyf",
+		"yDNo5id<F0juTPL&h<5%6gI9NlxATZ<F0_r0M2/TEIS#8h0XMjY08>N4F<akHxZwO846TJl=ZW2oXqfH",
+		"uD/Wa33mYA+#yo8bR4B2B6sA4h^#M>p58fn04Iv%q3Eski1I/bEV!OUSu%o?gcbRb*k_VCmK12gjjsLi",
+		"EAt^^5Hd5bayitm!093h3EKGlcIU&xSwWtJiO$l8&21u9VqH?d3DmO5I--f$keqmiwjg6jlyDJx747gf",
+		"Z1D+Vjsk&9qZ$1E7~V!=OA$yz^%t28aq&lR4z!C8hL?DyebjywYTjw&dHJGFJZhC^n*8%Mvz4nFrwzAQ",
+		"5DXEUn&aDBrFIl_b!bgH2^ep*qlGPy~j_^Ubw1sss&9p=-oM9wC5#VZ50t/n&di593K-wZUU>Vsv46@p",
+		"n!hVZW%W6Mlv9@V^D#4DPIkps?v_Ldx6sL~TbLQ/jPNOS6%*8Ms&W>?m_E@*><q<03uswtVOBWY7-STs",
+		"PN#/vxo51eABAY>zOMVC?ZjLeuY=lJxehY81%403q4ne/_7lOIMBuVKrD^TmEZ7M36xCpkC2cZ@w>b/b",
+		"5^uLb+aZoYktE=OW&_G$akO2A=*u^jVxwlN&J-o6fS<LZM8GIBk8Oglme0yB8-Iyy5f@8ixWSuLiU!be",
+		"P9JEZw=x9l1W6jJaek/&0*<0o%lgOdxnK2tMLX%YjSKT9/DLBSjX-t0v43k?9A8%lzJhpwuLTQBhtkoL",
+		"h5ZiLmM@9Snaq$%f/w&5O>Kwh8lXPswyAQqae#xhtq5rjl8UMU<S2#k_RYp~3oUoNh=U^35U~LjC^98-",
+		"vZbLQYduWyYWx/kv@Di-wjyI<stZSVhmd&f0b8s?rf%k9$+gSt=C_ngUylSRjC$>!-^cEdRGVzaG/zGt",
+		"Ty_k/e*jZ1o3*&@h<#h9hK@43=0=CU4^fj*^!p9UM9P<t?p$eqc%5-+bi>x9gOX#Bgu_DWi?&UuuH9mn",
+		"tILS^smli-&9shwzVz>R0pDxVw@xE1c!N=4I5T&Ys5gR0sUDQwRdhb3=!WY>h/<kO&Y3Suu@Q@&sTk3H",
+		"@*wld457nNOzsyRh2deamb6KmiA3^Vp@$N0crz/7p$#E!b#Y+OlppmC#irDNd!ZC=7%bV1Y=s!>f~Q$C",
+		"3#w52o-ib5b@4/Xip<4#mJ@79i7H#%d!v@W-3V$%W%IqogT^cPpyat<#ux?Ds_KW6?PE7/toalQ1^MM8",
+		"osaHu_m0RM^jbxVDwZSBWW3Kde&EG@e<<Qx9tPVt7eq!G0QZGwL+9OC_X_UfS8_JoUg4<TnfeA=cd~&5",
+		"Wm+XcHJssm*v=$gs=WI62SFyhJ+w_g@aejtl@24LgAHXMAhxd@/=9jhkRv9iqwh>gqslYg<~LI8MmRk_",
+		"PpR3Ez>FtIve*2GC2N$jsD8kus+Mb5>fQB~tJ?5s0aAh8=+?SM4A/WKt3v*Zt+HFGq#1Dxupk5Hl~Jb1",
+		"84#cZI+o+40F#Lake*62VY*OTspA2pHmXgrJuLjA2DtJB4^83-52o5-P_pL4-SO8ASKK$N-EXky1=*Sx",
+		"UQO$<X9ur&0JBZ+g8REl-^k8Rq%xIA0VhHOEZ&y3um>4&2QYFExXI4by>aLxobO!alWuGyy3Y501$ML-",
+		"m6$?qke!Jzcrkdf9oEoSOQGdM@5jsj~wGWXl>vfHaiuY6vObopfnprD94*jPWe#WFlVfZ5ssN^4NxSvN",
+		"LuOr8mK?hvGsnQU1j>IsM7bPaSaBq=K5$!fEl$4Yf8&MDP#dCZ2Xczh~Kr1nkTgXgaawthKM/xs#dTB3",
+		"v8k6bfp1>@okq^qnFedYr^*i^3fSD/~$6I2vh?Uyu5KnTO~OUqyUk&?ay3^Vi/1bBqboe*Hp~1UCf<86",
+		"7>u%=4mvGCgZcZZ#*y1w$TTPrjKPUrkx@fo0UR9anafsX^k%HCQWy7S_S1ue2^RU&=lyZP7EFiM=@5>^",
+		"0rAZ@D0m>U_GnRPUIK6^n~wN93fag27t/MRgcM9p7#!Z7M_-A#0trz~48Y*U3kuWLf4H1cqVglzs917x",
+		"l-6xT-p+SisG=LQebzNF7~cgpqgJX%6@3Rpl_PkofvWTU/hT3gS11LOnt6gOmHrMJbEtVyjn7X&6gVqM",
+		"biMw-7HaYFbqCrM4Y76e4XSOV%X~*@V=9i*InI6l6S/&%B+>X9d6h2^sMmlLcZPWlsu~x~r2A?ohEcF2",
+		"-MBs!Cv!?Jddyjq#XxMSV9O_Tm#Qa#@7/_1O7%K?7/anNIGm28T4MQAc$G=ulJFo5vcO7D<sRc3j^0m#",
+		"~B+FM4QO9%g1^F$emSssz5/u_6G+Dv5gt!=509&JynnVRDDDeuqwx*RATdZZdo/XRt@MjI3Y>0-8Tj@+",
+		"9F5!CEIr$Dkwh-7PY9fne?Qc61C?>=kQ-=OIdlOB+4s!9iYn=PcY!8VlDt6TjpmTooopY1lH#AXrf<w^",
+		"*$u?6A1Q^ePm@1R^Qlt2+^AQ/lsc3K7A3f6%hTaf@G3DR58!CtnpKFGZEbuOkOfK0vpR0?_aoaF=C?C2",
+		"sTaN$THuj+pM!JZ3E7~TXaB9GqV<4>m/zciJnliWzXsATpAVM3oI*DP6XGv!uW5K%<QFs4oV!?!7te22",
+		"7Il5vTE#hotY6q/JHbJPEj6ZnGAKklcrjq3Z5a-?@/!A!Q/^~Sq0pr_DRHn_TaDMnp9I3wVhh73nmy_H",
+		"TkqJdnGqx332<z>dJsJ09=>X23khk=hH0qSvU<-X1_gxEt!NXS+tR@0Tcamt7ZQ%emc3FwVl37s=Ox9o",
+		"*gg35dHsTt/Jm+Ill0$<9Ax?BGHP~t2>Sp=Tb%4Y$BF#4*PGGeb~ILe%Mf+^dgkyaJD<>Mrb1Jz2/T>T",
+		"AX0pYTwLUv7bh/91TNav^x6MZ4Crv#p*bRDbuh8wVsL3haBdg!d-G5sAvF@LJWKK+Pj--I5jF-+PQc>R",
+		"L7@S&LyeMhC<qb!B&mQPm#Z5Ac9~Aepw^PmAm%Ja_73zOFvsKYCekS1c<@hoe@F4GhSWSi<mvrS/D@dF",
+		"7b^Bli=K_rVj_L7f$8XcrP2iz4bujesE1ost_-HXQcg0dffR=ZA@tuG~pM+glFLkj$wB?El=!jml#MX6",
+		"lCFQH0T0Dcim7b=Fy@EQGPn0J2VC1%l&bWl6Hp>eRibOoQ1&+C6^fKsrt#tAMD<x=dphN$O6#J2On%gv",
+		"TXmNO2?s4Cf/U@~g~j6%rElXZKMjn&%8Q+$qSO5TFwP~6tomSDc+@TjcWmgCM=GoLEdk/rdcL^eh=Ge%",
+		"4if?S%ZHl&68gJ%aJz_iO&x^Yly/fL-1aC%XK3sq6@RY&+Tz2bis?ZGx5w&_^bDskM0rA*0t^0PVqvDu",
+		"PjvTwpM0o?0LyONWd/ujW5tkZB*zde7>orI32bXsi+T2@og6uCSqXtBlm<Joc%sNmub1fw-Gs^Q!YLpU",
+		"t?Y1Clu*rZ/+cKspYka70-YY>$t7IAYGy#Qu$*Kx%a_UMqI9@7v~76UnBvVc7z_LnFGXOVNJGPhN^hB^",
+		"6RR5CmR%B!%46NZ85OU!rxdCl$epwn5/W857f?Cadgj2HH5X7RZQ4TkSQHRv3n$jngLH<2nlG2F5R%=F",
+		"5j=@Ln0rAU3g*S#cB?rsYftu&~L8!8Hf7uqF_v2~h7/!9bcQ#&t4t<Xq<!RLq!G1H6C/!!1vi4luCMW0",
+		"&qUgtJkSt8COD<F<q/@jy7@Q8VvHA>E@v4hVH@&RpA>UoVYPdC#C2CamcW%?NBWoA=~auqrsr=*wx+kZ",
+		"!e+Yo1TV682B<=zUdUiF55zJ5jsZ!2qnlS*lAaOZZsEw6jYz9ej5jvJmiGBAbdlCGhUooHIEC?v3&JcC",
+		"N&8tgqGqo76f0H9WRc!9CC-vzLCC085pWwvjgsBFBQ4Y$&Gie!OEDW@gA<JWdFG=>3boFf>*APUbOXnk",
+		"9KeFis~1zgek_#!s~CjMAU~vWfdf?MrVr-1qYB75fgTr*lf&HuaU89-8/7Q-IzqP&it<1=W+SSPNFGV/",
+		"wvi9MhZYHwXaG_nj8kLJ8YoheA1bd!2-5$5o6lq0sPKjwl~@fZ-5-KNFZieRf<8FTt~=kPoW7IFt8ABH",
+		"v#@oW9@*wVnSbBan3Z5pPIaNt*J=fkuofrI5V+-+mTWW<o0J>9QTB=!oi/Ne5xwMB8@+6wgU#y&nzvD=",
+		"9/wV&n8qm&R9%%evpxwliNOJmubW1pMzsnTXjQbw057FPgJ6u1WmQp_4Uqnjg#3T0iOvzU@iFjlQxtBF",
+		"urvzlJ_wGGj6LZC0bJ2v/u-NQQ_x1DqXrALiUaUmo$03vPp+kUEq4-/aM16-f2<dk<zPs47zuyx$v!kU",
+		"Q9Mom2c3W7vO#%0*7H2deo_WRI6W@41Jfu^i_<rmRveJ0s5iuqbx0uO#<D186v5tqMI3~*hLJ+dmF&ST",
+		"zwOuXj0?H?-27Y*Y6MN&52TvsFIvCEBwU+FGRX1/-gQ>8cnxHFHXCtaauhx836qt2R!quJOy3DTg6PCh",
+		"!84SpYqwihlkS^rkMg45=>Su+/L=Gkr7%e+N-q!fZhC~=tc&3-_ZGMqkbvX~a%Y>Qo3*t8<swa3l>nDq",
+		"8=/g_c%g!70Xpn@DE@aix5yHM52q@8V%zR+2sxmF7wfhAbsOzW3CGZFov7Rssqo/_6vr>+BY8h8z^g1u",
+		"NyO4xt@2YQ6v#D<^-4B6l>s&ktWz^cdnxezee/FmgT-F7f9ZU3zg=-k?pjNmz+r<SevOsmT6h6+Am9/J",
+		"E1-KN2F7vh!7QhyiYasXi8WpQF=446dX@qPU8*nYlF=Gtnf2@#gJSSV1VZ1#V9QTmgn8YMbhI^LDBSM4",
+		"uV^kb671dne4TNEbILu2nrz1i9$-m5s3_LP>qPWDjsVZsksl4<3pdS^t3kDBNn0nk$DftXPeTNttXn1%",
+		"DH7S4g4AyYtmAqWqvvKJs6z1YakMU=1D%-<lObQ6aNTX#3s3vupF5&*h/kn7pP<gkpTU<CKmxdS$!Oag",
+		"6_Z!i7>dfL_Xe>PT_KVi-vWMZ2kRbmY7AZT74#15Wc=YLcm3epBg+RriqkdR>JKBT9Z-Mz5wpkGTvdX7",
+		"8M2M%fjoN@CpM+cb07=KMi<wsvrzNSkh5eE$_=$b+w@s*4DuBFxa4<r4iIU6qWP3/z>O>LbIQNxlgFDm",
+		"F@kgCMBT7yfJBOg^>azR87utVg#CgBKFZUZi=C12P!I$Cf/Ev+d^pcWo!bfjhuBD!Q%lEBnhL<aGQ1Ql",
+		"?vnyj4rjGF9Zz?1pqbUUm#iHOSSYi&@1ftc1bWMCOmRTe*ccKW/=%dj-fkuZrJ72Z^pQKQkD?s#dor$@",
+		"~R%_rARrx!8+fzpOJ^=IPhk6Io5Y7>*zC3oz9A#*cAvU?$An2Ji2!%+gu!gYd/8ZKjPVcGyje&i/fk1d",
+		"r6&XYD4!bNy@L~b4m2d-u%~XtZ0848_1pYI~Qq/NjXNhlh2NR1o?K!_FN^Xtk*-hlSZr0ip~Px?rxZgS",
+		"af%wkF/-z=of>sy4rm4zjmY~YHFQ9J^l2sPu5VqQ3J~ry4asiMhdQDA0ojlKbuNwr-5sQmT6!v<Go/jH",
+		"FGvYWesAgj-=ZPd7na@1sJsqGbdR4gseQhBWDkuv5D_wFYo2y3kpjAK7OQywtIar6EF17uva0iGoO%>7",
+		"yn>G?iaZi=nAhzicgpfydS#uFgp8!m1hjF#2?>%^v8FN8HlssBU!cHU50B&%dArH&H?Gfjo?+Zy4=b$z",
+		"OX*y3uIGvod1U78rIx4k9X8&8G&<K>Z+iBS2UwN_3mROnS1+4?cr>5kpWsVJ6u8Qt0ofximME^EpMNXS",
+		"qpKDl5QFdAN7_zxQ-E-XoU1ZU9-2Ctc-$qp6-BF*#AbPTtWKIab~F3_TjxaWe6xwTdN^Mr+!n_Y6w*@A",
+		"p>OXJ^FIYSF@scN1s4*kW0h5W@j<Ap7CG#dtPLF9t@BONbB<iRx<FPmv@>@7s~OUze0014#d4EGftpDm",
+		"8#=xi44-#tg=MPg#GIood*~2?qT!?=Ow7$YNnj3v@p0wf!c@DY^&APWTg_6<2Tvj^E!xrsAHoG09z/9B",
+		"Cn$-DNz2QEoAm7qesScM4l>wmW2IQo0ZMtWmI$T~8cHatcYX=d~r0P*XYJ5gOC?BGV$=~h+s<hg3%5S/",
+		"d7<xj&rc~AfQY!gjvbKl8%5cbT>87^E$hcosP2sK98gzFZo><C#7S-gYV^D@wF8c5bv95^dK<E3bqp>K",
+		"5jPk4e?p$bsj4e39=wS-9JWEfJ@~nhU63-<y@_+Y7YW1N=-XRD6vDqZV-6S6irnyIAW_wOP-NV4b3_@X",
+		"O+QW>n-4bH_?iBl09*3U1sjAgshukZ98A%DjZMXOcFgY+JZ*TbcKPg0K<i9?K/Yxz1lD00&M<8+Lq?R5",
+		"i=c@@QE!qo>o%-=qV&#Vc?!H3oBr2dNQuV1kIg>M%jmtdNy3+Anc%aaf479r$W>^dx^Jx^@HeoS@tuwm",
+		"eab1y<ZNvcC2f0D3ozjD5XeTZdpl??e9*4&SVRXw#vM7_qjwAQreSUFZ$E#lF4Z>X&DsMupq+_0>8e*X",
+		"n%ALlqjsTCsoB8D9ax#@qGu4nC$Yqjks/2_W-uZB>B2O6SFg<?6vzBP_EbKoQUb&mbKt/sVF=naCx%=%",
+		"u90VcIph~32kFxjbUxrPsLkg?*-#%=agR=QT~ic+255JXS#rc2qc#F8tyYIql68xSm/HJO<+oVk264LN",
+		"MlE~Y@$KuWYGl<i8$HAX2#i$s%&+GQ7-VFLl72W-k6fc^rSh0#l?c%uq%ItiVdm<@xL*Ez@0wMjBx~No",
+		"qr&fD4FgAwGmH/Hs_fGlpT9*+D2_580Ci9djsy7MF_+gT>Ld-VgSp&anKvy4hF<z/9~%@pNR8o@i07+c",
+		"dNeL5~vT2%6~!4P69WI=R<->igg__IoVM1ACMDJ^mEhE-iC=zPq+uUrfMBZUFAZIi?3zNgIEsn2J_4uG",
+		"i9W9tCNBoOHY8%NPMMo^GEPU+5MZmeKnd1TvnNLqQYwfQrOI6qMF-W75--*13hfNrdApwIs0FzEpH^cJ",
+		"bB0HRg&E~NH8rbSawAQJ$PW_7nGc2iKX7&QtvVpv-iEE^793<mq>Ingf7z+fq?7HxZ$w=irSxR*5bL55",
+		"dtM6tB@jnC@%ip=q90r%LRZm0re-RPpyfY~gIcM=Z&vqUhbi7~1B>4mN94S42#bPfaH#y1hpd^SkX3O@",
+		"h?uFA/>4NLFB-&6o/sBx7Na!VAnfUhCD0T@tguzqt4l+mBm*#4ypybm%7VQvNdlWmnE*AbW61Uh!L~cL",
+		"3jK7n*AB95Vmib!Tcz$thmqj%RL<Kfou>SUlR>YK=cJN>MpMDPE@x2M6Ba%u5QVJmWe^dUkr%-jte#-x",
+		"Ucpi@4vvY_sqo$Gm&yOK2OKY?43~Lk8O2K?_H00q6w+4PN=Zlhnt~^#W*+j#0dbE~4hs@-q=2!V%nD!U",
+		"lli0Sc_D_goDr5-rJFZs54X0EtRI1*r_i%30LX>&>kNELJ^jn~3ccDk+1j4yt<z^mH0e?j^S+p~I^d<c",
+		"prB@9NMeNA>Gq!fsKxd@joqEqk7@Fl<YR0pgx5nHbhYHBz*m$xbz#?&rqvUCblX4uhZtXN&4W7jPaz9j",
+		"qi_BUyiwEklt8Hx4QZ-L9W!>W#5AE%&UqOMaw2%!>p@zoDIkXW_v+T!y>lhunPlEXxm~q~YITfuku1I@",
+		"*NwhcXU+2>lGGnoW-hNqrA8P2qZ~Q!4Pi^%QSwrF39FCug*5mWowl-@boKBm%i0<Tj3Rj*+0NJVJ3K1+",
+		"Xb5OUdrwFrt-q$i*i!zv~*fY*o/7G>lvd169WE3+u/H!@go/$hjpd@00/J-?2sAF?hm1eORA~n2z*B~N",
+		"zV~Yo6@&avF#GBmoKvp*T70C%71/ipsCt*Ph%gqOyJ/meLOBojg1&#69Yjw=Gl7-hr=P+Ksl3AZH~itZ",
+		"2uvDVqksCR0T7cZvqAv3eT*k8m**wxD-mquivVjnjojygZyLp$$cx~e2yJtz0f5r&Pb9!F0Y?1J<dMpb",
+		"6_GiGviCZT_rfT6~k@g%7pn_S#dKdW*gtYQ33>@oV_lVf-rzGdAocS_nKbKSh4uv9DY*L<4npPB=+elG",
+		"2x9$UoGe8hhM<*zI_<SH9%*20YGRC=_g%C1Ck10tIA%XqJ_YMdP@cuGCnjY_sMjP1ESxB/cs%=Ih82MH",
+		"2<nHWpYIAz6Qhub3D!csJ#l4aC?ixVk=VPWOILA1Hek%yMU!<lu0Og&1h8e8wDd#vc0Dpo30wpZ5mg1&",
+		"cGqXl#$*is>Mk--X_>DLxT58G+H!TXUE7sy6Ybh7&V08=!?~Lo92s/JLnoF2_ycWi>P!SrdL!%Cd7GDX",
+		"+$!-BoBfLuysOn8J!1rauas*E0R7J~@jQ0x9CH_4h+P!tQbdv9-_nfK8&yNg4P=v36V^c$27kjk2Rc6g",
+		"dLc6pTFZ6p7g&O4VI6Nq-#JTmozgnHxH~2kpyN$o!kqaYxDkuqlWH/%wXPT#+i42#wSY&zlGO&oQ9%yE",
+		"ulJ1$iIFvcZ2geBnxgsmsHg->e%fakT4YmPWNo>?ufUf4t$t9ohq#Eg$A41irWK~sDUQq=E>2oB!HBdH",
+		"-u7M!YUkvq2n^!S<@KawnRP@NUc!NhCCVQ!PTl~*JKe&i1t?#hqe&2CNrA@VBF@qxS^kP0%zVx!JskF>",
+		"XXW*%o0ycyjvvoy@7GvOb!H?HphQPwYsQ4ilqJLHzcSnthu@OF6PuTur?WwYaNt/rDXIwUcLO*V0Vl7R",
+		"2g9CWyFpQ6YW2qUd=ojr/QuGC%HSIt04WHL+ADbWDamwh9a5lCN-jMQZjs#u9dx/^AS4RXiEma4&DULd",
+		"hLhd?S/E2YD6?%#fO#A@2#rMVtD6QKe7oT4cCMJ37_vWes=OTb%Qyxye$+jC%=baCY7>%EWFH<mqbU#L",
+		"/OAitWibw%ls5Kk~@X%PGFUfP=kHTW@ujWWHQX#ajGLfAQwsTl0c2R=sHw--1Z<B!k1Lg^gn<7x7&@E-",
+		"2$i^8aLI~Djbfyy4dw!Hvl2Mr8xDJIs5W&*_UxVZdJciPccF*R=RN->q*3+T1n3Uv%XDRsqT1p<jP$f~",
+		"6!coiAHsj%tk/tGnq<0U96-!LXP#5KDiXj2qbb2Aie_zy63=9&e_Cc!f=Y2ci!ed0kfinotyRiV=&@9n",
+		"L</xcyNtRHwEz1R=w>!yfKr~>l3Fm0!EkeS5$J461ntLhWTGpB+cplJqO@0@aw0EV4ILJC6L@/eQ4F**",
+		"U6bKN03xn<Fg1#Ls!Q&D1kDjo!/H_II#QldoNV?rn_P5Y*4qsmxX>nI2@7bQ8<oxHcRZK3aTJszio*?3",
+		"7<535?B~lZXzrGGjOqmFLfiB3h-Sa&D02j$%sxd+r~<Pew!+N?yCFx!hxHpnyY6L2s5WVs3aRtf4TxbF",
+		"l$-aKz^%L_LTfDf!!ie<wPVg>7Z0*c0-59Pn3@olHzzlovJn9X*X4bTS+<&G+3n=v9D?Kw5D-pQuo>/m",
+		"hgZ*H-4_G8r!pja4RwSb99&5_b*PR9d!w47Ki8^9xHtLiX4xdgYxzd2Sc?h55v<yZg@!Yq4Bl91V1sG7",
+		"HA/CHgDsv#R4HB6HgyZK!wYn!RU?KhuK??>qxn*_ZG_L0glRR6W=t>3S9i<OVNt8HV<KeBOoZpdwAh+a",
+		"-<F+BdbU5*H7@vmY7!<Vt*j?qJC3y#2BCRlVFjixg*6XjwFLM#RH5l+>zL_Q%4P-um!P41Ca5ip-Y<<~",
+		"=7d3IjI41j2/aAqqLD?I2MGv35d6s@ds1G9gBQfq8+SGDMUoC#m@Md4orvgty#tZcn-7Jubw5+3fB1r>",
+		"nQ?o3dtYtR@iTeytQbUBG+&X0KDLp+kK-VRyhfwk2ZOh<6i-VVQx_lTBsAPKG#3Nzqk>s7HnN_M=svTk",
+		"68~tno@%7jn8^/vhdWEN78rpR>ECi~-yCixI-5B0S$CMZCSjGeb%#2r2#9Dg?IFf/4yO3=3>uLSZZ_ot",
+		"558ry1/qRp&WAM*F46EGyH+P%-#2=brgl*u7SNCmeX@Xf9~V*rb=0Rv%=4HH@&nu*KYSkFqR7aJR*7Yv",
+		"3r9Z3iAObYfyle%OG?y1sKq@0Sur6RCj/kZ9npd^-3/=b!DW&6H$!jsVIPhL?vw~8r+_U3Gk6o*=G@>o",
+		"Uu--7ffzl%Ke^1G73Lcbf</<nb^RtAlx$w#o6-%W!SxqXtT9Wyks1ZKw%UcHcZR?CZZu=qq>8UvGGoV>",
+		"MXBioXM@dE3n<ZZGN^W1WzUUUoBhC@ZCh?d4DVBZ~FixL^DQWh$H_!yc_yDeh/CT<98$ph3x=Wt/PsXa",
+		"3bj8T*swNFn#NTBT~ayHchP/zIbys^e+&=!p0Q!#kK8!R5~xaje89-Wl37ixL%rL7tucxtri6BvfPowW",
+		"8qgSwLm9s!_pMrHiDWV&-ESP@v3fXKriTAk24lEYCP5in&r^pp%cK%vv5Z8gog72uk4j$Lx#+4@0efO~",
+		"9xz?NFf$?rJLQ=orzkIru&#-mg*^&0Y<AQExQNB>jlQVgCgIj0#dS$0>X5Cu1C&#vaPet%R=v!/^ooR9",
+		"$@mjVhDs8Q0s%hcI1K7+D<H-5bIBS^9n#bn3!x_~7$KTx~jUfF9tFCrKa?p^sl1H*?k+JTw~_/3_c0~?",
+		"0d8loiYWhlu^_IC^1uTpcN&U1ZMyEJjLjC1WnLsK4cP9C4_u#xDxOeA_zWZb7F%*FpC!jCjVCKsupgdZ",
+		"mPL21g*+dCWfKSYM_PMxtkHm3?esvulXD=h4e>aH1d4OYrW5<Ki@tRsSN-nNh6Z@b+E>Le=AKWM#Rek^",
+		"-A~#Mg9A%^I>IQ~?G@cR6O/wkDL8+#SJe$/a7sUugl4QrkC8W5LG7vn1Hj1hZ+Bm+tePQ_l5lnQJ>#Vy",
+		"g?XM~2iog@#*tp0oLsQ=KSUU6XL+XQq*vmL2=e2<lKTcw3c~LWS4ipVy&zgEK4Rtjr_6&IkvfzRpH~L#",
+		"LxiciOOK>3u&7%cwB~b6H2bjXMDyQTa05gEq~7I1sylNFryk7R63J!0-Pv9U%CCEHqng?THky&25SUB0",
+		"psN3coy%F/uUm=ZtWEJ1tY2101l6#c^&Y-2qx_RdEAEAlq6DKsfdZb@lSXAzjPf<421k7=L?58OZQI*J",
+		"GnU@JHVp>&daOybsjPxk25kD/uc*y#Jnx*-#S2$y3MLi1ntUX<6s?B<jq+7m7DV6sjzvUBDYp*!?2wKH",
+		"uS/&rHK4nNvB-c$Tvx%p0/0DvAXYie&gEVR30WmSA6qoMok3hrjFT_z>1yjyrPLW2c<+g!WD1aupWtJf",
+		"7!_h3T875p$!6?pa#9osGd~tTc8K=2/@%^vJFV1ecflntaXPt6pg9zw4DFB-Qx%Bo5F$pZB2EKmPr9z<",
+		"t/#cVK&$KYNHfmOZ9d-^pO3n^DLv5SXYMF7s4mCp9D1Z7iE#WxjM?rhqcpTK$BYGD!n<O&suL$p*o%Y3",
+		"W^-0xqIB_/q8UDztRLMtfcPnKiTOQ42-sxtC~FaS1t4&i3q2&5-~6kWF-7I+62LapFqu%<ocbLnx-k6b",
+		"c4ZcjwbtAduhCnO158zLvldmyNMdt^tZA6yhYPW?q3jq#a5WHZbnJtV-#&RXh&rT!4a42Tr0CucBdxez",
+		"d6L+@12v9C6c=rn5XbKMkS/CCie&Vv2qx^BKKP0b4>EBKq!rKAUAmOd7>%qc/F>AA94Hl/z@eFIk>2!P",
+		"/fwm1U%dDEiwVlwHIbz<u#!?z>vr*=GP$?jkJ*Cw9/6aES$WWz~PDtz7q_B!FFJ375sDo%FbzI>dP#BQ",
+		"t&Zy?KxdE7HoCCJ31Ev^7-iL2w%t2#fcdNz9k<~gc$@1^g2D^-0H=fhU^%nRQt#VbGb6%ohGx&imn<N-",
+		"07L!B$DBJsu9~J<fGfIYNd&Yf7#aCofNY0Aih8QJuB?Kjh7I1d>Pysu43<_UBUpXLK3DDIxAFp%hJrEb",
+		"QcqTfI5rUvk0va3Oj%ZvgtZiZ0q@Z=uW52XBI@V-ije8X2KQnvE-c-E7jn5HjSP1XoBJYSh-JOr!lGB#",
+		"DIu<!l$4@AhHq3BV6fW5Bns>uh30z?5fPm~j_Dy#9gT/A1qN>S2-Rh2/1*Id=VmjH%P&k!ff#6EoVnd#",
+		"d-XXtc/4I4=_iXOpmt*j*mW?/XlR4Sllsd%8_B_JlO-w#jJ&?od9qHB55<b@qJfLSVE>h?<tdz5!vMBt",
+		"4xMaLpDJ9U=pz<#z<xn-*TbgJ/3n-QGo7*y_4Ds>-TZNN+h@6yYgtr&Hxb8BdE@JQe*#po6W%?Ek<Mrc",
+		"M/BTbvHK4sHJON~D~*2YZBEy!aoB7l1yKSzdZatgZvzUdtyXGh=P1sv4oNTd5i~4Bk<2vJXoaH@MEjMu",
+		"9SCgAfifnGJ7GKzIOdhfI?#%l4q-nH2=Puxhz=vZ/$KvB3kQ=z64pkrqm*~<CB<&Blb7<Lww3YX*r=9?",
+		"XXkE5LbE#5Cb#2OGA?q<6#^T2b*/8tTkyk#f6VC/pbpdCsVzvfu&ZNrsVCDGi+edNQ31>ULT%Xd-Oz/J",
+		"dJzVe!PvK<+^eY~~pQEJgWeakHtb@+!9d6bHv9miPm@l//XHw+>JsP7WjVQbiFp?g^!GOxu8!L%9>!Mt",
+		"5VPd5vKlSGf>?j@pLJK7cHDvpnXxYDgiGxpdgTyS2on1f4cgRr&-nBopyINsyUh*LWhwcgSv$qCTCsEX",
+		"50Uk8#-FVrKO5#hri>UlZ6$>0$h%z1yb=+?4kzm6hs&!@*FUIZcSRkVgD+Xm8H-JzQ&h/g55TEamCP2O",
+		"avmho&*wACk/K%$7Wj~n2J<vP8DZlRu9@BEke~Nwp5qN8McPG7@o!o#J7+@tW!D3ks-y6e4#iw_P<60Q",
+		"/jhTKabc?UAn6eb>xE@vxNn^v&Htn<vyXILQ$sll/a87apgK16cAuffPm!UH1o4-f-3u~vwB%ih4aAA6",
+		"G8ejT_fJxce7ufF7UkiD*QwopjX5T7jMn~Eo9E&H3SwLyh9?1qmgSz=DUyHFg/H-UH?xj1=V+wo3^fM2",
+		"L!D&#kqb-_&AK7Qoas?r1v634t#Ot6n_xd$ortdszGKbDt#cZRo/1>J-afAn3%@vdgf6hejyNBzQo6>D",
+		"gB>p50tAjibRlk5VC^cv<cLL>2^yMUHR!Z@HVRAk20/%McPkPe*Bpya18zmA3LV0AHC~9JtTVeoMu@_~",
+		"C/rwE>-Uvuf^B>#ebm82y$e7csDs+L~MDDPgS^-?mOfgg/kS-klfANxohbB%ieSW0G4+<SazZaBz?N?r",
+		"Sh_f<Upm#I#Oxc1yA0jKCN_5>I$~A+O?qD4mn!T5HNQ/GuRokaxmm4bkR5srqR91Ohg94V~s0HhRWHCn",
+		"8%Dq^<4bu*1mw?_6agn=7<nbADPz=YSxs4R00g<>gUfMtvQVde#$=oOfJoy-gbzp@f&FQohAbc>#~$PP",
+		"3^Q6V98p@rW=uEt5XG-z4ayDFt^K+Lsi?#1q8#1ysRPl*q89gGd0U-UP0@vAao!6eoV?>Me56p31dhDA",
+		"a/~xD1~SCC2dHzN97Z@wsvUgb86b^66CxBV*v~rxpqIti~M3wtewMBv9nOk@m=##IlfcU^lp&IQ5P10X",
+		"TCfw_YO~@YW/kDk5XG/44ayDFt^K+LsayWIqEnUNoR8^f?tNs?_dIsM3nU/idFNm&heQ9*v4qvH^R>k>",
+		"U!<OFaft21dlIzB7IjV8+0P-Y-Re0_zsBOJTg5bTK&#bYmRHc95TqtewopjhP=lP*pXkddPcGYD-N~A&",
+		"&OO3h2J6kO0X~8-Snm0<SD%S*~0cM^MBi^8h^E^v*BSZC~uBX*t~e=wR=^e*bEGn#&3~K-eC$aEu@_U=",
+		"30WZngSqLv1F4WpAdwVl/^TJE>i/RR+uA0iJ#8eqjcGM>tk!h>amqy2BSrOG&oWKgoTH?Bf9bKGF/etc",
+		"dT_0e%56qPcGno<3=xAzEDo/xF~$52pJiJUSlyA&Jyv9TuGA%ZuBW46nf9+yk@Xf_5VrDJl0+8vSRy!P",
+		"bjdYGw+txaosvl86V+kKYYruO/@vhAlEPYcC#SUDWG&sE13Qz4v?@cjaR~suhal@cCXll9d-2EIuw>Fa",
+		"~y1OJY$S0vT%@Nr6<Jz_SQWmjVZgVb~&FU8<n%LmwLfF%dp^jom0GAQKadkB4GK?zQ+Nms4_cz*euKL*",
+		"?5F!s4^y^vKk9fynkjjAUR2g2P2N+GP&IoDdI>WgdkI8@aeoH!1j+hN0UGOHp30nH^+fMfm=Q>tdoR3_",
+		"p!/>52B&?EBFzD&bc0<mOrI!njb%?1geZ!Am4B@Wfd=_#aW/l/w%e!69BeL<RWG4noa/~5Iqk>Ll4Mo$",
+		"$Oj8_8V&yepj~_bVLF+zj=%>qQgwNd$zI-~j3hzPtC7_g*+oPz#LwVCjCE5oHEZyrJ0ZglstQCgGu>sQ",
+		"~Wl<O+%g7Fa$e++vE?TuY@h%f~If5aI%Gx<ei&Q!N->-3-5RV>qZ_7-loDWUuc_H>i/Db90u@lyh?Y0H",
+		"nFddY9M?_Q+49YfRcT2o9zp?G1yc5E*H4iZJ1*&eFKUPi3ZBpGvP%JVN56DNx1s=&oi/tL1<sP-1Xpl&",
+		"Etgj^lpKaV3qRZA=oberph<B6sqcLURPc!&!jo<H9KE<AG+yjRJhl1U1R-4DFWh$knIEgKjF2$W!0JyB",
+		"&aG7&xG/vs^?z~N!~ZSu!!bv0sij%$O+ABlmj%rxk%Xs<pP<Za44b6LqTHg&G3b=AZ5pe6cOTuAOEU%T",
+		"BKUpMt0R7q%D<708xUm7>1IwnI<icMvgRP#HH~3XDeXZuarA*61T_GRFzYsPjc%07kYUxGzRQ@n$MI*b",
+		"k?1yR2*rS3B1oIn55#-A5w!m?h1uN7HY@3+G06_%fg59gM2H*NheP9MXV#jD&ASdfFLVVikqYTLmTg6D",
+		"?w67JYQbhmgc!Iou<QTx/SxRvq<kC4F/#Kfj8kZYYOVa5V/&bO1PgD8lNod6%*D+^tS!TeEMfJb/2RK=",
+		"uCwSu4ZJ*Sk3N#17v$9yp@TYg1=UHWpNeTHtK3YS@T*S@fT-5&olRdwjqBzM@D2VAgcEl-*+61QAzC%U",
+		"b9ndFjeY8kro$qJ<Cn@f1sK8dkYw!tVDA#z<98Fak!14rjzxW?>t/0Y3o9@2Lmk/02D23f2Rqob2Cf7c",
+		"wh*PQ^HjM%-V+VUR=eOEZgmRhn$7OI3HJ9r$juD99e4#@~Ux6dngnd!c2Y/UxLi9U&b<BsSQFhr!7!jc",
+		"YBhy3sLDglauK%_Ijk/S$_rF~XC-R/jnY9PdF/B5^d5a+n3Yx_6SZL9oxM/H2tC5ZI@2S>ept%=42?!I",
+		"kyiWbtWvf8LYP+-Z_k&?QJEIscw4?wb#-T1v6P3gpP>Zg3%ft?CGV&=^N-^ykZZGg_999$wtreA#cApO",
+		"Jh*j1o/~3Rmn9ARliTOvg@+TbH2H=luKUcK?CMQ#HN5t<UsZz<3AV1r_JVC-t?#v<3LIBv=LAxnrax?f",
+		"a7UoRn&id#?B>/_a7v7Ieg%RS6Mqncab-qiPVrFMgQ>^9u+83a~sFfQ2Lhd6#zF>&5wJaqJoRyum5~5p",
+		"kg!_ij<M84f=A8f3&IO$iCwgQ#TJafhG/>A&!tJTr&%&^gtR8hOjYd7rFdw#vTvw/EjwO7/eP96itVM=",
+		"iht@a^u^BnV/Fgm&>jNe3~zMy8yXke6/FGQn8L58o-l0bpnM*f23=Ikz<^@Obe&503Vr/Dcm+7rcdf?+",
+		"pitl8Uec5-a$t-zciE<rp=pYVoU^X?-T=RQ7HeywhLh9g-gcWR9/tiiP&HfXQM!AEj0%47?qr~!j$7sb",
+		"Gz$9VpH&gHW>mp46%_k/V3_uvF%x%<<bh+U*gymP+pV8BfsYs&00jcwaB0$UAQIB_t/5rmtVFMKtEp*Z",
+		"Lx@EXrz7D?3kE+e2Of05gS~u/tTckMoL?<F8%gY_PgbjH^u_HeFtb*idS#!LfN^1ZQW6%9gTAF/d?QEZ",
+		"LJ78<e?zUSjYtv1tSRgbGa$@<VKBMOaGHIgAs+bwQn3N@oeXDKa<V5+gxwo%WO^oz$LmJ9/JJdxs&4lO",
+		"cP+pelLsDkyv8ZXS2yeCiR^J_KlB0Q1hSfs#DT^F8=@mauP%S38%uVmn/P8%b<MmL#IRnLmQlU7uK%kh",
+		"feFh-qk&_n6_rkI_p!1&2o3=Fn1$iFxUAaP!1yJT-!c6#5v*c<6*Z+XmP9Kzh+GSEAxAv2iGB*EgJld9",
+		"H<saIP?_=-Wb7?T>=PutqD$2JdAV<*x@%GujLN4/rXg-Dt90/fR/+hnncTcE2x-MA-!QR*qiNQZDV-4<",
+		"I!Rg<9%v0*oH=hOVU~_?w-2+7sx~EENRX3t3~%vM<@3N/yJrg4zk1g!6l0Y#7>8af3$QexPQglo0EWP2",
+		"~8G*prj%gb%<>H@GL73LIbr+xo0v6/RNqk9mG_V<bUm-vOFZUb->n>d%PgR9t2~S#1C2ujmLMtjU^=^a",
+		"op?F<5H%oHXch_<q8&!?H$sBcN1ELRMmzu$CKdAhtO1CW+cQBC3d9F+r=6$vPQ3_*t#02HgUpqMf!+*@",
+		"7ih1SFC$V=$Yke$dBhtlnjI-od3H-ZH5JXXhGt6j&vH2jETeRL$12BA7X9#VSSnxCOkBt?JB>a3mvoYN",
+		"wUnCifVwwuD>40sgd>t<v#h2KQBgO/a9Y<urtN#dstP@<E?@Q!Niz?>qrQDnB$~Y!bXH3=Oep5WtDLSk",
+		"%Au*RTiT46wEg~X%3gb0gItD_b_1gKh-uyLpe_/h+z2r7lT21dblxfe&=!n+uQRN%eQI0W!L%HocV9KP",
+		"7C^x/CyVO>H?3^ce&d%XqL2UB0NUp^qUDh6nVvd&Ix/OWh0au&u2e/$7MVmcsIasI69FCle/Iynf!ozm",
+		"q9hI%paIh_&Q$#F8nAy~l_0kXp=k-SRZdCKaTdqt~xtJZifQ2c_s/PNXUWYlCB01N70v4OxJwviP$5?N",
+		"2=$Gi^z+ppb~!%unJMNeoONblA_MOp5H^9BeU&xto#E%+~CKUOw&nF35iTdN*6Iv-l~C*1iKqbBTTZF?",
+		"1o?mRKPd+m7lPUL7+_xpJ~K8gVFMm-S/z+U/WBLpv6^~IhOI+ddhwAHFM&ICDndnNu!4DTj-#KN+qZT+",
+		"k!i=#ZyV_5m%R#Ge*n%9C@@Y^Iz/R2w%gz~rRVPVXdvue$d3dMs+E7~h=pQYPQ35Z6<-B20IV1V-6U/L",
+		"mRYH+4mtFY__i1%bdl9ZmkS-$qnM<XSaoeryZIG<++@ZM#IL46lQ<N3e!H%axEb&K@@6G?x0GCTzc9^P",
+		"HjcHkyn0%yWQdI9kpke^sjI#R$k=w%f&p7HuQkSX=bOYeYUi%sW?-fn_tQK&26+#Yx2DMAX/w4vqS+85",
+		"*eO$?%*$CIgPe-B5CXSek%ZiB!=yfMYm@H=Np?@_egrL9p/QB*cE?7VqHvv_#sd?zzY7gc1ib%Z@E#Ge",
+		"ntQ$f1Deu5Cug06l/0nVsjg#i5u-KdtUlZM?~LUkK1jHh_G5iWt5bVVgAyU4zr4f~*K>2d0A1bq#GO2I",
+		"a!7E-6t=L>SIs&Y5<GbW+CS%!f=9FDh3<>IlO47^vo!l_mqK**x@lz7uW6!EHr36~i^PS*xeR!QtK1kJ",
+		"Jz~Y6YELM?znrLo9J?/ZobQfpeqLBcgY~r?o9jppfz92k*IOE25C&oAaU^09Cugd4ol@IykKpG%kuR&M",
+		"q8UQd/vD/Fy#plMV#EvA1-i6>s5OSToB%I%fG$3zdhns7d/_4V9tE>xrWS#JWzP+2qMw-Rpn*LP3A<8~",
+		"hSp~aN%>oHZ3UsqHiSk?45DPsNG9imr^CQl2?b>gsTeu<so66h6=69zr7gcn@pWFs3AQ^*8yo&<x>&xP",
+		"10FYDy?!81fDsMZ0$@vW>CWif$q!2r8hYvutK&9VoH=?KtZhQKo%Jfof%wJj7wToNbOCwGt~A!eUru1n",
+		"jO6p1e~PP%fgo~lp88#GTQFycLI0EDp0vE+mrR>4IU97@7xAyI1c-dy!F3*vj>KWnGVoe!gEZXTcUSvI",
+		"L3_Sx+DUMvt/=8iFO>9x*>WYIiK1am0gvRp@8LT8h7>2*iOG&vj>_uu+AdbY@2H<$2yD%_5_qW!9maj7",
+		"4<z8>CnGPz2vBqkw+Fzr9fFi9UxRhdd5okd<GrxUGA>K8n7Vb!^0yqR623zW15qdItHhfsgJ<p-nPF@u",
+		"oshGIX~-w^t!*#4a0LLB0c30%cX@TudcDkk0#e2t2h=Tvsz6cd*4Q/v=!ve$8x=iW=+ryjeMiD2Z9y9l",
+		"42T+8FAmLI60VIb_0&j/9~JXDOx+slKueE#ieF2r1Nq1vSnI$zVKnHkq1bW@e*#<?cTH%5HeO*3XY%T0",
+		"375GL~wy2V7iX@F9lqR_41FknuF9TiKtA/zpg=a~gA8<X<8P&Fg@YUrcYSB<i38CZj_@#tsjRsy&&JGV",
+		"gcDQSi*PRu0HmRxOdWuno~G3qQM~-qvwTbnVgqGCH1G2k2^!aGv+ehFZ6dWAjqLUAtq!Yx/LGdCxtBPq",
+		"0XawyXHIZ&u4d@siAQwH5lffttt?gKnd$yDkt20#0WFzWs^CBwh$!W@r0=-*uYxCoXsl~-se^OVmeHj@",
+		"p-Ebwu~&R56zXleQ?rO2C8Qrn+aEY3mOZmaAkmFsyCJc*ZQzWv8p8hf$3VWYcn>HSjh*u-%jIMChTpZ8",
+		"z/iXC1-c/ebuu_ShsabBqsJg$NhXs2PHOdZDq>wLRMt+odp<u2q*%fd4VhhJ0+!Z7TBgc&c/esd3lPwm",
+		"G~n/y=XAoTfy*ckj-yO#N2a+2smt!r5HHO7vB!pof_gY17J4qDfTXF+6nIS05Uqvvgk-874B$E2@+Gl?",
+		"9r>7zN5IHfna2rOr9F~/!el/7!f@U!E=D$=b$$G&uA97hI&i$%jcX<#RRLQyeSy2se7qFXw5fF*BS^m0",
+		"CygfI3nsK>Y=FKwXlEEV7CmWBhX4>*fftV2qN2/<oUBxj9~tSiL6KCD1-K8lX=kV*HY&clna70%71&%2",
+		"a1X3kDnMDI%ZF?2>*9y_#$EEMsFTD_nW=9WoNklnftMoJNPANH-/@!RlF>1bj7q3R2n%jvEE-F>P=JYn",
+		"ixlqBl+>_HYrS*T1gY0$3%LOP7WFNRe%1z88YG7Y4<kd=Pt#v?8P/72vB#H+jM#usi$3dlG9_WU~Ey*<",
+		"rb^RHDKA7saVLkJu5N_Wg$nCMth40&aQAj#kAPz^iZ8p%~dH*3bTBA/!9~C0eomgM0O>nJ4qqjjL*2qf",
+		"u@Uw^eX#Kk+UC<^YhHTQ2k&%jrF/dkhZ+/1Hahudpb01RjgO2ieABk7RyFt*jI8iD8*ue**n4cm>FM9#",
+		"~D&oD%ZNcDbks-&NrUX54Hd&%_fYzXMiCJ*qVnEk*F=4BeF-@Na--g6%-N?%E589lQ1B!8q$^jYw$Zjn",
+		"HZ^x9ibbIfn&F>OcI3uGD@Vt7eHIrlYWPrtnADbKpaU2t9?>up7!@_SPH#92QX?O=T-hafTRGK>40vyR",
+		"u9nYqo#IK^bk>6U1ridM7Fldl1K=Z!lkZv0qasyDi~$CW?+rSM1j3XbtmG+sFM<1#f?Tpt5ARX*my>lD",
+		"@-wkDeJoOY2h6sKUGlpWses8XkVVfbB$UcdtdBWtewRqijVa=snoKfg8QDDvus~>/l&Rk=O#S&wi<7ez",
+		"5Wj598b$IEuSD%Ao0cBew$^=XvB_ZSxPB3BB^>9KvRMKLh%RAX?e%8S/eBoMMXQ_yp*l1_yjec@$3AgY",
+		"62&DTvg=#1sGg7O+L>25?/3A3>k16Svu>i-1SB7w1c2uw/r^dpV%C4*d_Bz&G_8*aM!rZ^>vZtXSkm-4",
+		"TfazTOs0c>3^u*qhiwRNKVKAYh&ZV8a+l6@efrB^mgN~ORhHIoZ8C1?1UtJ$ugdke9402tqjH$y?ewKH",
+		"1+OeuNTSgr#Ba_O@#Y08?eTd<pK8?weCG_#260TEh1JMQ0VA#$uQFmYai+kUf1KgPD!R^Skg@M!h&sIw",
+		"G+E0*98j<q#^697zJw72I!T11f-zr!Imy%kr<-oT3T~_F8ZRcju^i!p3r9XO6mlMyDjyu_r1P*EXQq_h",
+		"bn^3sJ>F1eNWv-EPY6^H_#56FhnMAw6yDJYtL#MJBo6i-KonTrmysI#19SWL8=?$i/%JKZd~SX>iRf/5",
+		"9qf~h1zIlV>y+eg^UyNt_9H/BqT=OI/Ywax6UU2Wjq_=u^H+pv8fds8$5wzkMj8W_Clu^Vr-oGif></n",
+		"/fU!e6I$v3kg8SA?8BLQ3lxz%m-XcOd/L-6s0-g$WskHSRMaD1j6A7BgRgYPLOEbYE~gZM=HupmTb77A",
+		"Yb/3_bSSkwW!VYksV<SxPsNByl3k4ux?Ywkv7-gWhT=oYj9rI~9~?_7_D>fkV<9Bl0>HifNr6h64c1Oi",
+		"lf0asQI*/~rPE_bOpK!~2NNIN/eilpI_Jq*tUGg&c=aGY@rd1E2NGg*8UW5CI^vOq0&C96f~pF41uVp$",
+		"0QP3b465JEeBC+Z1xqa=7_oX9T9K>XfA5C+3#O6jFpT&#sMaHQCHAi#93O7GJ0y4yG~dq_6Ucen6-4/b",
+		"hVlLtnr?+!!iF-n^y*V_g^D?>P0JK4_@IYJDs9Uno0S$LnsEpqPjY$gtIZI0m-Z%XD4~T1dP3P51RWyq",
+		"GTfWQky+Z+d1b&U>9@>vct>XH9U2~p4f~^YqyHRC3jV4IdU@=W~InY&22$9$kSuaOV5g<5slLH$2KXrX",
+		"n=k_euk<&8W8~@VKG9lfoiW_Rz<DC9=^9FXn*vTim>UtkpH<_ymsdUAp%FtXojnTV9*^YIhpEq2BkLeJ",
+		"p%D9njgXVJEdH@4yyFXcRf16%b+%^0ur80s3i8&08eN$LO=!2zM#J>2uypg_bjW$ry0teS#W=d>ql1G1",
+		"#3/~X?N3<Umw*?T~Kxm@3zO$WQlnC!2RRr0c/p9elqrj_?7JqD~?XZWF-_ZiRW?YymUla_YX#0+?1N7o",
+		"<P17Qw?Lo&@/fglqmcJ>mFlWml8URZkHEx70HUoq7I55G=7-*H+<GBma>^cAz%4MVqHW7/dS3hZ!^?nQ",
+		"8<=yr*nKRhHI/wZ_4g+9^tBhxtUQ0%2c$N#oBS!@tQ2aKou?UKa@vFW/^Pfu7Q3sGcaMIxm!TBamsZA#",
+		"6K>Gm&#J/dfnElXDI@gD0XIW1Juxn+L<VLXwehYaco@-eRhL0/zG>M4&e0XGoN-+6b8!0<bHb433qWbE",
+		"704AG=G8zWr%IS7aWtJI$HV5/^9VEnq$jOrctMAIASPX+olI/yl%0F#d5<s2cOnUM3TK8/<mgLVbE?HE",
+		"9QtDhsqI~1ntVBScHIa8+?EE_mAQy9-^E538E_J$rpWP_j^9Blgs&C$J#68NCK!p0ag6zCxByat%f/Yu",
+		"U*R8VGfwL_iy5<Bc6/rMpQHS9&E7yh4GRJ8VB/M?@S1Vj#7eHPE~Zc4/pHysNfN>o&BGA6m#P0lc~/~k",
+		"OP6Wl6EZrKjgN4wJq//0jCJaAa@FX&0sR3gd^r65fm0R~9l2#n1ltcI14jf91j/!HHZ-ag2c&Y^T*iV0",
+		"hXgkVf*Zt#nRe&-6olv0qPQszhL78yI-!s=5>rBejXl<Ff$ym#3EsF7XuFwpN1pE%ef!yLHzp>X=5JP?",
+		"+81x~Hy@H7D?!MRW@CvaWal*p%rUq3v19Utc/6*9tylB/AZ%~jetK!%7+N!grG!sTO!j7H7IVU&xdEUB",
+		"Cuh6!HSPW>uWz4suj<5>BhbBw1zA3CgJTRWWfnY/P>Su9EKwUYCXRix3Fx*<po/Y4ef3WotL9E&iWXa!",
+		"b0%HdmvaQtM1njP2x%1h6L63k1yl%Z3cwxf<GTFKcq/s#!c9+BsrP0<70Z*o?lR-TNyu3Yc<U9hAQbpU",
+		"dGZ-V5tsm*^~qm0FU6Rd!ypPJ2el?/=>FEvnk63bg5ZNB_E#@<9SX7%MBnTloMnPzhNTHKjuDc!-!b?h",
+		"3cX#w1eU&/Yq6J?FfW^!T/OM^n!8*4r~UAO9c=Y3hbcxKgrVosPU>MfRozDF4I6hes3JYQElMr@2O!!%",
+		"^fVK27RDVAvs>gj0ajw>qfYlXg_*KjqEJBte?_$0hNV4CWz&k1JS-26hLDDmAfh/ol-EzGr<t3$iLnow",
+		"%oS3O5Rbp=XNjSCukJcI9LSgt65-2N6H#5!d+Fg+_J!=!Uj5H0ef~^@o$RI<0VrJ<guL/in-ex!#-1CH",
+		"mKIOzpIq~/9e~c~fhQe~D0H5>Uj!N&8gcNcouD@P!8~Ye$i&Xprpy>Wusk0$hmvvoX=UBD4Hyd~+&!C%",
+		"m_QCADStcTtZl*SuQ~<_Qz<$crA/c5hDIF>@ss/4<yL3<AWS<QIi~5ArI#+Y3lKfsOT!#xleYGpf+8vl",
+		"0d<i~!QWHr%&NB_qy#K!FlL3_LIr0FHR*V>^VZEgJVWWSM$ceHgpQgwaqv&omVsu3u?@oYco_p^1FHCT",
+		"ne=9htI@pFh5-$d1G/&n1RCVXeg@D0D+eGxm~NCFVKt@G3+?D/nVbwDId>Zk3jnaDTb*M29y<*BelHxT",
+		"e-D3ksJb?4ky5_bhWB>ce-+zqodzw&tAApzbU#/w94B_lik$iY4beQjGlq<xna@bZWj3Uy2+<wwaz@tL",
+		"K++1wt$*Pe8_1X#IY%OEd!Vg*gaczeP0U8^kaeUFe1b7MUxUXdr$=Ji0AW0-=k0/JUuNxXeCcluD4n/0",
+		"EW^@o58?56$PoxK_3lktRb5+FrlkGw2<>LlpdK1~hCx/_P!OWUu9=GWuY7H~NDkg0UcGfAq2F^V6WFNP",
+		"c107l>L/rSwpEkatPzai1/C#BJI2!l+x2#R<onIjjEr&yl4IT5al$Z3lZtoARFHh3*WUjlb4=u+o@MDX",
+		"0_i6H8e#$p$h6SnEZf5^cQ5x7Gr_G09rnXm1h^W+HMBmLfMh/7btDKu6TBDxag&R<PeZY7ezd*k3X&aj",
+		"e*#QsSbL!&h/qP=5k/#hA5b%2PUf~A7jn7wEovamYDC1Vu7Y$DTLuy-~@sxM%/MVCnRm!seY?9y~RanY",
+		"l^82byTbMiSCm3i2#3rzJWB~+qHEkCAumSuK3@DO8uQt^x+7@*B_7/Su4IWD34X<4ENbSk0q9YSAjT~d",
+		">QUWer2>MArverM5Ix$4Wj8T^2CKk?pMNCcE&hrKaxCGChabGTf~62Dq&TU_C1+wEArf0CvwFRuL8u&3",
+		"55>Jt@~chz@HON1ht6C$Q5#~/5q+8=_/^tQl7_023Nqf78<6H=l+PMc$+!^jWXbN_cs+Ty+c2QQk+-j8",
+		"hAGuHYD2*#GqXXc@Pg8C~XW=+U%K3eNgNDYLgN2z~BtI?>rZ@5ePBtAmPIHzhuXKt7aU_Y$@J72r^*b2",
+		"y3lr/te<ftFJ@=liZbe2iuYM<5FKaNp%cb0NlbWqa$si$S8&$b0T5EB3FF7Ubtn_/ANJYpLdDVGnRk*u",
+		"y%rGhjMT-n4Moe<%30t!Rhcj_YUhs5d$lBI9c<=<iFRbS0DO_Df=M<^p1#3FIFz>4W-!Y7q/W6C4#QvT",
+		"3mvkNXMctG#z4fsirZvL4/1bEl>qD=jFvl#4cY?7VFwX+B&huJ^LP0Uday^hxyc>SKu0lTFEB&#JMclZ",
+		"aqXuibC$xD$kqjf>XXk#J5E6tbe8Spv223#whYKt*Er0Nl/zJGxSWHy01xLqK3kc=h<jlmVENFjNNt$k",
+		"_kWCin@kwg5@?BXl>++iV#pjs3KCt4<ch%<&+$DHhG2a6%CQ92am*NHdTKRfnIl8*aSYKF6karaag1Fm",
+		"GAjqhc!?lN5vEQj378#*-GaVAj~YvT5_AQLhkmFddAkyh7U4_MYkSRQ8A0vg7R4y2jbTf&Iq+p6J*%e8",
+		"@SgW*aXHzatAUi20dk6L3@1SkJD5gGe#nBb0&y6K+C=&*c*!yBoJxjxs9auU68Yj5ihf*v%_WGOyHEaG",
+		"01A6ymSMLsdPSVOwrFDbyPMo4fb$Y~lQP*2_PV^Z1Jr$g/>vq5p2P8L7k5V~sQkrCWo0Wt^D3XQbsDJ#",
+		"pktpca3#1@Hg/FMN~EJV1Dm/guy0tO6MyiCqffq#zs-XxdC$H2l1x%a-~YIDMSwJg<DIqBjRg?P9FFTg",
+		"l%I48jzE^4F$nh+uq2X*l~%F5ag=<XXR+_l#X>iYCea7+fcI6-m+O$@4@wwoE0fdDuM8ybsbzhMqr!gq",
+		"rzRLsl8w=$r^#eT58pJXIr=rBVw#--uyd<#NCL6nk=>b6^_=RYZBE/i72sU0K4$w*8*4qRU7kJQ_QV95",
+		"o~bLKr<8NM^ek=~ToN&8/BhWpn~VaE~I+vsc%J^jyrnu$zL9WPpJD1iokqcdb3<inJEcV6*Xj3<l9bD+",
+		"a-i*PbP5iTr@9Dj>WczcjKuizOJ&yxc?*+@N21cyj#O571*r*~>ML99lsMO-~BEkm0&#<=t?+8AaLHA6",
+		"ea%iDMZYj3rX2j>~tbN261XRvfn6F6M8fX+hiC4ErED9oqc+CFsGbMx%MrT4W<M9rH3o3ZZ/-JB*g%ne",
+		"/Q@FQqY!dVavi&Ks-na&K4FX$j&b1~bV1j&olpcgY@%4rNxlHFnoiEquY%S0MVFRVU7AlNAy-fwlf!IL",
+		"0/2tfv9paFuX6/l<ZcEibCgR62PGGVej+^k?kjdPxEaR!Kd/v<O$1t8MC7#hjX~TpsVg%yb1ZtGOfBUd",
+		"WYJndbpDd/tIf+rpB#~1j9vSdeEn7~sJEmSsx+MWd5I-DgT?$?=YQjMJjtm5<3HmNJ-jxJrV1b296tF6",
+		"MyX5lIW@srv=$p3jXATA+Z+~$Zl5ZrbxN$auOGvEH2R-n0L&NQtNIUv+rn0B%Z!%Y%D=F3/_H~Adel2E",
+		"&J_1^5!HdhXizwd>+4g#RQXJTh&Nq&xyF_Vsw^x0k5T4?Bcl389lsHtci=EB/_H4$KvZT&lFBp8u%_ga",
+		"!K8oL<cSV2@TdO+cNsXgnNdK~fGXDKeFr9MBR*I7GS$RdpUv%8GJBmFO4V@RuJiaYt8/mDKhYi-BPN4i",
+		"Br$p<A7Sd&9B~p97UB1J=0Eao<Ywkz/eCJdeHy7V0WlChtVjSvhvlDqDwMzRn^skx*Dxuoezk&<uv3v_",
+		"E=9JJi&5Cs0n-^ik9+0nkP4NTsz22$5TWszjoU8%mAuz%l__ha>9kTWrb8C=Tn$PnCN@MoS0Ge%o@Caw",
+		"y%@p<yA#<m+/fU>XczhzR#>&H6_K2UkSpT9ooy>~Q4Iwfz>&!8nXEY7=IoPIi_e2_1+*/hn4U1egvsn#",
+		"@cLoR~j@+5qNr9V6jF=VqckN5ifaS7?6OCC98mX$s^_q0!Dgfr4ECgg3>=ImjYQN*50QofvB2>RGK-@7",
+		"@>#pCY7LW3Q<6$W8#65i3*WPWifVNr^Zutr0&W0#e9h<b%LL/20t1c?ZPSykO*M+7Nhz7dfA8a3D=-Ng",
+		"3KWEfqg%/1+=w/4bcrd@nEb$xttgJve^qP2-8n4qA>Iwd_3RHQMUVE+bWuTIm8sIBtlwI?dK5B$o/y+N",
+		"*0-1KWROutn/JqCx9za<0WD_M3XNi_c$BSo+0lwA6CO*M96iqR&%tmGX<OvdioDijx$O<P!=Nxbd7eAJ",
+		"T3IYkH6b2k9cZBmIKUUU@Ys=ovfMo+dOmlpy6V36GMLJ~cJ_z6vRKMdoVBSgrWWcKy/Om4&*+eAOl1P3",
+		"yxbhwz?^1&p4tY2fhw!cH&^$QokmoG04%qR8yPGF1r<_cJLaDqi@Gq/TD9nd+#qN25sxc*m/r1cxZM5N",
+		"m7<h-UGHcCgU2wc~vT1oM4Ut3g0_$eVK%cjhcJo^3Jve-v4>^Q6H^F<F8Xa6zXiT<5M3mC4=EhO+1bYq",
+		"MHz0+tl-%EZ^LAk~FaqFqhm9X&w27*f&DeICQyjcmX7pfK1qE=&Do^mkQ#Oe#pVWPb9h#y#z/07zQtNT",
+		"17b%h0!wkChXWFG+q$*w4>/~TmNcJaiq@pKY&SN+u62rSbp9!qriuRt4IN@#3+yUxC4FRGPVj%Z1DY5H",
+		"3?C<M8bKtukPF~uy$ra^<kbteU*q-fu5~9jQ&~7CnV~ja^P*XMLmXy=Onrm~Tb--24GXlRqXm%EkJXL-",
+		"k!3$U!=&5@I5*6ae?edaa?E3Tr2PxU1q7KYsDkinXoC$4ihntC~cDTzqlA-/a83JA4&yea5c*UhaFfU9",
+		"@Z+BAhmEoBe2_^e1bh@4f$j4%th9epn+bV*t?#<EaJ=4~fHXKhzg1<ov7#5F6L-ea~6p7vcbNXrp0tTm",
+		"afdBEj&B<tri_MqlLJ-OlCMh2-zAkSPifQxlS9^Om-X8824a+uP6I>5OPq=S1_R&A9HYYz5C~rTa1sG!",
+		"0ka_v2Sb?mdj~jz$^MqIuj8?zK2+q>aMZ>fcJ>Utj~jO_lOPo3ks=kU<lDjm3Hc#$o0&pi?^+0eO!+V1",
+		"Xae>42oBgo02J%><@pOKDjoqXJT9K!%l*yX3mY+pcUMIi_yTe-8r-z*tXseRk?Nk=e7gEotC3~v1JRo>",
+		"rry^Fj~9G=rqz!sm<&gh#M7%ge0c*as>iuq_ZNX+pr2w9xI79rb>sl~55MSO#lGbtTPu?8Nkh5_OPNNf",
+		"dHLwF%Mt%$ACQ@f5C>EJZh8s?bxa+pvb$E5s957d3&<oWW?QzMleGDb!*djvmEkX#$<<+WpqJIAY#l?9",
+		"a$L1k34DE2rrYgi5~Jd#%tvfnHn-YpsmK3q93NP2qD11VtZ&9&#rbLm%bMFb$5ptEu@40/&OUY9h<KR-",
+		"QkGYMu1+4q##3t#$o#d$a0QEo4#an#p3DcF2!eG/0jKutnf~-meTg0C4P/3_/fXg578GY_=ov>pIn2s6",
+		"u%QkRluDr21su@Bn=3FTk-+K^4u&=u_=Z?6ehr&YXe0~m793aUSi^RcoCWD+D!M*6s1lm%FiMJ2jeV#B",
+		"txSB%ArrEPP/>SRlL~2HIXz7b%Ed2E7F9kQGG*piG=!mkDKmHtorV_WLE$r+<W?5DdrDSKtPkh8_Lz^-",
+		"Lg6bPr_tlUAR~_4M8<wgE~2n/%rP9MxPaLBefw!*ekrn*WeDSPd%835j1X@R6bOi!s^&j1UTsz7pBy39",
+		"B5~*CroD6U3xzQnADDHUk7_WyLgrNC$Y3a*c0wQm$0wyxF0Y*_R09hL^c_io5bx4+MTBZ2hK/*zZz%!l",
+		"#*NY^~j<0z!ul<redp/P%rs$D2mwLn1hU1spDICO7q_wMW_$xDcI6X~uk2hne-C/aBjxtSC0T~92iM*A",
+		"Z6K1D8*1qezgCmwq&V5>!j2#^aqY3WJL5uTP5FBQL0BOkk&w^BnNo%L8Y8usWYw%-18QRe-M$4R0wb!e",
+		"qodJChOA-uT#FB47dU6RrsauDwkIC33+7>h=xzDYrX=u+GSj8yQoW_HXv4FqA%q#akNwPurca~H7CVwp",
+		"6h5KcxgDjFHIpJG%eheb3>GR^x?~NmbsN*#2IFiVG+2U&3UzE+lg^Sr+sFo7Q_byA0m@6VJEl5LT+1ZZ",
+		"6lETE3+=SQ_UoiPkM9jz*+E7+c9WpkAQN6pRSx-*rX#raj?/*nK#kK11**uiyU@_cZKAzn8FU=euaVD-",
+		"CVPPOec%YO$kVUkZdpu&mjqbATcguJw?kPrB4WB@tQbQHC0Ad>e&PLtj$#XMh!@=@kS$6gq_kw!WrCzz",
+		"lWUDEn?ofA7ABt$#Bxa0s6vYE9Qwgh1qMTJc8H#DA1NfM2de#ID?tygmG0RDcbC5Ncmn^B6^=l51@bD1",
+		"aZa%c#x=>tRSpIpL8BPJE+/UMS14d$&@4l?4@Eu<cI/mGuchM=o*ctHpPk__?i*ids_czDI?szUQ2/oJ",
+		"dh<^l*_Tzj%h2h@n^l_!2@nwy#*YmU4m@fmE&WNpsvPEg4E%I$8N+bwP2>%P/g0y!2h9Ae88atsNul&Y",
+		"Er2ck1~x=J8~kN9jOwlj^UZNaENIFws$U7aKv>%H8MV!Di$0PaJ!@4tEuRKFk53!0Y*_nonSB=EP/vG!",
+		"Yw@-zcklf7ss1~Clu=d$P$MZrlS4^vqSN6#iJ=ko!iSC+InOCjahw>s5Q=+>Cc-8O?47?69JBq6Ctk4D",
+		"Wl5#5DzE6ur2cv5+f*WSlYIzTleS3gQC~%@t$uXv#7HQ$/5mItjl%1F3-fr7b/IZ-eNIH2z+>q6mbL!<",
+		"s-RiO/l&$iq1w$9gelg_aT<SwrBwVKQ8H>UVQssAJ~G?e9ee<^eDn$KKbBaGhI6Dtj4r+AGFL5hi86#C",
+		"I%HkmmhE@rxvaCVwh/sj^Zd>3w<WZ0va<n=aPh&eUnzqGT*7bP!WRjXlUEJIYBVa<Tf!4ahMvU1Tf4/k",
+		"dgHutm<o~oo#/=A4PUS@7J>>%K=@I*s7t8i^$VZgIZKTwYyWXvUjC=?^8G3>3/sX+1t+>0cK~6x9yx5q",
+		"05w~ucycNMaIr+tbQLb^Ip?W*cIaU#t>m=Xh$GesjBQkpY~$JEcNP6yX8o-MnfQFP#YAQ4ljlSu/gdh>",
+		"F6rh<PIXgtPu*01muWc!/z?d?ZejqXax@+H>RiDIcBQ1f24GF~OsRBp&_$bDd$p=wiXxdDaJ=OR5#Yxq",
+		"Jr#P7onsNh>sMTqUsIjm$X2B8*y1xtjQ_NS0bNV/<P084d4k/hK&k<Up0XU_fE&57hFl%OGMnvcH_^w+",
+		"e7N/rrJw6UXVEK0h>E&tnNVy?nhA1D_*/m~@9#Fje6kAPcf5bVc2BNU=?~w2QUm8XjGFGEoVXHj>n3$A",
+		"0xXzGnwSuBSqHsKkK4uso1W^x6V^Gn9C*Gh?D27SjowpCuxx7KBBtPCSNo?G=Fvzg8wIw=I<R@$rvDm3",
+		"zKTmRIPZAPekFA<m*Dtj6-HvcKAm&1DC^vA-$/4opnvg#<J<a!>rC7gbUJEaMoE=w9QK_y#Zj-B>=RX~",
+		"9XnYu+cYGwLZw6<3<bG@fVMBp%XH78M#LdM2h!1EkC*J4K/B-0i%b2/6PxG&=59HNja+vuRV<^_96NiQ",
+		"RUyKCq1^R?S&KmFQXK*B=qO5Q9n9s4z8QdH78wLvPKW9czBcbX4=r-W6+Q8DkfJ5c^nX<Ht$1Uyd?>HM",
+		"-1SCU1yxpp0Oa&m9$yaJupyl33#2<m%u8bZG6?~OlHOw16-dt9@>ruKL+*yxMb+oap>Y@lP9tNKJ>^30",
+		"afImeE#_+Qv<2Ke3<#2QmtwmJm>8H19#7NV9gmUHvT@7?Hukj-We<gAo!~i&_2>M#>QuG7c%LuM*TS//",
+		"7eF_=H>k9al2sZA<3%Afdu1+Mmisb10R<PD_%O4GrgvZp8w1eTMhmw7mXT4d+pOSFlj<2nEZ#3iB%cYI",
+		"8F^B=r9JKen@fwHrTftU3A?AQ0@tLzcSEHjDWvEo2_BpCO9c6oTpmCjm@&>*I-0533wiN%hAen1sfn_c",
+		"4G2$2as6Lcl@C^eagxSmuSM_Q@CUNDtZgnBiTO_r1Xv~/<u#wxo6BgU0gravtD/3=F1R$v-O?sUZhPg2",
+		"B02Bsp#JuA3j7$C6QbXqd-*cZUxnE_7*bN=#NorBaIV<+WVnLnPsjYK8ojy&!5PB_>yWG8=-vga4j&6+",
+		"kuI#SB@2PohnO=!uw0^-*X3Qbqx8X*ri=8*qU@O_pwMfCXQg08sRwq?Zp$g-rUqF8z*2uarToMaY5nnd",
+		"Tv$pKfe+lzsR%>$Z^MbqD-@Z+&lu6f8y$RG=?<8>7A1odtje/mn6awnP-OOD8g7!KYER@!9<dlyNCowz",
+		"$yb!-geNMc6q#Y%isrYu7I!wV0VF3f&R%xpDYD^=f0cZe?~91Bkm%ufc_W#MF@5@Jc/x?CkNS8a6gkP/",
+		"$4-_E<=LbaU/#rGp~yj8$qEPquwqiNraHok26pKp?jpzdfR1G&W?lDvf&pleQ3G<5uZb1qvn<wsEhbHo",
+		"uZO/g_FzSf7M@^JciYT+m%CX@~rFL3B4h^t%Dz2=8ZPHAZ^Cs*1T9P=fkcDJr8p@-b@de7nE@N?ATCnJ",
+		"pGKC6obltP=Ihp_44cH%q26$i9sA%CqXYoJ#V&np=>gAgb02>Mc/LYKsgd9kaSezir+k7cn>OWW66qZX",
+		"fU1^g1v_>E+GIigrK_0hK_ME~V0%jW%i0375y=rxPdir-TCgyA0eJM/1_K-v#S_*Z6Eb%K-/G7wD-JyT",
+		"guq^^3o5K^C52oA-<&jQa4%Q$jRZD+ymGFEbH%te=h@tF*9sd_Ib-sSY&ClHnxvNgsnq~vqFXPa0bu97",
+		"n5BMp036JU@f%@VtP&iBjjH%0wEV>x3UnzbX~nmWrdZIRhNeu%61?epnqWQGuPC9RRnuRAwXj%x>=q/x",
+		"aJ$C33pL/Md$gjQB&e1Rl^ufiLvn$QT_=Px$JUWCjgQReh4$jmrCEO7r=d_ukm@0j_v78B6PHBhfU4r8",
+		"DH0z00xLMjnV2K55sP&+~W8IQn&ozoU&7/io!V~ii#Cc/geCsnd0KT*7j/pKey1=Ox3LM#1-U$I8XjQN",
+		"n-u9+vq^I3lw7IGH&!fMMl+kOyE8oGn*6bE3nMHv6Pj>d_^QIsbd*W0Mzc/MdSm1F8fW6I^v_18z=23t",
+		"DH4540ajWDD4xrnX@5>zyYKY<q^V&#u57husG#jDI9jJlOa1#A+<LMDBYdBLcIk9R=CNN!PY$@DGu?oA",
+		"#0-z*tp73H80B>RGZxqz3xXC!4OEj5%aJCBeb&#+f0G0a0e<=?hb+cHfx1ii4Mkf846@c<i&O=+8+fN&",
+		"21bY#UQtdNt%o#h&2J4UmgnOA1x>VS7DJMXP~0nUjy%OpE/o@*6bpUf2ql?Lp<L8Q1YpY?>~-L&tb*Op",
+		"ql1#8l?kpa=+v5nE86*Xs3-&PhJ=JSegC5hY&EJK2T~sh8Y^Qcz@ouR/v$-r~XUiBA9?PVGaVt-j1HzJ",
+		"fqkDrLsxcDlUgq+bS#yl8eJ3qWVL/P9xbU~x+eM1!yu~MLT8#UOP$QjYV66#yFiqQOayt3CUxyu0n2k9",
+		"-&wBj63!nRl#Jxgc&zBV4TsNW~4_X25!3^Ph2-^AuWlOfcdM!Nf_@eY1Vaqecdj3Wv<MB-U8Y5>S9jF?",
+		"e/gkO4?01OW2UW6?B4/VnPo5O>X<_ZuI_0q<wI&Lm_6Vn9TztnjBDBWuasVW*%dw6rK5gT6hpVYdO@-$",
+		"vM3Tr9hl>cpVpxOP=vp7u9uPnO=MXjeG@5Ox!Kb*2&s$L7Wsa>jwly*5C!?Zs<4uk5$r-Kpl?^^4ztIU",
+		"LB!&Z6M<6KsU$=6LD0~4kfR7l0&1V2d7D~vskvYO0HbAa5BZ$x@p6/QitM9+&VK6!m2AGh>_JN<-C65j",
+		"e!x8gcnIfAI!Y$OV/06G^dP4uy#iBoQM^D$lkV2<0aNkxSOuMOZz0=ERnWUI2Wy7%06bun4I**+/SfT_",
+		"9v!B/cR~wDu<LuSiGqgUt8g_euHBeC~0<3N_*jP^kCVVomhmCy%O*Ff>6iPR7ObfKu^_G6eEsb5TgSEF",
+		"YEp40-RNrvRgoJE-l9L6-tkVi?-b5+q3*re2X0hbJu*58Qbhk+v-YJlBsq?EoAP%Iz_toEf9qK>?SSmv",
+		"nu0zE*^rH4h1kAeqz0G=v6GoQ/J#U5Br$kH-&tQ?dMh&/O#_7+s9?D>1q^Cv~&ZT5xK?2ho^$uhPu%4I",
+		"T_TzEQk<><?nK&ksAtz&Br>y-1zaD9h$0A-XcN3xf*Gz92-1=4k-OFcr!S0Nutjjfbr>Ar+@w?2u1z~L",
+		"LxZoJpbW_GZOYPpUxpd*1h*&A+cj7LscwbfcO!95U<P5QMcMHgsx5E&uEX!b=v-g^RVuiN=J$F4EuI@m",
+		"saAl5bjrgjnZw%gg0W-to2n9luy!#Qg93gi-E5&E7!PR+qB7IQm-3y4*V/f*DL^9*Jp#U35h<CTxWCpQ",
+		"t5Eq1dy_O$JU!Kma0z&vdeT^3+dtk#7zzDgt&_rlYLEuCYR9_8T~%L%Q>8gsY7%1-B?+YsLcY&cg>*r-",
+		"RDqDB2>G%5cm&No0/c-Mg<5GAdxVc1rHkVra+$*2Y>7C7UWXUR5y!olO%O7EPV4+c91AprO=XJaWN>O#",
+		"1PTsJkgCi%tN*<4xYKKFdW5FIQ?gN7U8DJt$<MyVbFh08yRbg~EU&A&i3aw!Jtgw8Q/XJD5uv7OARL6l",
+		"VV4%Kdk<CR47k@K~vNk*lBpZM%M?QJpFi$UgLO7I5P9OYve3/k/SC?!b@Qr5T$8RGXMUL@mZ7Aub+C^#",
+		"oyj_pp%~Y3$SNxVg3fE+ySu6DpG/sgh0gpClBt~z~-Y-g7@gU=c-4$-5b5we1?Mv4ZjAiujMFXSni#1H",
+		"~?7KDDu2Q3vx?%Km%79FJK=h^f~jb0kT+Lf*eTFH7qP52cb!49bDM06qWwDSv3aJ-nu7fxsQ1Kr*fFKv",
+		"Cqb$e4%=s0&yPEv!VP09@97#kuiwg?+p%hEknC56N0>h-4SU$q8k>1VY36ETh<>i7hkd3UHS=#D5b$U+",
+		"r>U3FqI5A5wNhg1rSk2-ohNGNrmVckk5Pb_Br!32ESDe6Fa7ESO$S3L4a=_vcgK4wv>gpeCOT-^qj=d+",
+		"=<hBeD%E#3>34T=kJ_kUNqGZDJe3NwRPu5cdN2qyfj+KCmI#zu=LM4$5ibbZO=oUXLJ>KykMUg2Gb_tS",
+		"q=Y2~LKo9PM/K%>nmm7EfR~JlaE-_Sn?$DtEV+TzeI/Cp6igj&2d7O@b!9qXN*Bdt9R_$aihy#_%Zlo^",
+		"C~N@h3!C1qitKB=Nl@LXs?~1/i$B8xv_N4-eY0&sZUn=bTf-qq4TStgL_v=csedn>@fQd*U<eyu*8YnP",
+		"k@pw?oeB/!fT@GaE+sd$=dg<4<n>7r#z~v88v~Sh5OasPZ2*I^eD<imzVXY6u2%p+50hqS+Bd0$cy%QF",
+		"@FM59Fmt0T9p&5537-&3uCXV@Yh9>yzq@F3V=pQbtDa4I3m1dfbMF?x-4ZL>uLMUv0gocW340ulBD6Ac",
+		"~M<Ao#^b3HRBe8FHhU/r5T%AY2KtdY3NxWSrD=+8@GNC^jIJ=a!&VeIDdxtn+j5nta#4-BLIK~Q/JS8r",
+		"TA&rC1nsYEhtjtG2Nz$iEm%e0tj6Na6%NFvfw~mr/v>la-ajcP4E@=yqE5$Gk_PcviDK6n0b~PB/tH^w",
+		"r-vr3j=zJTRHM^V/bmZUk7Y2TjH_hlogpwwBC!3!n2>KZN<0<mNc7Arb/VIJ357tB#m/F&Li9wgg4smV",
+		"nCf!KsTmfkh_!9vHz>euq==K45!@a>1_kbJEA3*1HbckY<+!n6e3Pd+c5_?P-gdlHsnPbgn_JS-m&VUN",
+		"0RjgEvQ#223rWhKyO^k&+t60Bt/@DJf&N%bo1MeLq~Vqkoqhas6-cPZjoulpmtZZYb@DnPJ0/m#q7G<%",
+		"BD2JK&VT=Pn?aY=hF?IA+xrz4w_<a7@gDzFAciOV8&3T$5KL&++1VgTm#8Wve7cG/P$FJIma1zUkzV9<",
+		"=bwU!dt!cWPG5a_R/l6Y9XraAgPpU5oEJSB<1lkGyicUjcDl^ut&nbGCaw&I*b7VqMqk2mr#dojysxLy",
+		"VLo5o!>lk~vAiO/it-/rS+=b&W9ndkBkqU$6JzL=8H/W%o9*lD>$*i!#<Q_yRmA_%urf*g&b>bAgp%zk",
+		"d?Q<m/<yV%q4nEMbpJ1Idw&J88SQ0d<65*+fL64ItfqEAqT@PhLBuMxhHHK&e2JbJHT>##o2v&+79V>&",
+		"S%Zk2cg->90~Hg-%yR~wd/8UcjayQ<jIvZqi#05LaZIHjfYj1hi==<LSf5C70/*Pl6d-E-hR!1wf+nN4",
+		"qVZ+sZ_a6M9/+^Dd#T#a~_m*YF9u9=3pG1ua%!/+^fksifSzpWuN&g2u2*P2n$m?K2v%V47zVD16biIx",
+		"YYn>48E-D/1SFwY7Vhl%o_KiM4>~Sj+~rgYtxkAg_e2J5g0%lv=q$/zyDnQdY?sMJP=5-c~6iVJ<c-Cb",
+		"c1ur_rm!+jf^qZ!-n!lELAs#e7fsnpvopp8c4AeeD0i$_oGcllvsxncmWVL~#Rk$me>5Q2JQ14hbWyQO",
+		"gRJwF9#rc0gPg/hhVyotEhMqoea00oLMb1yLrx5e&$m160KV-f!9WSJCvxqZPj7Uv6T6h-<M?mEbH#7z",
+		"_xG@L8q#=d5A&-_9Nffw2&p<EJ<qu>5AQ-iR_EQpcPgB3ZJoBo~lZzy7Sx*#hwJrBo-%^s#LCDkhNV0$",
+		"fS5KOlM++vA4fDdje3Nj+gCoYB1T>?T8SQemml_&zNcpV53B3HnoCd-A$K@>R0vwk5CSL%W#!Pkk6N<L",
+		"6MKs2iD9+p_>!a<hgpFRnax^7efqe&_G5Rsm-i-4c~heHw1xuK>B^7&*c$TPD-vU<^>yQaN&SJznqXqT",
+		"7RHPmsYYG5!mMm<UiZVpe*Sn=83hZ%%m1gd@Xk-lUizc$E<7=aoJ1J?mG@^UW7g4o@dZsDQ%b7ytl0qL",
+		"rrw^2ec&l5Ch1epEpkTXgDu!7Er_K>J0^@lm=GAp=i&56p@>oG@dj7ht~cf_%hE-7S&L4onJ#azPD6O0",
+		"-XvMpz8rg-2hc3FusBT3yjrmjP5q~JZ1g/Xel8#H6b~z@qc!*C%XW?SYL?H!NA+<LMHsU=uGeRf8FV4v",
+		"sDTn_bP1^&g#nBV_Bc_c0=q6<z^4n/zQ3D/E9-4fZEOD+IISbFE5qD9fYpon~%8-h1OlNdLax>DfkC/z",
+		"mbX$DTsfZ5Tex0=k1c9z^8~f%jj1q7-93$Wsf%=4W2s8K!boc6a-u$w7Jg^i>td@bG^HSBKz4zDhycz0",
+		"cW&7$pvfkVEb$!BuU<8W+&9eKkqk5>djPU/8%o6UOhR1WRKHulC9Qw_l?vSxJP4H$J$FPX30vVc6EcZX",
+		"heNou7Bv1qtFRne/2JQA~OivCfp+vlP*lsdt3DemC_#kWr=L-hs7^P!eH61m>9V9KY%E7esH/~mIQJbE",
+		"OROar&j-5bp%ww8u?&c~pB1#r-_Nmz~oa6@qS8o~1/VRntaTyh^i1xGd*V1XfhWw0R*ca5l~<j@#X_^c",
+		"%?RAi3%@6Ln3c+qJg3L518V#Daq<5l3r7Hw#9fQW%Ce=f4@M95hN!wWbJIFN3oE&/iz~+<Qp3!Rk/KEy",
+		"X7nkfkphKnJ8vlz^_FK2/A<_2aY-9TSXzzNsq3!0*^tj/~hB2w?/gU@jDX-k@~F$^2zPLZj7_Hi/aZTp",
+		"9gqJa&ne*f4lCRA+mdv~_Z*Y?3l=Uss4QniAYk0HeMnlKoTWC%@<Esx^gDjJ1uPeWaxD-Q^CBK*2gBss",
+		"pMW2ZoaM=Xlvi-mYy7SWQxfdA#3N#+MR/ZeUc$dU$W<HA^8Pg4~L1qYfZ4!cHI~F@wUFU&<NPVntvwju",
+		"plq38_mlRflnguE3AXO18mcwNqEnOof7h4n!^XV%QuoEO93OQx=vF~LnpvIbAtBh9/LM/wjv?9Vth6$y",
+		"azPPzj8L6eAdrcPtrCT~qOO4vY$ZIC88$%z9_Fio<~?tLo-jn!ZvGgy~4lbVbc!wC=2T=wVdK&F*9iXw",
+		"eJ2C8LzlJJ2z>1jPK$UN92~JTUXf8@cVeMzrzlKO?IZ-Nj+0gyewuPen7Y>^VJcf!B0yS91sA@gHBn@M",
+		"AwWyLrMBj^c+8bGgu!4DH=?d#3~E4Zm6iI/6olB90I8YQ7VFL~m161Us%mk61<+lJ2^tfbyYUuDV70!y",
+		"o6MO27A-<Z5jZT=TF+a?XS6t1sby~^XVDW/Suj+jdu*&0Pm3R!elG9gjm0Tx8zXKp32WR3oCo~sUaD9M",
+		"1Dx=UE18Pz8T#vdy-?LyEXyiX7NeASy2y!vngoeDW_W!>+H4h^9O$Mkux4rTk-tJu>WS&d7VciWx=*0d",
+		"_VwKHh^QAj_M$r4gntU@!&y7*U^Xs06X_rkt531</mGJanbiw^p3WcD9eqgNTgLik7-eMpeFM?W3P=!A",
+		"n=8P#R>S^0t0QA6AjsO_n^kxCsmtLh/qIvy6<Bf!NxHgH+o$HCZ~&VecnCi$iFt95C^T2o8xG~HuXm+s",
+		"%Cz1y>rFfswL+kWf#5?YH4IS8vpe2w<IAELgCmj03hs=3?/R_ZamsCCEg/vwkjBwg6~A051F6qHNfE7d",
+		"jNBFn67qE#4_rVzpPvke*oJ6M#5d8Ps=~8Mr$tW<nfvV*/0j@pISviIJcroOab+o~eeDbLrq$hL7cTS%",
+		"d1xRmxcorZj7*?cCJaQ<8JM51&D&M^!wmCBmm>z+0yZQVkcAY&2ZD>49qeEI3E>L<kfM8X$J6uc8N+M>",
+		"O49BfgW<%eUZh$-gBAB=ptC2*yKSC*hq?v/tLLTW#VlL6FX0XQplz%F/rgR~TLGmJIFprekBn+k=L?O!",
+		"i9hR6H%AxokoU#DznbeHFq*bfwmk-n7gSY*mnA5t8v1l64fd&/zU@wvf3CIAdM6!QBt3RAsFux>Vw=wz",
+		"KIAn&ojcHYov>+Fk1@+ujCtFHZ4t8$q=%sLIgumM_6R~eIlAH_C!&nBg4G+lQWz#B42iy$^ad/lm!Drx",
+		"!pxZ<6bK<!jC?!@nucO&zD>^qBspUAi9Zbb3aBrIa&@x8MkuKggS/d=J#J-%seuvfc36*u*ZIG#vjik8",
+		"6^ft<51I^Csjg<t?l^P-O+Oc0W!k9yT_$i_X7CL6HZy=Z*BvOQeTGB8h#R_0f+Alu#cj/Mn2lJR2s-X9",
+		"yBVuvp_3%tt<tm*2qr?stgkcPq/Q3=@FjuTkvor29g3katy6d*^g6V*M-mGzTb5bj^?@Q<tZJ-7O$FyQ",
+		"&vu=N41jmW4+4+=%TPRS8sGVa+5sV/rEALZJZluXPVPgEle+SSLSLn+k3w?/*/l*YqYi/AxRpn<ttJ~b",
+		"~aY6drp3fptRqISYyU<dLkf&0v_8@GtsB06ukKO6iyU5f5L3&cQVfYa1fp1=Lc9Rgm#BwTBI!K^&DozY",
+		"ZO/FRxZyV-8U9a=r->gv7d1xbfO8IzCq+VobZNY&0gTr*Z2P9civMi7qec82ti79^_WyKoYUS^?I%^Tm",
+		"#R%<c0dADu=q<NvdUom*VSBzA=x7wBx~nvLdE$Kdl1d?4eW/s5*9_eEgMF-*tehP&WqDG7P+KGymGOC+",
+		"0ZD$x<s_ubejDgGcd-6Q0CtSt%nQ!=L#=jV/1-WlkY71VQuKeRlbUd6B*HPusa9I8bGTMdAf/d3fuzr!",
+		"eLxR#tmSu^*d@k~A9c=JI+9f3VLQkr/Gb*SfJHZ#M5e@HvC1I1nUU4-/#XXR^8^S7o9*+oT<PhTnn>9z",
+		"1klTkV2Q^laRu2Liu~5/4Zi~ZsIoc&wrG^UzYptFDw?N%mnws>2fRC#5fsBKdPoA@1$N3vsi/+ufd1q4",
+		"7VALUx0I3$0@oQJpiFcr%o+_#@CEG$LgR7qxvQKj6PO0Zw%JY>L+IQc3kDpM7w&N7p<R8FRCf8N^uNaO",
+		"HzW>OCHJhbeHYY#dX8q7Q=03IM//G^5Nx#6sF$K_jLs%*t$-?4rACz7khk*m2bl?ct<5s7hxf^lat#7k",
+		"~zV54qXH>Wa44grpOlk57&LP4iknhEjpz?Ua-=G/jlV+l4I_m0stKNK+-IGM$8J>EO%UvXl=qioC?5=?",
+		"ovE&Ziu^55mjXQC!$K8m?tfV$LZ=Z3~0jY^LQcJF22CySHFg=*9e/t@+rlj=5Uav5p0=2ne0HHO7MCNw",
+		"8yZL8r&UC/cfQ8Npg#5>Rny!HHv3QT<IkWNScv/haa>8CN>EtAQ!EEacKUyVY<opo63weSHd>=I9GyXJ",
+		"0L0Xhxg+VFCjX-as<KCZeRbWN%Ka36diclXi?VqkgaSe%LsM5E=wxqZjA4O<09MOtpXb89E<MYJROyh<",
+		"-N+#dtjdpj8@toeW?9h/1oDSZ1X_Ge+OkJOkr8XdHHyeH>3s@^g+Y0ytD>giPr~A5WG<CQToqtWte2hg",
+		"AeOfm>br!A5Z0oxXuo_dpIXOz7gCz/0Ss/wuv5HC9VM&gpk^U_tijRT+dUaJM=G7DbaPiAoJ>nN3^T0D",
+		"mw#m01YlWK2yUlVxVaqe!0ELucfs$vHRnqu7jg&&=~EcPgz>fkYd#_PE2I1+^78p8@o0?I*saU8pij^a",
+		"UEVeaCxLo^E#E3^g8jaaEn5%kvkGkPiFOr5P$Gk>vr9&ljJuBNs2B&$<3?&qB@l6U!7~m2n!6Hf7j+sy",
+		"F*jr_!vx=#b-R6tRi<V#G_Qys0pLbRm@=#N8eiA!H*i6UhzDw*32k2$uFiVY+dkY7?A85CAcjs897<#6",
+		"yiJ%g#yZ3zQaWxp!?9Z$=m+viBpzP88StFc-jh^9rCug$jIsySc&JHb8QIwp<1l8q&K~XYylwsTAA<OS",
+		"SL1ibvp-f&C40nLtPeQR4#/pR1^LWFPRjeK+1onHvimM_NGL9<uxBmrKI%^KeBQ4L#B$gIgJSWbjGPu&",
+		"BMEjSAWTF4Qr-uEtUXmY!m%h>w$J@+D*chBfBlE!*^iYRtF%r#BbYt>K2rw5fXU!PpLYO#VSTu#u>Ecr",
+		"kK0Z%t4HwsWlFN2PmtE*MQmbRqzBK~ioU?$WY50bdGq&~r%moRvb=h_f!rVBbvZ_S/xVJA7%#UW&lLMN",
+		"4f3CNlgYJUcqoJ*3H0EoF&QGt<B5Z94j7H=4h&qf_39J$aUsR8u%?Od!Lv=&ePDdo3O~>=EgWgWm<PZj",
+		"qXlG4cGY#%i^>#u58nGTbpqL-Mw1K6r!$Gzp>1A3m%i8*YdxIR6vK5T2phIQRlB@>2^YE9o/8FK5K/dl",
+		"RlnPAm>PaeE94pOg0/@x0R!6sqnD-KVE5OR_BN%WkX>30BlS4MaL$>sp*Uc*F5nEV3kWGneuJVXqN/NB",
+		"n8Yvz7yBX/8R9y-_UR%*p_O*i1l?lIw>/WVk4R#Kt2WC3XZvb>6Bz^/o$73j?SnJBW0OsjW5HXHZaci-",
+		"2!pP9pHdr/5pQ=JwPBT^7xaK?CvXzIax04$jY0XfDs5~@0eKP2E@32A@?v8mm15DN$a-Eys~xf0#C34s",
+		"u!T9NGyg5E%A*-C-7<I6wAy743QK9plz?ZwNFKYV0sczi@3@NQTyT9S*dFG?tKRlBe#<xLdqtiAb>t3s",
+		"HqOQHapjF5ABGStdPxUt2*@rx?PQ&C0rPx3h5oVZ3>BOBcR*QgJcXEBIJWh2h$pbmI8d=03QI8zg>i=A",
+		"MBkD_dNg<^i4T&5zPuR*W8rYrINU^XYfQQpAy1f8wo<KD-$7/Ru1MLcjjAZY3/3%~aLIrX-_e<R8disz",
+		"T_bbINGDCxflD_SpfHyj#<$i^5x%^I2iPL4?$ngO_09OCtcNuajCB3*gGi/a3I8liHDoXQ4lG9yG5Sat",
+		"hE4b5GnzL3d*GJtt!+M$3V#Rea~w+6HFL=2X+GmK3y@*Z90V*WSOIm=du10#e-6dF4?&uu4AaJZ$AaJn",
+		"//U~59yY3Asx5ls<s-ugEMav?XE#Ux!+xDG8Qzg5dTNJb@gVKge5CRX^rU0!bdIP<n02HvlW$qm^cNLp",
+		"h@Xb?@#Hxqdv4#xwD~uLubQYTg@~MK7d>m*urYGx3j2&X8MI8TJ3h-qYP8#EPj$j@dT*-V1_%7Pq@@VG",
+		"fh8j0c<$7KtLIJUfbywnonEeK6F!*xTD?SRf!Do^1OKZbuNTJirK@ml!?KR<8sS@A5kA9jp$uP>0i+3H",
+		"Znh-6oRGRdS&yspqOzpRaUHX0aAD<32EiFUZFGNfTg36XtVEm@s8=_puK%mHzn?lk2r1BtUYtGi7ca*G",
+		"xpPu4Yvmr/92#RlRSw><=MJ*-wSt%kOBJYD*HO_Sgw>LigyQF45zW3t@T8!0>McR~Sj<ox>#W>oA!-TZ",
+		"6Si!O3hQTK$fJ4numKpPl5aGU&lI+r9e/sTP>w7Ad6qbxZ%Z4U@Ix?v2e2iF&m_wA6jUxoaOjoatmqpv",
+		"H/CrzbHX_906-B4Z0YXPdt0Dm4n?%Lc&4yD40Hbl3bfI9vCzPcRv89vV?O&!h<NdV!^g^aLUV7~l1gvC",
+		"j2kl&Daod/uaugWmWDKu4>vFg4pyd1e$X!Sf3>9~oE/>~cnG&3c5ShV!BSJa/>!OHKJ/v<O~^rxrfYgh",
+		"0Mze3nzUEVIJs#7RcsYUqYfm$*8wNBjly2o68m0sOQ0^gb?&Ld7w$M$~D-JKj8_Q*97PPmkt1zOg&VUr",
+		"ZI/rO3z=Tu0d5aYMZ1/A*T_7bruh9u~TmqS_<J^+x7G=!TuJM/zUBuse!FyE%DjaW3Qtmz02WNF+#/au",
+		"Wybk%FWus>nPYaKxEIQgidniFV7ce?*kxNxf#Esv%cD1SDHRJINu_Hu1OidTXbjHYc!?6s$ta/retirA",
+		"0ke9bk0@3b9XejR5Zc80V+7a5W1t9smDK02kMVg$8xmbjZA4kuX<X?HfE1beswR^Ho#ZTU~o=zd-p&xo",
+		"vsIpRMb~zKL?a%=efx*1sPi6ZGuY8v3<5_oDkn0Tu4=guuIwm=sBsG_Z>e?vkqG_qmCPWqws>n*^8W<y",
+		"c/Q=3svj<rc8XhnUnLTcDIFKCB22XYF?-ldkl729AkcJ%eHSj=po>PMuq<3u/6_Y6YWTnnbX<yTfw70~",
+		"i?-%T>!g6+QwiT42#Fi/g^iehZu/B9b3V%e5u7PS4B+2o9<2/E1gcKQwD5rQBidk?h#aPslcgGfvw&$R",
+		"kB<$9XO@1+iGQGC1m#0JU&=o17XsdNbjUqb8Pt=QvfX4~q/1gqsfX?T3KhcCpngrH7eFEYhpF~9k=0$6",
+		"yY--Ya_*SV0Rt%X1GH^cT81J_oxsDs$~*4oe~1n&=6iUFg5XNvj9/#k0z%9QgvnnhxjWV-gQ$Wj8ydp<",
+		"MGVyZB2aA/7PSFB3P7n%21GMdsrEk9WWA#K995CBTNB9@kifCnDM!qMSY2bv>gDa-xBY?s#c#*yjVVBY",
+		"BecDHkmui-jQYqoi/#X<nu~WPtEV+?9zH#Q46S?Unt7X+p5%qat/VgD%^gpMan#qYp$4tfm^tQYG?d+C",
+		"Z1=S8hAsTj!e3LK7QMjgvBCc#yD-CQh9PSkMxDPHyFnhOFW/PndSaVgNNS=vle*MXtyOLr2xame8$A@!",
+		"p#f1A*pretanidR>huSF<-H_InfZk!UeDxEkhD$@lvBRv5F<Wg4juIz&HN6mf-cij4s#@P*NIC+r6FhA",
+		"Hl4**maf8_7<Enc11MIu!Cyc6PnNiCOx~_GsxryrO8G@4jlgFBQ^1OemmjGR=hT21ptx#Z&adc@p%z<4",
+		"NljlYk0Q9J%XQdB!!inII>#4>eNC+&-pAoDsm_b00*bzWT!B=LLgobP8<N^AQOMFZm-5=5D8*pp7X^Hz",
+		"1D0o=9hXfLs7jKrh?<=JjF>LtqhjjImn7rX1H?<?Nc^*Tr5~<_nuj9k<qvpL^^avUqcDuiqzZ4Ho#Ql-",
+		"&a*DpKKg?i89_paw*/3=q/tKg47E5t!X4<T5ItiZHlO_SE?jyeKo7Yx44L-Jn^g4jfm*0>npU^I%@>q!",
+		"fD/^4wZ9tq/_dcfc$-5RmC&#!X8&ZC5ipd$dHiZHTx/b@7!I-Hqf1Q0ej@7oyPsD<+1eG@i6<J9jTy5Z",
+		"~>m$!n4W?Zq!^9MtA<dDmCZ#BLB8~kCvszE<r@WwSlZWEF&LKoxV^@p7~CiujtQ!G78+Opdq3^WX/_*1",
+		"x10<8L-_25asZ%_Kr+AD7/yI<dIk+7pC%CU#6K*Pq$_##R=HOzCO!t0uV1Ix-hBZ5dR3pyl7S%*B-ZAf",
+		"28pLX6p624%pyxszG%aab/lHhmNn2Sr?A%Up$~hXn9pKi/z-yXqL0B*&+c04~4VQ/Yj55MS3OS/<F3ri",
+		"bm?-FUb%kYew4%YuqIWqu0%dQFSfTp=qhNe0%uQxS3Bwl48fJs9QAcr~=di/tehc0Wn9R=2utVVtt>5W",
+		"7e&AkqHGlvXurgodNtDOMvJm>pqMMvYG=82%!$O2FFubz3df!&t!=EAnD*n!ud+SWj$18#czbQHl/n&A",
+		"QVv>YvcnRv+4Jlhp@<tDn5LfYh9mwv4~gsXK^c#&$5bes&xL/<xVS!yNSv*+Gxi*Urz+jNfwD9xO%9cr",
+		"bmfp<Hdl#GyYugV/j=qC7@hL+h=R$X$S0Q0_~jJUBnWm>PEy8nlWK-j4*xr2wMNt>p@LRv!Kf5ShYISZ",
+		"jOP-e8w~>PknIk*rKa8+2qsy?@syzCcyR2Fq2CssI/HBU?@Ex@_<V28zlFrd%9?C9+A>#Ar/U0jHajCH",
+		"B/5#6ZJL*b7!3SQN+e2N%2VC_9X_EZGWkWj&=5/Np=H/B86Tohfk1hSX6~Kwa&L^~cba085<sTq-g1-!",
+		"22^Q*7XQ^D1@pIf5n6MK!EUKF6coyWsJ3wFj_uDcNpiwe%Hyl/kG-mx#GJ7vs*PBPa8glqgm_kGNuhsv",
+		"I+5lB0FWXuj9uZtbYz&r9X@SJSB0sqs1VDB>c?j>hModkk78R&7gB+O8^rn%h3=LQc~GPx?%e-jphVAl",
+		"e-PN##b^~ZDmT+81d*E+~OaB@6YN_1Cd_gywFi8eVWR9Tjbo%6jqEH@v5GflNw1Tokc9$hbQ4p_6p+jR",
+		"dc%jW*3kuU=qvXjgEy%zi^VoXjPr99hDp@~nM9L1sapc3g3D9Pk6AsR*2gkPCM2AIpy?>I&m@F1$?%mg",
+		"63SxGx=^~/u05c90Ce7mU+_Igxx<l8pk9KJ01L27tN^P/cf2HCu5=KwPVcBbjK2XY2DDHyby/gXBqAOc",
+		"c3nTir5pnChWDrZlnktyqoLTTuT5=~rG6YIjjmFyrvfq^rC<6FXoDZvNfd*dHVF!AfcHifl+Ly@3#31S",
+		"tj-Nyq<-m08m8_nrZ?Ut3xT*0DTupOTd1uuTW9FPm_Xqkr*XO>ief*au+wqFNQjY#aXDBXkQDMTV/-_n",
+		"jwzRZRPv%Fy1/_h5u2$UlhAAd1ACZW$J4@7&1F?5KYPtj2pSS_TDPh=P2d*$75Gw/k_+!<&0N&U1Ds6<",
+		"=3$%u!c%fRAf+&cyTngs+9W!AeBxm%$QO5CmA3<*z6d@rcESOO8a-?N*Xt#E$>u1ia4c^@eIgcp9pwwc",
+		"Nye2Zts!pq!KM0umx0pLRXxZ5JNk4kox^?1-^_2V4$UTOIP&tWMHv2Ua*#q9e7XMc?%s1w!rvP>ase/i",
+		"w8Sh0K#FSb0TlSqqiW#wf9lRU8?o5JqSOKfnNW-V4GL^kNs_L@gvBUeU^W^t>6LKc@D+r-hcvLZgD4PB",
+		"2m>SrKjoI$ZVTyCbzKvHu>KVTgq?C@NAHH=y^%qoCu>Kim*-5epBH5AreNqA>5Q2>GUrAz69dmg+/sz4",
+		"c@^f7lMhfG*=pO7eMoKo46dzm8oVpae%4ADaN//ebjmxo=Zi&WNp@n0clhwY!YG<hiC5i-sK%Zwl@E-z",
+		"d2^=Qq1<S!Jd@f^&0zd6g9ju=iDS4zsFZPsb#JJIi~Ve=XRofB4aV2*g2XHo7pI2X?fmdPmeCvS6PwQ&",
+		"gViI~A0E@rpW~%~s6$qahfLwkM18ypF%YO#Ao+_M4f99~aGAW_opg$w4*&M=s9@m$l-r?=lBKkYyp891",
+		"vhW4%uCbk^aXG$RZlQB!TKiKZZ#VgGS^d$rj+QjGK^@0nZGLL<bn!N5pJUi+An+OWr-LoRhNJ_ipnq-U",
+		"P95w@DBR1urwAtbh6$#$?pb+cGt4LvkC4wg2ww#_P<GO6%4AU<2Iqw!csR4&6uM3?9khw/9inUL_a!Ra",
+		"Igamed>@A@kmv0J5zE2Y4iUKcBythGN$5t>2Y~WeaafBaT*8d6aT#5H-@U%!H2BzB+#<fvCaqFUd>lbr",
+		"ot<Gl5neEi<4fJTarc9jITlC33r>+40kwO>EqbPMSB6af8~<AANAK?zaGhO/+<YeoTrVmGxxP!ccVjZ8",
+		"8@#/gpclt#*JB7Vcijy?lPBH41MXc%a7zIH/XjbHOt9!RZh7&TDul^pl=L$85n&DTd$PmDekpLIKG?0?",
+		"BqTt@LSkrllRn^MHOT*@GzY4kao2z93N!q4O-V7E!g<Zp*=BnOIWlf5%zqEQgS5d7nwbf9o8t%Fny$P$",
+		"gldijvOt52znLb%f3P=bpA0HoUX/r0~~o~8B_^eaVbr9wt^eaEk9x@P_>sPH8R*>QhEqjtmt?vKK<+EB",
+		"nzyNKrJwK<rirG+0R/Xn0QCHdY$piL+C86mX7o3970n/y8KX<Lrw4Z6=>vqScSGU<V9knz5#A=i9a=YM",
+		"ei57<f8g#u_*9w=1~^_oyN6^wLTok9qW+<EGSqd206nELD%I8FMP~$ti_O#aoFbMlqfN-Vo52mBqh@#3",
+		"unlew2F9geqYPFhs#Slnp7@xsYe!gubJAJ=JY3zbbF$MEn8SNMlfhzCMNkiYvbA?ktCKdK&seKf2Tt3T",
+		"m546Q+U7&8_YK8~TsKhFt-9ENobLGn7g&-ymCls=hKUORmVCw<hM@fUjKUz8hXFR+*A6dN%Vy83G2rE8",
+		"D>umiSwwE@zsbJzr^<@rV&O-AN%mZih=E0HLR</-a~xu/Op50ihs5AaxdKRSn>=-h#*0srkU!OXXM8Fb",
+		"8-!w~H+a41abqMfgF_<UPuPpGq_fGThL2Sjo!UdJtL-&tlsz!Yl0tEIjKUz8!x<TM*A6dN%Tny6#~!2A",
+		"a%_2W9g&1M7Ce@25XG-z3UW$iNBejXwlJiya^Wq9iVEV&0$Ic&Vm+xunhU#@>3q@84WCKIjLpT$L~lvN",
+		"pGVR7Uaj+p*Y*$>mT4+*x7_Br0nQUcptEUIld>6=2*$omCDoVE4bY74aWwVBp?Owo0PGHDnrFLbfeC%x",
+		"qnMtMejOgs0zN%UKoq%Bp/7IU#bYB#5rQanhuqmQdI9?r9~!R*OoELLmka735M%QrKNU>nd*h~2sCr0j",
+		"mn+r__oRke*Q6va_CU2%MBi26ANwswjHH9wKbHh~fOPQ5YwI@IMoAD1h9EHd2fgiwOJi&0n_%ptvZM3#",
+		"1$n&eTVSv^oimY6RXW5^aWYNe2WVM70%cxOq8F!xaMH+~FFBd@Oi*07cg7mCb/UD%rns/hAOFK2pxPA4",
+		"sgkAfdln?U>dZ6-s!rHbtk<X102Klciw@k&l=xHvWZ_pzq=F*OvwSaw$^JaRpR6btln*FvemV<ok4Px1",
+		"iKYymmPTLzHdI/BP3!P/jNt^iRiOoGu<whk58CpwDqfb1&Zb8D~#vbEbQeTJs4aiwvz<tpQR/a//5=FX",
+		"6=Vu1SwFd+LjmM7P_Y+vf*hk<roToKf9@47xg+hjIt>igJfHbKloOYR@Kof$g=%ETu<pG5F$bUMg/_7#",
+		"=^ogeqg=Iuaf2f@YnBg$2Yc_S1r!*+?$yR3n@rw1ZkVWD=*<ku@QW/bXwH^+3F=yXj-V~I3XSg*>0IeT",
+		"le&zGkCtE@emf991qlXX41W?o5dpO1cm7z?&QSZHy1FlP3977Na>4aveUIwdZ$aZU&&QoU6Id@D+9v8d",
+		"lLROGnD@MmE2586aRkZ<iSGT^DUt4QGe@YEWFT0&t%oFCz^jETxfh@2S#kl>hDs4@5zJgzosd$-#Cuu#",
+		"kGd/!H0VU6z3$i0Rr%w3Opp$zLFxa53FS!f4l$h9&CeQ0wvKV-hOt@6=IdLoneP?!pNdce=5<LothPSu",
+		"4tXBB6tSsouDT?wbUXk8fxPUnRm?Y&89FYI5z+eHd*xcXwynSQV*3fOnXy/FlW#kG&Cn9S%wmIu6cJ1g",
+		"2PVEyS@55j_@y@++i4v8ikbsd?E?kRhyD@?ke4fmE>j8wa^O//kMZi&htP$/a-5G@LJCp!5H!kHw+~cc",
+		"gqZJ%k8>4U6i5+?p!tF+fLvV8zJ<^Guxl7QYYN7Pe#T06b0hqwmwGZ9>X+dpI%iA#P9ElL8F8DaNkFiG",
+		"e>CQ83~wh*fA_sZ_7S8JDd%Co1-oz@73RCtkxr%E50R^+lKbNFfHOHWzr06+Bc/m8*E5UhtOq?@VxALp",
+		"a4<Ja^iZ@Eo/XmbXVQHdkCt~IiC^3AP3D_9Jr$jG?16P#_i2jMK@tdxp$+3Mm+bae_%Zz+i*H7If5wvD",
+		"^=~wlJI9CnYoNnG>@nAn5-d+Ck/#jJQlAavPQ24_0#a<8=p@Xbi*&iuYttGpX~eHPK-B*KtI-$ow+Rt~",
+		"6=4dGyb!#V6u5AMcS97e93rPr4>%rzjHkIB02Cd9XGscY4k8kN+rZn33t^~zbH8Jzt&siSlIQ0+I#~##",
+		"b0&u_*#~+85+rvshqRN=-rEkMjA@IXlrXV*RKYM5b_t/sa0?#G7H%?6lyBoXPvBvAq8z^0p1erw=yjkb",
+		"<%5ky357=>UoIv^G!y*rD~^&c>vcchJEnZ3l=@&-7Q!5=fm~Ky+/4F@dH8_BUdO/HzK~WDkW8IGtV/Ne",
+		"iGMuf6vk1NA=%^OjKaS2T>Szbp5$eWYC-Sp8Sz-JyErAv1ZMNbeI<RHG=KwLd_Br4Jjun+pa=xQ7Eo!f",
+		"Vg28Z1r><!!6RBh9cgNY0sa59v0/NKQfxk-ZQp@51$kpIR2Q+6m2gl1v$DB2k=~X&jc0N_Y7k^-ncQzj",
+		"6=VE/ocn+s399u?EVhOMrGoE4&2aFs+v+2on#Vf-lqibVxw3yTd-5a&qAHfoIn&8H*+@0$zVg~d7Sz-A",
+		"+fvD/59TIy>k&aA0~wkt*izy_LaLmBSEo4E0*OKLE?x8anL$8t9U=3cn1eZi!vpg#rrbb~xDp0Rb<jCL",
+		"34hvs8oekXx+P~j-?bDi5jMJW<InHH_kvK@0IL+-Zuj#4YM_jrj-ZLR^qXcr76Zsgse_=v6WX!HoY=OQ",
+		"oq^MClK%VrDAI1Fe92tqy#2h~NTH9eW<FCJrJB7Uzlz>!5T/-t@%BCGt5M?1a+~/GiMYSf1wugd&zUgM",
+		"@Ei/@e-$68fb0<q#nye#Wx9gxii^Q4<yOsifav->D57v%5wql#gBe6Qp3V$_5m+b&jPQ*vJ*Xfi2HyWE",
+		"5+_j?2p3<?oQOOvdZYFs#4-+u0#t%_sn0<P%7ApFcDAv*2sYU4e5nI=Gsspzo%lR/RRmeYvz?@A^7BeX",
+		"1xm8BKR$kSh0<8JGl9om_4Hcu$xL*1J?0#1bSWo>%dDWc=bggXZmjTegKGrdf+LA*=xTR5V5@0q*sQ7%",
+		"cnYVBjh0VVEVaTP$EP6@L6P/n4EQ_on2PAdiXOYqT*9+b0SJ0f1%A~F3eVv4uI=VhBn/hGd5sGNWHC$9",
+		"r$f?N-NzAU_zDtk84s34#!/l1pQwsgcO@b2Uhwpuh>WLh8D?yZcdEegzZmI<aMzfY-Ky=HoM76df#dFu",
+		"5h#i9qEHjBhU!mHbUOapG4mX^n&Hg+@Br%Lfn!F%O?BA+$cqK56l@CPcwwHrGS>iKY2_Bmt-6!Pm/>Z&",
+		"-8^0fgxbDHVAnm1HVtvn7FA$VmD-b~m2CqxtMoPifQPAHdgJvDK3ounNIq=/z%D^LNA7IEk<c7Rs_^Yq",
+		"bCfssHv9wFv00yinMNx2C_PQiV2M%weoUbnsEWoDCDpQ$1/?+UmK+Xzl4p8?3qw~*?Bb/1tR*bfdxXBc",
+		"uH<!5ivh0JevB8T+HSt=~1+GRt4o>h3RvSI&!Lzd8rLoF>!7d~AsW7o@uQyK@jsA4*gS6$wj#5I5TspM",
+		"CK5%Ad6KhmcszeyqRbb+k%q2oX?2ngvXzSyJo*w&=a_26?2V_iON-wkRi_uqeR+5?=CZZEkDwhC82Fud",
+		"%lK5??Z!l*7tmp9ya>!h7EH0/5JiavLQB>l1IZ35l-QIU8MalK6??g7wKI6@ib-ots/uSDjSy6FX-!gx",
+		"Mrf$NnWpcUiYBE7tk=?eTaY!MOXZcz!dmDGknL!CJ@Fy1+Ti84#k>fYnXA?L_Yv=u<&5giLi>Rc1csuk",
+		"0*l+Qr/4zAARC4HbmJvQ3NImHl-Ke8cx>u!UhAn0lpW~^8D?7icdFC<zZhpVaMv1i~a5Z7kZkHJu1wc%",
+		"Hyy6Mb2r$KWL5IMUnb#L294hWj1!Nh5+I~W3T=v?H/Gqz70kNF1h+A9qN<fJJtH$K&ZM&GbP6V>1SDTF",
+		"uVYijCRTK>3=bwDw_I8koI#*=k^kKQU0#tS@E<4pBATjUC@p$!p^@4ob@tvaXA!kDsZ&s>vQJv?3aQs0",
+		"0iyPdAIK$Oa3kHPKj%m^lj1Ab-i~1laCuv_mMnw71Zi-Da/LIL+~LJnIPX_5qF1=ghE1*PPBo1-rcAG&",
+		"EpGwD&$1yHhW?/Oq0YHt3m-o=6b-0<EFp^!fCF9^_?yl>Ds*waDTDKlOGK?fub9MmsjS-o=v>pJtGg8E",
+		"q!UUdkZMwl2@_vcZz&dFl_H_I4=jPsm>wh8ZO<c1jzTRYMEJ$B5f*H@cER+ZN?-Pfm@-Y>@ZDHMh#Q5Q",
+		"W#qNUdY2*eUve>c43S/#gohF>/cW0b6~1Sv1l94Xj3=pIl#nfel~06rmIN4@RptbQlMg%91vC_jb2JeH",
+		"7sj#%j66ZsA%K7z4H4FgepEuAR%AM8Oekf1j_a$AlzEpY*cba8fIs0C&YGqkceVl~LleGyCxVeeGaheV",
+		"UJ2-ie>aC9hnHqKpoK=r-Wh?E7*pxDv02u$d&=$bsVog7L3~0=ELhjT5y$IK4Znoz3u0nmmq%u+2lRua",
+		"bQ~d5Y00zM3>kJSYsqNV<PuS7mg-tVGZsw5R-J8$fgom7pys1R3_=*&qhg2Gs9QSt3Lkga+RWrd+!Pgn",
+		"muXsQ89D8R1EbQUbd7^-k6ieKhdkW6C?IrdbsO>e7U<6X#xl1!38BAPaMjd11ePho*W~C4?SGy<h-0^_",
+		"SNTK=5*Ehpu6Y6Pf=d7F7P^58U<S~WSybuSO8g!hy?iCah4qmmK8*oXl/+l8u_z-4FFiT9k#sP+&rlq^",
+		"lu4!!ZamE>AXcS>b2H+>R6=XL?-5~H?c91#_Ukg=bqm#IGC$c@_QD&GdL2HU~vS06N+Z=m8yC_8vbD4@",
+		"2<>EqwpDwU<D<w6mMFCzJRj0rr@YFUqhCd_Y3K/Q+p6C~Pl$Qx9EopdB9_EY-!_tG$/AlkT01I?=ZP6R",
+		"m%+7uNXcUia4c7KC8xopb/FHIb_+SD-#>kjDF7^juP3%/n-tYOV91Cu2n078*XUIjWPQ0c&uck!8JxyF",
+		"O8un64=Lr>@C1rQovah93-/UfSGoB<$ITLAf~6Sar<O?i5r>5x~I_Z@-#d@nam~R~/^7%_kK2d?/8Z%=",
+		"I!>4_^6I=#DSe1Ie=z/UJ^F8>YB1wsnh/VhL6x6Sy>wOga_?sU9mM&yOQTzm4RpadLLQ7!1X*?+l&rrV",
+		"p!a>lhN4vWZefMC>du5eE8g+rZFz!L_HwnRm=>j/l&!vZkp%D<o%ZQutEMfWcMbVQ^5aU@TTK7*zCaYN",
+		"L>7f+pNG@!u1i?dngA+AL/T?ihL9p6bD0*iA&wS5eiAZVdz4Z6<fcfBl&v//30Z9hpT9w$Ng3yZ1#RJi",
+		"86~s49QtBG2*W!^5+d2?uBFK-~y-oiuDCdkb+OPhK9z+tc%Oq25tE#DDlTOjhOdA%r4kj/se_OpO=1+<",
+		"6Wfb_Qg542BXpRoU>X?HxB9J=RUa%-0fi#VP6kmkZmXdW>TbV@+EpWCk4xAK<caDO&wJRi8Yz&9_gb*5",
+		"-Gso$bLGM^dk/cDYJ^#w>rJ2cjkE22eC$8_ukRQI-+v8=eQ-BWoq/TbJQE#sUxM3Y?G%f+tXi-_?_QYp",
+		"Cix*alw1yku0O=<5RU1MQADndmbiKQb3WZ^seGNku_xZK!6q7>kH3WWGR6*!sr4^u5L4zpr9teBH0E@x",
+		"9@&1pqt1kzdj%O1psv?UFsHc7r*<N>T@PX*0O7@Y2=cSH3DanggxA^EQ<@5CHBN%SG<$~F0K^so1wbVt",
+		"Y?*5VmT0$cb?$vu8mqyxqxBx+cvJ14+3Y8e6sRI9eTBv>~nc#Gn4-GJ4rKpRY+aoobY49WfR%qB2Tga?",
+		"3@BujKgORY&rUkCkTr9>1E>1HXG@Nt4B>%tW%cYNo~?qR3*~B3hrtzCV%2Kv0VgJAuSENGom#fAiu7ba",
+		"L9-7>7xNuhCQuqO6?3bn?H@_5Z@US%anAC<$re/i>hPm77h>JH^MM-<rg-NY0*c~1up*Yk13YJTf>toJ",
+		"wA-5Tkey8qzl-8^pEPuloc~BS7=GHyVTGz?7*SLYFczU1z/m%XRGwTYQbSp3p2+/uQI2zT193&%kHLe@",
+		"TvvmaizwM~rh/02vfYa4uvaiia9$K_1p>lrC/&4tSRnYxbf5hc%AR*#52l-~eh9z8iNTED#o!Tr5?&kJ",
+		"sL%uHmgvazo&p/4mE&&06e>MU1D6ZU0U-e/u++p#*U2>g=^dd=e3rdzvcC1@_WPEke_MlQ85B=@tTE57",
+		"!=S^e8f3%rt1^nwa7GkobV*ZExmW/@n_ZhG3Htza++s0^s~9pk_On_2SHcgSjwD8jtB4*>6X4bse/1eB",
+		"c+-tEuw>3tT^/hCkIsAqlJ-Uswv3WpqHf#mkEaW_oRElI8lQB9cA/+%-fjLxzEc>Hkq%~=9X+a0+@w<<",
+		"pnywf-P/+th0Vdfg7HOM-Kh4~k6*tsTqcEmDZ7QkJj!9vib0y56abUbss*TcielqV8EK=Yxz?nKt83P?",
+		"ehr7Rtb+#10/<1-OCufCsmJPGp%ppdsOOt<eN8Wof!zLM2dZ2/O2J=T!0o=a/0uOA1yYG>K=$j54XDi2",
+		"hO%AId^xGN70N36iYI=M2Ku#fabhg!?83Zqv20?F6^0>Se2sGLPVTVT?1Upz3V?X6MPSxyn=8r_/QCvo",
+		"7^LU^pDmYD1nWhYNhQI&6&?3PlcKmc6@F@MZ^w!LZ/PG-Zu1vqj~g?=O6rBidC*Sp8e!5QYiN>~m%s^H",
+		"us-vvy75cSa6TIOs!<lJbk_v~ADB*=GzJ<!NDur+4&2H59r_3g3mv_3!+QQRn19dN%~A$n~x4!-qikC=",
+		"&*rGuhMBT&29diJC~v0S%38nwW1RpY2oSFB9VuPppMR#Fh~nTKVV$ys1&@wlle>kl1iGROp<%SNeE8^t",
+		"a-Fx%D$=/w9L8B3^C*drSXX=%d7MSl$aeySR5TN$R_@7B+Zi4-=^jOatNp/^k>&/BTl?=adSEiOjh711",
+		"vg+Dg5o*b>N@SN/@d-<_XCpLcGYw%&fsQ-T7XU4HbRors&8&!o2b@AZ2!C7oax>HN/_5ZG!Kv49tANvc",
+		"jAGpP9Qu<XhU9pnmcZ0>asyqau@WFwD&T_<ph<OC-%CnD4i~h>CgcF++mWd55!Q#Y^n8<hjn10fg1Om_",
+		"Cp1zVj2^F624k@7gM600Bv0*1QaFOn0T3zTvk8^jvh674&j2PaTT1@Tk*V7<6@!z!T+i?H1MReqor0S+",
+		"Uu3Ih8_Wf=^W=W7ebHA6u_su5%@8$3x%qcn8aiCsBgUN@a1YX$mA6R>65~5bcw&6VoN/UDnH_p-tk1qp",
+		"344D/@HeOKSnRvTw52FZ9TitT2<sC>cn5?Hkkljz5rSxgf@5t~8A!Z^jxwtI!jWdqX#&GlhI6ABlS3gE",
+		"nuDpDU!qeFdcw3KdmydQmSU*d3G7KR72g5e_sA0sl31EnU7KT8rL/$t~vV1gcwJKLkVnF!kV&EztASwn",
+		"5V+U+e2Wp_rtOYpAJq?Y/2@AT8&IV!7r@j9Y?W4QaD3fc@dQUV9P>f6m?&jRqZsI!1F8dtsVagLhuyXJ",
+		"7+k/@N!PT-4FkT9kK=fYJ<q^~?@3e*i&CMgXnYWACY?7lib?J=vA2G@IpBlD+m<hEh>sjfj^8iJpX1oM",
+		"qfq=apkftq5@x0v3Bz5U9H?mVs<=6/d49dPvWQkB16hn1v&zA#?_wI^h&=-Rq5ed&6jKdZwCIc@28rBK",
+		"k5fJVQvW~?o6$2S&*Fu9oiDS$ZwrJX-$/%41/AlDz8lZdoiXaT0O1_cAH=PPedJ!oLl&kivsdT*21lD%",
+		"mHmNQ5iNhIu$4COJTI?BbCa/v8n2WIwwv9VshqMZ_IhmloyHAGfe?RFrE_P8viGcUnBiHk?0KaUJ7*55",
+		"L?~_>mxOVcm46jQl^TtmW_SfbEGo=ohaq4YN_xD%sz@lvF^p&HSXb*XgN9BHSu0!dq1bZs19SXd&*04/",
+		"&nn7tAhZTC6#p&7cNI7To$z3>RvfC#HOe3#*>KY?_lSzik0AIj+blwz#+RoRtKlpP!JPEq9Z%nxbTIcl",
+		"r@G6SYfbM&q>REW_58e*dJPiVaZFBAmCLnU6>XyQ$g#g@yWJmNW@NNcEsYn?gZ@0Hjh*ASdA$yMM?weC",
+		"b@Q3Z8zZQJy!Wi0oV+QOhJq-Q^V20Ov*xanmv~9_dyyD6k1E~M75hSQx!+Q8nqr3csn*uQ9+_jedDx-M",
+		"vAV@79B_3Sy1iZsghA$pJDXEOMkV=Af>vJpcSMLPoWwT88^B#NUuB_q5!OdK&RW^%9Mt4Pfp*ZefGrbG",
+		"jVT_OOcZQQbM6WEKtRKQ9Rx%r1k&zH$Ri8QtH4YEhEh1jq?x?sO+LAjF1qvy6ufVJp-II1R88F8fG039",
+		"sDv@hej@hK6H5Rx6HJ%v<OD9stbJVd60OGOhO~peucXb^J7bQi7>w+NwhN+oBq_4YDd33FfCT$wY!s/j",
+		"zhb4WND$@K+ofDgSlEo0C>5F4BL7wrb?AKp$?$1M~JLA#brg~^o_Zf/jNZPu*5?nUSCUf9kd2Gtsjncy",
+		"0>jqsN82scM38--59F&W@Eey^g8M~+mx%TB5sPljVQi3QM_oF0&nNq2f9D@pw@?qnJXwP@eB78eJM36F",
+		"=?>AqX7<9CT0#PrcGD8m#X7Y_3F6en7o>Y4v6Kkl@^@8@g/yzauxF6Z1xS<-iBxF<>j5Zf7XBJX06rK5",
+		"T2j$0vi_ZVr61Xuu6Fd!N=%/D1pID7bd9Zdyigj%~DuZEjBYYwo2<3jMMB%EYJgeAt#i&UU-scyEn_nZ",
+		"zF4fu&GLjheJ12lf-Oh$C%xLtN&N^buYs%P1LboDZJweSh#jNO39mPFb@FzBp=/T!-r/o1ERH1qCZ9qo",
+		"7V5ctlAw2C8-2HZ@1zdw6vz/Z^Q5@1cUu2-fJsoXsSro5qwwn3DqoQyeNQMtMXolFk9iC?zh/js2/$I&",
+		"44o0neM!Dk+q?=gh@CeQa&Cu&Vdbi?9S2N#ss3Fmd^MyBb<f@8sN3AnuLpl7dzkUvjTeJO%QWba%7Sd~",
+		"?hcl?js8F-dRP%2Cl26Zq=mjXC+#1M2^O!s<6VgwoNw#bH-To08C_lytSHuEs>*!#93*1Dd@&I<tlPe!",
+		"8lhxoj5BBfsSZdZ!@eNwgb>U>J<5G+%fwT%UHt-m<wUo0$_MNjyPW?vmlzq3DiY%ARfmiA%d_SE0ra3b",
+		"n7Gy@60ICOJ~6Y_+b46o3VyD9Yo-$&sANo/3BO8CPH-5/u7RMxhmn~%43Qj@npXz&_0ltlhYj5S-UX1l",
+		"op~GN&$#/mCGhLzn2c*%tmwbas=s+atGlpPX-~oSM=XK/+pw@zd3WK71=XVhdHxXehSoaT4<SzA/0O30",
+		"Si?Bu@dF+yYoP9!2Yl@@wEdcohEoz+!Dg#i8FMfX2OHWAcv+SLwor4&_-/WN9P<Td8O/^f&F9PwwN*XV",
+		"7TtZN#-@^n6#v9@Ii1u=P9-S1wmBUXZrp?N329~Xo6lEjp-#TeDdmQ?GTFgrkD2&iTPUoXrn#w*tnxGb",
+		"thXWFUSwmo+/NrRDi7SxTuRkQF6bgMeW@?5tzjR+lNEfJbdLRVwHG72M~Thl>$Gfo@GP6R=G<GPm#daK",
+		"YNQ2thf5A=^362$mi3^Ro6UdJ6-s++#7EyL$#-hio2RL6Pb?Ivd4-tSSu@y@a@aYR&^eq+mUanpqZbjo",
+		"dG@?W%Z=3S#3N/-B@Dn?u984!1NRD~Y@<s+lbxCTSA2t2bg%k6TkL8zyj&!~B7WydWNfYZ5y<t^aadbk",
+		"gBpg5E~I!@f8s~wPzLW5G7JpH4<*_E3TP?7^8&&<s#FCV6F$vDhxWw#S>3L8*BfXx40s!NCBK1vu11>Z",
+		"Cg^V%TrW^zNqtsGO#A%?>XqWVp#fho2isySrQ!sS2VklZa*4c/efXS>W^Gx~WTfSwc!w>4ov2Fr3CTW<",
+		"TcS6r2_apV4bL4qis988C/f~L16Z^2sQ8c03SORwe$Z<&e9=at$51ZcgRkoxrdk4aEE^fIrl3?x1csfU",
+		"poI0h6!/i!HNtpI~3PhR2+Kw-SPPex!H/UZs@5gA7OYM%0__7S^-!=ARrlY@oqHE1h0iq_YKfSE7x#-_",
+		"pm=>koRtuflqs^cL@<aK6x3zU<3bt4wHD?!nI$RO1d35FW/SsAO_6Zt/cN5RI!7RyX6/a9Q~mxRuJj1!",
+		"cqEUabHQ$cJZ>hXe!JCUaM-s=&ZA9qgvVXPIyYS48*Y_^xcWxDL$l~oiiG4dmwQVOFIdTKw8/o9Qh@CT",
+		"<=mE!&lxdD*ok<_3Z+%Et2@0OiWLCf8<SNljH6o=k^dnXm34Q^g&#lfY6zosgLq$p16oWX~Ws%gfthwj",
+		"tG/~0+t7hdfH$sGuikIDyvDZ&MA5mpl88p%1DpdYWQ5480@+pvk^gipq>Wh$lb?eXD4s7j=~9a<vps#&",
+		"@Y+du0wZbLB~iT&rW5%k$=L-^O_F?B4fBqV1Lhig&MGUjdh-%q+orh~9GZXC5/U4%@R=V#tHwAk5iDjm",
+		"?g+sTi9eQhbDD?K0NwmqojNsm-@0_hqBD-ve8^l!Y*0u%qIBX8n9xe^3IIG4sSYE?pgn8Uhs3e%uI1bN",
+		"NqC4*#~jaV3yGqfh>v*JIadX<5_OAT#4v>q3D@ZqjDd=T4nB5*Q57*n0UT0>rt2D=j~!ud4qJ4wKkrY+",
+		"w@N9wvbLPl_!Ua4MsQf8kTr>ep?IB37g&-yqeRR/oA2Mon40H&hM@fUjKUz8hXFR+JCOPljXWpO!%t#3",
+		"s&sgr/yf*g4N@6rg&+N6-4~$jUhdMoNQpTYF3ybgyFxCOI>XYv%m/In$7#r/dbX/U1uE/xmiO49gTGz1",
+		"e4wmlvdWcFOfolHr!oF-42s3*p?IBP7j5#cmCtgQkZ*&Bn40KlhM@fUjKUz8hXFR+*A6dN%OsAhTMT#L",
+		"cLyKQ1BJTd2=3#5<62?1UbXF^h<ptxnp+m_^pvkCg4$+E6@F7u6Bd4olLAu1Su2sVsrL<~cZ5wlc/CrM",
+		"03r6X8Giu05fvyroV$Qzsq&qpt$#SqYe=&Ufy1e7+YJ6bd5xtzfS&+jsnDAC=aIo?l27568?2T/9De1B",
+		"6TlKlUUXjWpL$sk3C!P8fZl!7hEkS!mwDfU>Py^n%b25Tjgjwkqyv!5?i@n//Q<Dt&*w6vEnom#?%JA=",
+		"1Q4RBi!5>!0vmGprQ<9?*%2tvbB-iRTlwRCo92NYWO1b&Zf6l@F4Tuwhz1*71eo@ys<@g#e98p+mHp08",
+		"5UDnt-=dMwKK<co6?CW~WQEDb_Eu7esGMNJaUAHBbIvK<8@>Yi7~oq_e4ScJ+^TUW*i1fmJlLisMB$$n",
+		"5%x6e^3W_AJKMq-pfVgfjCBAvu7#T=i5~C$EiHIim7ACon-%HDmDLW0@?9OG7_vK<1*vRuC^wQ%&C@%<",
+		"3_Mt7lJPyH3KBOJI%B1S7C4+vpyz%OeN@$P9W7@tsxLZiFIhV7EbG3zlx9Y^-Q+d>/-WvQ%hE6C2>H^S",
+		"^7Lx4boOPz8gHdHkwell1~!Hw&uhpWi7An!8qv&4jo<ZO8b?1Fk1@xFab<>Kb*XJMg~URUfUP=f5Nyjw",
+		"n3y*K2F&+&rkxVNenz~oHDi%62n3>cYtwRvV@zF$Flp^-~B=>D4/W%~6=<99PfbGf5N<ze6mZztE#tLQ",
+		"20N#2jZnm@SaahM3nxmQg/9eW-SJ1~ad5+Tgo_~JYvbbR289M8b@fwTbe6Bqb<ree*0uC_>LZX9uoKRx",
+		"lxlugi1e2mVn7zo-Z3s5j0tI=WDVJQfzp&Gn?sDVG%Knb8x+1jYT5~DvU%+famhW~W<KKJG6Y58v7s2/",
+		"jEYp<Vd+rfJ-vBvQ6~KI>CZ!b5IJXWN/%^+pv^r9bFXTfXIxCWMLNbO>U9zEYOPd*t?T90hMe3X*@jcR",
+		"trw6gj>jQScQne*RjheOfBux1B$SW-MyZ*<s4fbggMfQsLd***8B2D_Sw$vv@Zc3zeacbNpTjK$19p+L",
+		"g8^mPJ_yGJr3Dga2<ftb47%7sd&$y8la0=2~x_pTmtCH&+Tw*LjliGwA!o?5SPx^LrYgYLVlgyjoE-@M",
+		"u80#i8dKO7LlY+O4hh7DYst-Yy*12c$E3j85XX>O2=lpO4hBNubv<*LqP&YI%v56*5p~pco@k4hT><Tf",
+		">60X*G?op^w&gPwjT1_kY5yD+Zh8Mg+g~@Dqe0tFZ!NWIfGtgl3PGXL24CByq6jvgo#<-M17$#M5b!AR",
+		"Q7E?fmx8-IEJTLSO+cjUh=x%%okFUBVwSal1fnp&RQY#JbRYHGu7Ac$%LKrbvA4<7r-zskmDp1S-5vu?",
+		"ha0fowzPV&MflzyHzYdxfy^t%ta5o!m5kZusJ+*~gG_@5~6c@fW4G76Xu!Qp=qNubJZ41VYShHP0D>?Q",
+		"+5ZZPXnk2DC5&s$00U6U5dmp&kfo2fMb!+$k0>~VZM*lVC8ubxh?Y_Kfmd_O*-TkM$mkHL+hW_=ekwap",
+		"Ymv3JqZ?8ZYiUWf0?4u!z+Aldlny-!>Y#7lh%yHNr>E=WDMzbBG+%_Jj5m_cr#6i++Vc%^R8~2Wn8N?7",
+		"04pL<d1XVo4P!2K@EbZ54x8ekuuC4qOq&?<pZ^~zvFmV7MdKhjv1_bDEWD*7Q=!o~aTJ%/W3aZK/5LAB",
+		"Hscsd@vMDxmQt2DukWX8ZGoZZl6rS-fdHvB5z$5qCy=m<L?dVNp^LJr+Ui7WfxPxu5z&&Og-6wzm-UNg",
+		"l#+x*LSnFDusnkF8@DNg6G7*V8<oHoKlDsa9xyUXOFw>Wm+jmHvuP<BMdpWd<1KMrKRNY/s!0a=iSL?K",
+		"YQFyb?fC0?zvTcb@K3/=lgFaneqwTcIenZm@sC$vh*GpuN2_JG3ob<>gmHB9Rh&@1dC6E13UPwD7&tFv",
+		"pYS>OcFku>h3t$yNfla>nXt^+Sv=uAd&Z1J7XwIrhn$i!p#G7I>^0gFf4~Qv+yy&r<oe>AFUvHGU~C8r",
+		"~i^jA3wJTRo^TW2_0oTOf%=7hWIWuoldtS&7sI?aQQFk2!Ng~!l9K6@Y4DvA$Gh<Vsz$kW8Cz43~P~6d",
+		"Sb>VL1q@zjDyASi6?~A?KS7PJ#AS2CvbMJJfSo_18&<lIGxK2zuG0Tb>$WR!PO/5ZIEg@0iw+tr4hH*O",
+		"Xh@N-8efZ21G8TPL8$6@YwhfJeM!Fj>9^C^u4^CSOgz9RnbJ2Q#x&F^s8ecEyLnZ-e2u^Vn1?!bfOil^",
+		"c4wh7pLm40@Z*3R5iib=9R1D?e~$D#0Vx^PXw0Ejzi=6~3!XWf2hldgMAyBj+9e$01@cwSWZ$5CW*TPm",
+		"+gH2*e_c=~j>T1<y+>iIo1O_V3uXL7NW8DzdK-lof$Vq412/7CnTZ>sj!r<kfOm^67B%G/d8=qgYW@T$",
+		"f^K^IM$##b1i$FO%B$y71wXX!*@H095j!xkrWqyL7Rs_Kk8Ccmv94_zf-fDF^D!756VCFq1f3G0HzdPa",
+		"40Y6Xa^?z7KC=Ba+/Fk2Uu*^1<5hdx1qk?y#trL_~S%$Vx~pjkcBE82oJacuixc^*ciej^3Q2Z0<?mgx",
+		"ItgBqhde^9X=O-eC76V~8CiPRpWmF3Xf2nMXOF6MnJAYScmrKqlA3u0AI9Q>2Qw#ktV04VW+#~YU68g5",
+		"UH<p0fpSLW1@+I@y%3oi*-&iY0$Lp_ubzOjgBgaGnLK%-ml/mFeVK2pN^E$-deCL5TiQ_zEvpsJv6dWg",
+		"lziN#nGcie7QK!u#5-QcM@A$Ikms/YwR-$LscAm~$L&?*c7vWk5#4irb>+lYbN<cWacApnPOjQNTmjMZ",
+		"*oradWUt^2tz5Z*V6fXakTr>ep?IDB3EGyOmClqCoA2Mon40H&hM@fUjKUz89o#+zi3b>S*~eqNuypl&",
+		"#Gcs@3Zijlu1a^0YyF<z$>n7hc1GSE7wwn2Uc2ms=/hJH=MZ+%#0D_*CBS?SlDW$i3Vq-CccTimmBVtx",
+		"r$wxzYA8*cWZU#rMAOjm0207Sp?IBPoGyL+qeRR/kXNnqn40KllpsESjKUz8hXFRfJxUQk=Rgd+TW_5W",
+		"KB?/Th1aGBkwcNCcloYaPpb4N-oy-fg0kj*L59ohP3xZzb29Nx+7fegcCvdr?QQU1ZyAQqEUS24%>RzD",
+		"4cYp+1xCthk%-$UjM1FK-@*7gRKI=^LmvZ~RDY*fpR1xC%oTA17cU&b63_e~9UiP81rugTMTHE=qz8Yy",
+		"hCxtqUUKC7tbO&WT2m9domoo?ctfAZo1?<wT$D0RfBZF99EXvt8X=*xce@OVc~97*TC*$qqh8&2--Or0",
+		"D_XB6=RFneu61bE4KDah&b%e3VwiiPfE$%xy>7w+terJRf~h%Tq_w<m6DLDlnDbP^2rvT<LOPv0vinH>",
+		"YvE*fb?O+NkZ9>+NjpI*%3KNorC3igNLX>QVPCkzj96^w3Egg-a!fr!w8Q5S9l8>Z8hg$s@!YN8h~jDP",
+		"9$24Z^rkO1QZKqIM!*!?<hV~H6^c@m_ll5X&I@te5SBJ34QAVK5ZGFew3BM7fdt1~yy6cc1IZuje419@",
+		"AmA*/OIpw7?hBG42QOaqvyOK23rNGyiL%qZDPnQuhd48p-RxyGK<g~lz>T*Bt30axnj&^*9%VDC1~58-",
+		"0qB1J@Pn>EV==QRw-0lT9@/NowO8/wn$s_iwsHRk7^X>Co?yRbiy%pH2e4=emcOkKh^p>Mlm%xIU-=Lu",
+		"P4K?WX+AqsueJj7kgEKfe?EN#d&/E<R2I+R1=xxR8?BZsbsSlQfuzWIo4Psx0tzJV%+!6vBZ*%76MAPm",
+		"oIN%JqmLutfW26Xt_#4LpV4*jHpe4Gx5X!3vl<0q7FEgwb&/6ccs06w7eRXU~^+&$bE#2#?BWZnk>H93",
+		"3~NSSrO6H0s4TdEj4OjWJHtIuIRN!79-R2TkrsJkq5=O?-cPtmPc>a$8~LX+4<LU>Z<sF_6>>DDysA$@",
+		"$u~A%I3gn89h@!Bcdo<~Cd>zC+e^di@sSrnFeO>8cf#X4eF/gOhZ*ubeiLQ&q03c3M<nvSb$7DT5*BB/",
+		"G1SvADQI^VN?_/MxNP6bi0mSSUD0#l_rT-aEseuwfx8!JQ6C3QeS1^YY@/43/XE3~2IQ5l9NpO+-2s!3",
+		"km%*kr$HFiOi/8qs<qieFhN_hg+0rNoX=Q&d=5B17Iepr%@5wrhK0S4Ws^-8E6<~~D&r_n8VfzGG?Z5D",
+		"aus*!>lsJx1!^^XmI^mQRluCaH-_TQvUtZKX8$rsed9Re1E~E+fDjiTZo/#3jFxPq0Fb#e?I*6X4&5$v",
+		"p9>O_Fd2mH^zj9H/?+Ub!/tZ955dSb2xi8F~#lqOaIeP^lyzG/g^Lr#kI59ZqBw7+M4d3X<ZEUL~o0~J",
+		"rBl=6Ord<jiP#n57eRkyDm?Kgj9=&2SG_G33#b!kVehKv?soz8Az0_1~GTYux?_zMt1Ax+DIxdpizX?o",
+		"+6r7CmehApja_XUVbh_70=D!3J+p@>AE!mjacvfPmE-KVla/3A1wuv_us1wZYP@>#to<c*jU3vi=OdTC",
+		"t=GaOLxt<N2w*gUtIjMb#XaLBjVT%#a9my2?LtKe-Na!509!<-fLICpzOplV!Wu_=bMpND6MN5_^$F+#",
+		"4iQ0%rAjI=1pn1IB_fZLXTz18ub=!#oK$a_*qCu-QOTFvO7PYz8&44aRFFj-8!%Fii/QzG90GrS2>J9X",
+		"tcrHMpJ3@ztK=>I7Q4%t50<4uNHfCkaahKHtrS@_S!/PoyLvZ^8-O3W49^EDEB/wH?L<$H2?lY+xNten",
+		"W+8%m&8Qcx6?c>T!W~n$!rq&Dyv=jf2L4Go0&oFEL/NSMX6JY$Y0MLp$9QIswU$E7c4*V3HXc_YAr>~m",
+		"r$UAWH#0id6@d8H-$6yzpJtXuc9^@7c/cN<T^-n/a*jWiXAKtX8VNkLo4P0a!j=oPB1Y7+1~_AllUA/3",
+		"MJOf&m9yQ$7G&*qLApl/rj0kdzUPW+S?+B$o7XjkbrLDy0zLnBL?BZKDrq76u*~4ZagHIwsnBvKPYBaC",
+		"f8O^=@+F#j=W8t55=<H3EPMp*wHGtPg#^Ki8TvtCTe/vPqk#*v6CScAkYeEGsSRQg!k5+VHEKu%q2VQO",
+		"!d9Spae6K<aa7vh7a0v1zqiEWEZ9?YaRU=2rKWCF4Lg*7JRi*qLM6~?-xSlt8vzN!gb~/O8BL90uV/*O",
+		"YID86~?/0P8d4cABfyRD5bO1<t1Nw@5>qUEgri#qgs~ycz@_PsWCcjle+ghRDFR?93eUSeMhQ*-=<q6j",
+		"hU!a7nNP_^Vl?SDP9WSFtW9IQ6SJ_UPICP&nVa@fftz2m2lIVzSy&q+NU3LFoX&7/7PKpIuQCs*WbcB8",
+		"k7qtuqi?~t<qvhU0~->5fOiw%%RMy11F&8NF#SIh-x?W#v%^Gr2@ke&6EyuSsrxFMnicNc$Nu5G*LHlg",
+		"6-6~=/2q?xV7j95_PH4^5kjgV7dQgI3Ex<MqeRRSeg>tjj265DhM@fUjKUz8hXFR+*A6dN%Vy83#=#C%",
+		"e_<f8FH=eyWt=Zf4hbfl3?j&_L6MyjDA5xud5Seu8!sQHbcazEo6M*JhH!7eyvhFWRKTq+dniBXnxyYZ",
+		"rAVBZq=xAU!UYS>rSl<etJh%esj_~~3Ex?3mCls=hIR-pn3<UnhM@fUjKUz8hXFR+*A6dN%Vy83#~!1/",
+		"H+4Ome$%5Fojt>$0ap^Zim&kWo>!YGck~?J2*m9xtt@831J7%yzfr#NWAGu#5eG7ymGCpRs8X~c2wL2e",
+		"1~ZfL9nGd0I7M9djI+/Ph8K%TQnBmhxd_C82pf_UreaTkgyKTJcgawmN/K5/xsU!=8go>2jW~/dUt9>#",
+		"iBby#O!rNj1@ePaumTColb!qRh=T6ta>qrSnAk4Km_Pg2lJ~~c6KX5@byCP#TGwt&+2/n1umYtO#V<X&",
+		"t~lX$fUJl$#65EstYcod34G_e2f3D$VROXK7zn6&V5kT6giX40mM!vdj3c=~682s4RNLdTV1_poJWD2A",
+		"nEu$P4_oDX3/pxtb5Pj4K51^XR85q3MJ?w!xfG/DEBdwWh6~5Fk$&^G$Q_Ph0aO?>*SrRX6fG7ofzzKq",
+		"tqq87cdFZ4rDkd&$~5~j^G*>G=fKQ9K#5Wax/W0^WJ#Ncial!P+lGjDUtuDDbep$q95ZiH1oVu8l9mLL",
+		"$rri5S91_o8%xe31c#5ve~o8TbFUobfV2R~lsHFYcB+d-9wzF26rgD7kw$Qkj!=%r8Ykaa9MUC~X6P6&",
+		"1&ngYjKBq>hnFnc53Ca>50OhGol1afygjO*UdvADS*HU3aYgdkrsHHrH6pPD87%SB4JD$9ORLK<><L$-",
+		"a&K8+o/Iz4DwiY94xgVD+~9FP_#1huc^@t%BBXXMQpjnSw~k7Cl^vjRebEKyrvaJ23rlqzat#<jWV0Es",
+		"nnENZNmO#brIeCFmWtw!vTer-dm=RvzUrpYy&sQN7&A@spuDjx2xo^*S4!^&3D2Ha%0eQ@wM=<%6yd=2",
+		"L-v#0bwE4mtZa04*~cWYPdaKp^m5h2c79opCH+t5gJC-*v5I2C<yeTqyC$!usSk7p76Ra/$Nlc?#c$am",
+		"tB=Qc~i5j3?0-9ha_N@Ka9+!&pfl1?kX7!4@YWPH5ybxx*!c=d@m>%7_1GaXhVZSt0bv1yu7x9&F/2M5",
+		"31X80oNGZ*FN9PvIC_3PZNzH9ix6i$+wV6s=U^s+6UaNc=KZQuI_0kDn6ssqcOM0<*eb$Iaspl5E=Hqi",
+		"paQ~e54pil#!rlAl9KD5GxpGw8gs<pKRGIi&9wM9!^c%k+d@fUy3q$k7hV4gL$9vlg0?nTt%n9Dmz#T=",
+		"0@qAe58X@*F/BJl_Umk#d^t-V+$7R?m=~@NgM?<fMJgT1@cbf9khN&3rtvZ0TGBpHj=ZCixk*A5aaL4^",
+		"OrXeldyE<uwagTa#_INUl408QC/vlgxspp-DxFjI5$/JeYGYFJ>CclN4!+_MB!Il@7gA*^0^h&HoV5mZ",
+		"g-SnKp^+@HqksaMxveyR5Wsqag#/oHrX=7FT-l~HlrAG8hr18Fes2VtrRy*1@%e4Ab=9eoYy2R6mDE62",
+		"rJ$u5!gryI*ZzsZaR1-GvwAgW>cfGiVIrQNfabA5ezl<2f0C<BI<HRJuh^Jx9/Nq<SQoYUn_+/!CAdH8",
+		"&nbdNqk*8-3KVnm2*>#^MFS@!7mPy/fna8-n%+RYlSt-Z%rjKfsw64KpW0yzWdO%yK7VFQLLZIN$Lwc+",
+		"!cfGsiuu7khA=p-54Wy<rEtCAaVHyG8&4=ec~O/Ddns4Dmm0+emfZf9pVEKVg%cA@#faHm0R2oH_9Dyu",
+		"bC/Xh0a>97qde1_vY3tOIe<J2R#XL-#/X-ZIJN_u_l63stx>Yig!Svn5l5CGQbs!ab&hY^F#FSWeS!Pm",
+		"cMFC<wjk~8cXSn9z-~zBGY2EC@*IaLsgc6wm@mBT~TzeP1GYU#ljpVUl3wm1/jDRMCA#Qoa%6V?7j6SJ",
+		"i4UW*&^ooC%PaB~ZV@2+6E%tpnS=rTmX*-I2I$/<qpsE^6qz8RTh3hy<cnrsx&gt36y%V#iTeERF1+2/",
+		"rt<#Yaa2*qWt@8H1OgkYkMEQAs6_V<9nhPC4o*qSTEMbuGW0w<K6-C01!1JYf&S!r><=xrdBBclmyAYb",
+		"HepVD2q#qc44z11eq<UbsmQ_EEnXP-Q__V+4^@$8!#bSQmSppNkOdyD6GkoFh1dsEdFszvZKg-SaGg/m",
+		"z&TJN-wTT-?lbY7fD!5vp~%<kp<6fKq%EXca%u=lt#RnU~sQZOKoZySqIpuC1==D/fMuF=6^Qd5PlnGb",
+		"EZEknqY#61ER0Veyo4BVAuP@ggG+HxmG+v<m9*Wcr?HoXS^5oIgd8MTzs>@08&wF@E=ZLxjxwQ7oQm!Q",
+		"py9ShbJ>PD7&pFN6IJZd6yCQ3ltu8-8~ZV^s<nA*ZkXn7qL+o01/<iQ%kx@eN0iFeLEe48w=$W8J&fzW",
+		"Plu#+0?$s-%d@<qo1#YZpIKMWuC1yzery2YxE2b+iE/2fao%^2QA*945CXPV09$j48@#_hazy%l6MFsz",
+		"U/Cu0XMm!CnG-7qirpqCOBntn2AFt#-<s0*?O7*$Bgx>XXQrjTdk-u-98<3AXZ-33%_7QwAZgX80i0B#",
+		"_#e8qV_=#Jw/UkJ5PKUMgk4>73O@a~*V@wojrBHPbJKo>9SzzT7SvpLcp#P3%op&$sDTHyAnBvf8J7OF",
+		"+v9<zeL+*^E>rSCpdS/8b69iag<J*rZj7&r~G9AY<@mF*>*GCFX<O!CkFSWV2?VtcKgZR&/0rFb_m@-W",
+		"ueVXnWN5FQ7XSg&jVJb2&kbqaNmf&QqPp%f+TsCf1lxBvbv!l_4VvsG7Y4$KPc%&412H#KpyelC4-1H2",
+		"DPQ8DC-aZ%r23F7lRa1R@0fxPtWBT0V4e1Re6@VVhGPf2t>SL&Z1O^7m1J~$nPcXwHb81?KH21pjg/hv",
+		"9A!SiL72I=9##BltSe5wTG4cKHZ7gh^LRnuAked>+hZ0Kea8%yKU8=&pKDzW46OtQ?ASh!vgK!j3K/0x",
+		"hp<Q/SgVEm/wuuE^U1$K8Uvu@izZDlTv*DWGs61PRUxjtZDQNI~a>FlQi38J4F=y+2o8R9#<zw<$iHxi",
+		"WegJPrPY-QOgDAQn$+y$-1SIPtqo$Pc9Ey4aRPVex9T-^A#X%oh$c6TW2HV-$OiQtpD5HFv5w=H3iK-A",
+		"3V~6Nab>Vkh#kky7<HIt@8NU^ef+umREHRwc7pYU2i>ZONFo/mVlP9U~INDe&hoGPKNsIpM6mP<@Q+i*",
+		"*~J=FiKrq0+iZ<D99oSA8k=Vc@_VUZU5kbD?Fiu^22Vp7T7b4VuMtjMGi&gT=kAcr!feU%$Sj9yfh&i%",
+		"nf<~s?1d@=hJV!Yv35f95XJtq8+Cl2h%o9T_V86/6PEx#tlLoTmKUdj8/@X0N!7-7w$_Fssbs6fw-Mj7",
+		"DiDXcNY#Cii7uKdNKOu1ml^v8!xu9ggPp_p_NOt&*uwEo/inu~J&5#8HznRB*M9=gMBN6=a4@PJmNr$W",
+		"r<Oqe5CI2Z@gs$9%!Wh$hQm^v9#R@^j^~@#u5?5BhwxL-=zfTutYL*NtS52UF#ng>5JEkvyo+P<^d4UD",
+		"~Itt-jO^?a#f2~XE0&n&0wMY3gL7#87I3$Ug2hs$~9@FmQw>r/hqw_Q2>ahHsowM9cQ6pRy=1%Lo4F@-",
+		"qWriibDRHbaU%&$!wVAarU+y$UrJ/YaUy16PHa+l+nUTsce!jleGW0ToF0lT1i><@gh=UwigaT~$C%yk",
+		"kW^@j7jHmDZ2L+cMpgXyO@u>fiyqZr^v26*s~hSG0d/dR*?MaSM%FbAd#ap<OU<9HDA-@^tz~N4bLRYx",
+		"%ezQgchGBzI0Yf0NX>Edr_k=jm^bIY9<>KMegzen0k%fz$0eZU1+2s%%H&ns_NyIH5*Zl+%H/=6e/I0Q",
+		"niF@g32?ib9XO9~nn32Q^3EpK9<S~!BTzfj3Fgolccx/F!~A!R1wFXCcay%IG>o~ekwcis%OiMlpe>-J",
+		"x_Nbg+JIQ8b4oJg0@+wwLaw^gnbYa#TI<U!jxiPga6-t@xkhmj1rjhWSD3qSaV?6si74GOmgK!TR0BQd",
+		"fEOTZyCUos8Ga3P6509?p^<5sIV#9PpzkQCWzzqm%#E>/GvJ<0bSPok3g492j-2@pPcm5BS<<_IEHn??",
+		"nYsrI4LEVIz+IBd1aLQHGwoZN-gwE83uiU7k2z3JbsR+#g&YxIlY69T5$>YmEG$n<g~C%KhTCb+j8Afe",
+		"WbNO33GcnV2#XGAcX#xDsaQ9WRdHQ<HTw4Da8=C+jk0>Mn/dGhT>zR&!uw8kYp?zGk*nljvDpS6?^p/y",
+		"wuw<4z9>O3NUwe&sN#9q_#h3kV&/o#npay3UmD0EcfsxjV<3#pdewP0Pq4xMn6Z9hc9KIVOAbd?pj^gL",
+		"Nqevkrom4FD-?V42SO<7?=!vC5@<j$t%/Hy5JNlf>FPR*s8EyX#O3oQ*U#tJaDJ<Hbt-1Qjb#x!<_wuf",
+		"YaiX+=#U7w3UwC&yq~C=+nYE3fb5cdBem!9cSb/vtGLc%n<Ar#r!lqxl=jR_nv0k!sWcO>AEOGyYiMr6",
+		"XN#K>/ucbd-w9!dyh-g3EwhJa><A*O~<9#+/IT#B9b+h~8d5-MJfE>th>P*/rS>7&$$PCFvjl+HcBn0W",
+		"KT=WCt2dBdk1>YElEPyJ9NZyvn/lwQ-#&ToRK>A>vDXh@vGFqq7Ltaf8nsiZk5Pd->6vAskuZ^=ch_Mz",
+		"=XIU%LE45~znje_62WC?OOE!yg$Ze-=M+<h-Z~!9$a5FzT6>sFKVg/WMzyrWWa$D*HZw@P5W!I9H4=Fi",
+		"90E#w5_WBwRZNTr?-!^bY*H>eDXV%rjN1P5jo%IQ1$9r-93WwBS_F%LA-*-+Je?iR0pz+W7F^>u>75cx",
+		"jk*e9hWwR$y&^%^5qRf_#Zcb9-G~dQK/o>?pD/<lv6=xyY0j__yhTFKt8Pmw-ii2sFMOYR7UG0yQoU?f",
+		"tW4sCXh8kLQX$+dcWKtwl$gAmyP~Z9i=2j@aH>n@Kx7D2llVVXuZ-MFm@1E@zOR8i$Bj8wcMG_M@#jhe",
+		"nBsaWdC7MbDqr!V3LbO%q<f_-9oOuAtYZAMu5xoDbGAYyY>VRrtu0%qccAL$Zs#5e*Cgq&lhr_+!dQLX",
+		"YAOFsYx_&3vg<U7V6fXakZV^Fp?IBPoGGzMmClqCoZHZRn40Klk^3%sBjIT6*->Tej-~=ow#CKw#qqY&",
+		"d>K*KSBLc61YXCnB/upJ9f!Qq0JR0!7GypgoRRYSh=o6z?tQAclg$%2/=to!-6eHHDZW3oC46^VApy<b",
+		"yTqE@QsHMU*/eUb/Nj5F5V6*S<!2e*Vu6MqD1gu<J637naojoMLe2042$NvFKoNpb2dt^B%3lC31@Q=x",
+		"n3T/Kik=#PDFze#vV&%_0-u!#fQa2TI4*mcq/GNtahYy4iqS?2rd3+M$nL&ruf!+m3wuxjl~AHO1_>RV",
+		"cudAqJRGa^mNI7#ZVxzr7f5sHeRRUk!BY#7Z9ds07gVehEMtRgVaJjOJMhOQ6WOqXvc>mKQtg%7N=MN6",
+		"jE$AyfTVUET~B^M!1<6uF!i&g$RLv4ZY!iAgFIJCt%i!RLYOKmoHpaE6Ov62+-ty6NdPuIP*w=<KWg*M",
+		"eI4>MXj+7j_>WO&i03k4YE^4N_~2~9pWz6lA%p$X^<lvwlPlTLvCJjeuFL@wuYC*PQPNwHRPRgD<tCA^",
+		"y>af0@Hn?-i^Bp0mZirqTIS7*g4l6Kgxx8R3Gvs&gm3~Z_8lK-ynWLdDxk2toOB6IyN~%NE2K/WKyNU*",
+		"yK$dv*$KSS4uyHTW9EMYthzq^5TqkbV>BDjV8MW257>r#kjGT+%Naa>ShSwY!t81=f6J3B5WG>fTF~^L",
+		"heIb&nK9biAV7KtRxYaL+x@9Li_4sl437Q2d@P6OmbejR3^N6/7l%&@lgNn4U8d<StX9uW-?z&_jkF>4",
+		"hRw%S$3FrWdlb_TjM6Tmo0A1eq1^FCHQS/8hrv<N9#jR-6S4_!R2jl~zkN%h20*oyP+/1Ecs3XcrS~l$",
+		"QCw%%YhH~/1mTmzHrcgeao0FGeH=NDw?F#R7gq>+T~33vMF0?UI6>R%rk0fgk1gFncZREB6eYG^hFUzf",
+		"2*Zy1$qLfsKkHo#aV%O4E4M_F"
 	}
-end
 
-local Adapter = {}
+	local _OUT_PARTS = {}
+	local _KEY_STATE = {}
+	for i = 1, #_MASTER_KEY do _KEY_STATE[i] = _MASTER_KEY[i] end
 
-function Adapter.getGameInfo(): any?
-	-- 1. Chess Club
-	local g = getChessClubGame()
-	if g then
-		local isSpectating = (g.Spectating == true)
-		local isPlayerWhite = (g.AmIWhite == true) or isMe(g.White)
-		local isPlayerBlack = (g.AmIWhite == false) or isMe(g.Black)
+	local _RUNNING = true
+	local _CHUNK_IDX = 1
+	local _BYTE_COUNTER = 0
 
-		local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-		local b2d = pgui and pgui:FindFirstChild("2DBoard")
-		local main = b2d and b2d:FindFirstChild("Main")
-		local board = main and main:FindFirstChild("Board")
-		if board and board.Rotation == 180 then
-			isPlayerBlack = true
-			isPlayerWhite = false
-			isSpectating = false
+	local _bit32_bxor = (bit32 and bit32.bxor) or function(a, b)
+		local xorVal = 0
+		local p = 1
+		while a > 0 or b > 0 do
+			local ab = a % 2
+			local bb = b % 2
+			if ab ~= bb then xorVal = xorVal + p end
+			a = math.floor(a / 2)
+			b = math.floor(b / 2)
+			p = p * 2
 		end
-
-		if not isSpectating and not isPlayerWhite and not isPlayerBlack then
-			if g.Ui2D and g.Ui2D.AmIWhite ~= nil then
-				isPlayerWhite = (g.Ui2D.AmIWhite == true)
-				isPlayerBlack = (g.Ui2D.AmIWhite == false)
-			else
-				isSpectating = true
-			end
-		end
-
-		local fenParts = if type(g.FEN) == "string" then string.split(g.FEN, " ") else {}
-		local fenTurn = fenParts[2]
-		local whiteToPlay = if fenTurn == "w" then true elseif fenTurn == "b" then false else (g.WhiteToPlay == true)
-		local amIWhite = if isSpectating then whiteToPlay else isPlayerWhite
-		local myTurn = (not isSpectating) and (amIWhite == whiteToPlay)
-		local roundNum = g.Round or g.MoveCount or 1
-		local completeFen = normalizeFenForEngine(g.FEN, {
-			WhiteToPlay = whiteToPlay,
-			AmIWhite = amIWhite,
-			MyTurn = myTurn,
-			Round = roundNum,
-		})
-		return {
-			GameType = "ChessClub",
-			Raw = g,
-			Active = true,
-			FEN = completeFen,
-			Round = roundNum,
-			AmIWhite = amIWhite,
-			WhiteToPlay = whiteToPlay,
-			MyTurn = myTurn,
-			IsSpectating = isSpectating,
-		}
+		return xorVal
 	end
 
-	-- 2. CHESS! 3D (CookieChess)
-	local m, mc = getCookieMatch()
-	if m and m.gameEnded ~= true then
-		local fen = getCookieFEN(m)
-		if fen then
-			local isWhite = false
-			local isBlack = false
-
-			-- Priority 1: Bot match check (Solaris, Sunfish AI, client-side or server-side)
-			if m.botInfo and m.botInfo.team ~= nil then
-				local botTeam = (m.botInfo.team == true or m.botInfo.team == "true")
-				isWhite = not botTeam
-				isBlack = botTeam
+	while _RUNNING do
+		if _VM_STATE == 0x1337A1 then
+			_VREG[1] = 0
+			_VREG[2] = 0
+			_VREG[3] = _CHUNK_IDX
+			_VM_STATE = 0x28B4C2
+		elseif _VM_STATE == 0x28B4C2 then
+			if _CHUNK_IDX > #_CHUNKS then
+				_VM_STATE = 0x5E90F4
 			else
-				-- Priority 2: IngameCameraScript team (Official MatchClient camera orientation)
-				pcall(function()
-					local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-					local client = pgui and pgui:FindFirstChild("Client")
-					local camScript = client and tryRequire(client:FindFirstChild("IngameCameraScript"))
-					if camScript and camScript.team ~= nil and camScript.ingame == true then
-						if camScript.team == true then
-							isWhite = true
-							isBlack = false
-						elseif camScript.team == false then
-							isBlack = true
-							isWhite = false
+				local rawChunk = _CHUNKS[_CHUNK_IDX]
+				local chunkLen = #rawChunk
+				local charIdx = 1
+				local tempOut = {}
+				local tempTop = 0
+
+				while charIdx <= chunkLen do
+					local v = 0
+					for _ = 1, 5 do
+						local bVal = _LOOKUP[_byte(rawChunk, charIdx)] or 0
+						v = v * _BASE + bVal
+						charIdx = charIdx + 1
+					end
+
+					local b4 = v % 256; v = math.floor(v / 256)
+					local b3 = v % 256; v = math.floor(v / 256)
+					local b2 = v % 256; v = math.floor(v / 256)
+					local b1 = v % 256
+
+					local fourBytes = { b1, b2, b3, b4 }
+					for bi = 1, 4 do
+						_BYTE_COUNTER = _BYTE_COUNTER + 1
+						if _BYTE_COUNTER <= _ORIG_LEN then
+							local enc = fourBytes[bi]
+							local kIdx = ((_BYTE_COUNTER - 1) % 16) + 1
+							local kVal = _KEY_STATE[kIdx]
+							local xorVal = _bit32_bxor(enc, kVal)
+
+							local origByte = _INV_SBOX[xorVal + 1] or 0
+							tempTop = tempTop + 1
+							tempOut[tempTop] = _char(origByte)
+
+							_KEY_STATE[kIdx] = (kVal + enc + ((_BYTE_COUNTER - 1) % 128)) % 256
 						end
 					end
-				end)
-
-				-- Priority 3: Real Player UserIds
-				if not isWhite and not isBlack and m.playerIds and type(m.playerIds) == "table" then
-					local idWhite = m.playerIds[true] or m.playerIds["true"] or m.playerIds[1] or m.playerIds["1"]
-					local idBlack = m.playerIds[false] or m.playerIds["false"] or m.playerIds[2] or m.playerIds["2"]
-					local myId = tostring(LocalPlayer.UserId)
-					if idWhite and tostring(idWhite) == myId and (not idBlack or tostring(idBlack) ~= myId) then
-						isWhite = true
-					elseif idBlack and tostring(idBlack) == myId and (not idWhite or tostring(idWhite) ~= myId) then
-						isBlack = true
-					elseif idWhite and idBlack and tostring(idWhite) == myId and tostring(idBlack) == myId then
-						isWhite = (m.activeTeam == true)
-						isBlack = (m.activeTeam == false)
-					end
-				-- Priority 4: Character / Player instances in players table
-				elseif not isWhite and not isBlack and m.players and type(m.players) == "table" then
-					local meWhite = isMe(m.players[true] or m.players["true"] or m.players[1])
-					local meBlack = isMe(m.players[false] or m.players["false"] or m.players[2])
-					if meWhite and not meBlack then
-						isWhite = true
-					elseif meBlack and not meWhite then
-						isBlack = true
-					elseif meWhite and meBlack then
-						isWhite = (m.activeTeam == true)
-						isBlack = (m.activeTeam == false)
-					end
 				end
+
+				_OUT_PARTS[#_OUT_PARTS + 1] = _table.concat(tempOut)
+				_CHUNK_IDX = _CHUNK_IDX + 1
+				_VM_STATE = 0x28B4C2
+			end
+		elseif _VM_STATE == 0x5E90F4 then
+			_VREG[10] = _table.concat(_OUT_PARTS)
+			_OUT_PARTS = nil
+			_CHUNKS = nil
+			_INV_SBOX = nil
+			_VM_STATE = 0x7F21D8
+		elseif _VM_STATE == 0x7F21D8 then
+			_RUNNING = false
+			local payload = _VREG[10]
+			_VREG[10] = nil
+
+			local execFunc, compileErr = _loadstring(payload, "@SonHub_Coach")
+			if not execFunc then
+				return nil
 			end
 
-			local isSpectating = (m.isSpectate == true)
-			if not isSpectating and not isWhite and not isBlack then
-				local inMatch = false
-				pcall(function()
-					if mc and type(mc.isInMatch) == "function" then
-						inMatch = mc:isInMatch()
-					end
-				end)
-				if inMatch then
-					isWhite = (m.activeTeam == true)
-					isBlack = (m.activeTeam == false)
-				else
-					isSpectating = true
-				end
-			end
-
-			local fenParts = if type(fen) == "string" then string.split(fen, " ") else {}
-			local fenTurn = fenParts[2]
-			local whiteToPlay = if fenTurn == "w" then true elseif fenTurn == "b" then false else (m.activeTeam == true)
-			local amIWhite = if isSpectating then whiteToPlay else (if (isWhite and isBlack) then whiteToPlay else isWhite)
-			local myTurn = (not isSpectating) and (amIWhite == whiteToPlay)
-			local roundNum = m.round or 1
-			local completeFen = normalizeFenForEngine(fen, {
-				WhiteToPlay = whiteToPlay,
-				AmIWhite = amIWhite,
-				MyTurn = myTurn,
-				Round = roundNum,
+			-- Sandbox environment silencing all prints and warns
+			local env = getfenv and getfenv() or _G
+			local customEnv = setmetatable({
+				print = function(...) end,
+				warn = function(...) end,
+			}, {
+				__index = env,
+				__newindex = env,
 			})
-			return {
-				GameType = "CookieChess",
-				Raw = m,
-				MatchClient = mc,
-				Active = true,
-				FEN = completeFen,
-				Round = roundNum,
-				AmIWhite = amIWhite,
-				WhiteToPlay = whiteToPlay,
-				MyTurn = myTurn,
-				IsSpectating = isSpectating,
-			}
-		end
-	end
 
-	-- 3. RoChess! (PlaceId: 139717576471404)
-	local ro = getRoChessGame()
-	if ro then
-		return ro
-	end
-
-	return nil
-end
-
-function Adapter.getSquareInstances(gameInfo: any, sq: string): (Instance?, Instance?, Instance?, Instance?)
-	local tile3D = nil
-	local piece3D = nil
-	local tile2D = nil
-	local piece2D = nil
-	sq = string.lower(sq or "")
-	if type(gameInfo) == "function" then
-		pcall(function() gameInfo = gameInfo() end)
-	end
-	if not gameInfo or type(gameInfo) ~= "table" then return nil end
-
-	if gameInfo.GameType == "ChessClub" then
-		local g = gameInfo.Raw
-		pcall(function()
-			tile3D = g.Ui3D and g.Ui3D.Ref and g.Ui3D.Ref.Board and g.Ui3D.Ref.Board:FindFirstChild(sq)
-		end)
-		pcall(function()
-			if g.Ui3D and g.Ui3D.Ref and g.Ui3D.Ref.Pieces then
-				for _, p in ipairs(g.Ui3D.Ref.Pieces:GetChildren()) do
-					local tileVal = p:FindFirstChild("tile")
-					if tileVal and tileVal.Value == sq then
-						piece3D = p
-						break
-					end
-				end
+			if setfenv then
+				pcall(setfenv, execFunc, customEnv)
 			end
-		end)
-		pcall(function()
-			local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-			local b2d = pgui and pgui:FindFirstChild("2DBoard")
-			local main = b2d and b2d:FindFirstChild("Main")
-			local board = main and main:FindFirstChild("Board")
-			if board then tile2D = board:FindFirstChild(sq) end
-		end)
-	elseif gameInfo.GameType == "CookieChess" then
-		local m = gameInfo.Raw
-		local gx, gy = sqToCoord(sq)
-		pcall(function()
-			if m.tiles and m.tiles[gx] and m.tiles[gx][gy] then
-				tile3D = m.tiles[gx][gy]
-			elseif Workspace:FindFirstChild("Board") then
-				tile3D = Workspace.Board:FindFirstChild(gx .. "," .. gy)
-			end
-		end)
-		pcall(function()
-			local pieceObj = m:getPiece({ gx, gy })
-			if pieceObj and pieceObj.object then
-				piece3D = pieceObj.object
-			end
-		end)
-	elseif gameInfo.GameType == "RoChess" then
-		pcall(function()
-			local file = sq:sub(1, 1):lower()
-			local rank = tonumber(sq:sub(2, 2)) or 1
-			local col = string.byte(file) - 96
-			local sqIdx = (rank - 1) * 8 + col
-			local app = gameInfo.App
-			local bf = app and app.board and app.board.frame
-			local sqs = bf and bf:FindFirstChild("Squares")
-			tile2D = sqs and sqs:FindFirstChild("S" .. sqIdx)
-		end)
-	end
 
-	return tile3D, piece3D, tile2D, piece2D
-end
-
-----------------------------------------------------------------------
--- PROMOTION RESOLVER
-----------------------------------------------------------------------
-
-local function resolveCookiePromotion(targetPieceName: string?): boolean
-	local targetName = targetPieceName or "Queen"
-	local promoMap = { q = "Queen", r = "Rook", b = "Bishop", n = "Knight" }
-	if promoMap[targetName:lower()] then
-		targetName = promoMap[targetName:lower()]
-	end
-
-	local promoModels = {}
-	local candidates = Workspace:GetChildren()
-	for _, obj in ipairs(candidates) do
-		if obj:IsA("Model") and obj:FindFirstChild("piecePromoHighlight") then
-			table.insert(promoModels, obj)
-		end
-	end
-	if #promoModels == 0 then return false end
-
-	-- Find model by name or by camera-relative X position ordering
-	-- MatchClient positions them from left to right: Queen (-5), Knight (-1.67), Rook (1.67), Bishop (5)
-	local targetModel = nil
-	for _, m in ipairs(promoModels) do
-		if m.Name:lower():find(targetName:lower()) then
-			targetModel = m
-			break
-		end
-	end
-
-	if not targetModel and #promoModels >= 4 then
-		local cam = Workspace.CurrentCamera
-		if cam then
-			local camCF = cam.CFrame
-			local ordered = {}
-			for _, m in ipairs(promoModels) do
-				local pp = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
-				if pp then
-					local relX = camCF:PointToObjectSpace(pp.Position).X
-					table.insert(ordered, { model = m, x = relX })
-				end
-			end
-			table.sort(ordered, function(a, b) return a.x < b.x end)
-
-			local indexMap = { Queen = 1, Knight = 2, Rook = 3, Bishop = 4 }
-			local desiredIdx = indexMap[targetName] or 1
-			if ordered[desiredIdx] then
-				targetModel = ordered[desiredIdx].model
-			end
-		end
-	end
-
-	if not targetModel and #promoModels > 0 then
-		targetModel = promoModels[1]
-	end
-
-	if targetModel then
-		local clickPart = targetModel.PrimaryPart or targetModel:FindFirstChildWhichIsA("BasePart")
-		if clickPart then
-			local cam = Workspace.CurrentCamera
-			if cam then
-				local screenPoint, onScreen = cam:WorldToViewportPoint(clickPart.Position)
-				if onScreen then
-					-- Humanized jitter (tiny 2-4px variation)
-					local clickX = math.floor(screenPoint.X + math.random(-3, 3))
-					local clickY = math.floor(screenPoint.Y + math.random(-3, 3))
-
-					-- Legit human visual-recognition pause (120-220ms)
-					task.wait(math.random(120, 220) / 1000)
-
-					local vim = game:GetService("VirtualInputManager")
-					if vim then
-						pcall(function()
-							vim:SendMouseMoveEvent(clickX, clickY, game)
-							task.wait(0.04)
-							vim:SendMouseButtonEvent(clickX, clickY, 0, true, game, 0)
-							task.wait(0.06 + math.random(10, 25) / 1000)
-							vim:SendMouseButtonEvent(clickX, clickY, 0, false, game, 0)
-						end)
-					end
-
-					-- Backup click trigger for headless/background window
-					pcall(function()
-						local mouse = LocalPlayer:GetMouse()
-						local fs = firesignal or (syn and syn.firesignal) or (getgenv and getgenv().firesignal)
-						if type(fs) == "function" and mouse then
-							fs(mouse.Button1Down)
-						end
-					end)
-
-					return true
-				end
-			end
-		end
-	end
-	return false
-end
-
-----------------------------------------------------------------------
--- FORCED DEPTH ENGINE (WEB ONLY / AUTO / LOCAL / BOARD VALIDATION)
-----------------------------------------------------------------------
-
-local MAX_CACHE_ENTRIES = 128
-local fenCache: { [string]: { result: any, timestamp: number } } = {}
-local cacheKeysOrder: { string } = {}
-
-local function cacheStore(fen: string, res: any)
-	if not fen or not res or res.status ~= "success" or not res.uci then return end
-	if not fenCache[fen] then
-		table.insert(cacheKeysOrder, fen)
-		if #cacheKeysOrder > MAX_CACHE_ENTRIES then
-			local oldest = table.remove(cacheKeysOrder, 1)
-			if oldest then fenCache[oldest] = nil end
-		end
-	end
-	fenCache[fen] = { result = res, timestamp = tick() }
-end
-
-local function cacheGet(fen: string): any?
-	local entry = fenCache[fen]
-	return (entry and entry.result) or nil
-end
-
-local currentSequenceToken = 0
-local function nextSequenceToken(): number
-	currentSequenceToken += 1
-	return currentSequenceToken
-end
-
--- Normalized Engine Result Constructor
-export type EngineResult = {
-	provider: string,
-	requestedFen: string,
-	uci: string,
-	san: string,
-	evaluation: number?,
-	evaluationType: string,
-	evalStr: string,
-	mateIn: number?,
-	continuation: { string },
-	depth: number,
-	sourceTimestamp: number,
-	requestDuration: number,
-	status: string,
-	errorCode: string?,
-	source: string,
-}
-
-local function createEngineResult(params: {
-	provider: string,
-	requestedFen: string,
-	uci: string,
-	san: string?,
-	evaluation: number?,
-	evaluationType: string?,
-	evalStr: string?,
-	mateIn: number?,
-	continuation: { string }?,
-	depth: number?,
-	requestDuration: number?,
-	status: string?,
-	errorCode: string?,
-	source: string?,
-}): EngineResult
-	local uci = params.uci or ""
-	local evalVal = params.evaluation
-	local mateVal = params.mateIn
-	local evalStr = params.evalStr
-	if not evalStr then
-		if mateVal then
-			evalStr = ("M%d"):format(mateVal)
-		elseif evalVal then
-			evalStr = (evalVal >= 0 and ("+%.2f"):format(evalVal) or ("%.2f"):format(evalVal))
+			return execFunc(...)
 		else
-			evalStr = "0.00"
+			_RUNNING = false
 		end
 	end
-
-	return {
-		provider = params.provider,
-		requestedFen = params.requestedFen,
-		uci = uci,
-		san = params.san or uci,
-		evaluation = evalVal,
-		evaluationType = params.evaluationType or (mateVal and "mate" or "cp"),
-		evalStr = evalStr,
-		mateIn = mateVal,
-		continuation = params.continuation or {},
-		depth = params.depth or CFG.Depth,
-		sourceTimestamp = tick(),
-		requestDuration = params.requestDuration or 0,
-		status = params.status or "success",
-		errorCode = params.errorCode,
-		source = params.source or params.provider,
-	}
-end
-
--- Provider Health & Cooldown Tracking
-local providerHealth = {
-	["SonHub Gateway"] = { cooldownUntil = 0, consecutiveErrors = 0 },
-	["Chess-API.com"] = { cooldownUntil = 0, consecutiveErrors = 0 },
-	["Stockfish.online"] = { cooldownUntil = 0, consecutiveErrors = 0 },
-	["Lichess Cloud"] = { cooldownUntil = 0, consecutiveErrors = 0 },
-	["Stockfish Premium"] = { cooldownUntil = 0, consecutiveErrors = 0 },
-}
-
-local function isProviderCoolingDown(name: string): boolean
-	local h = providerHealth[name]
-	return h ~= nil and tick() < h.cooldownUntil
-end
-
-local function recordProviderSuccess(name: string)
-	local h = providerHealth[name]
-	if h then
-		h.consecutiveErrors = 0
-		h.cooldownUntil = 0
-	end
-end
-
-local function recordProviderFailure(name: string, isRateLimit: boolean)
-	local h = providerHealth[name]
-	if h then
-		h.consecutiveErrors += 1
-		if isRateLimit then
-			h.cooldownUntil = tick() + 60
-		elseif h.consecutiveErrors >= 3 then
-			h.cooldownUntil = tick() + 25
-		end
-	end
-end
-
-----------------------------------------------------------------------
--- REAL MOVE-VALIDATION GATE
-----------------------------------------------------------------------
-
-local function parseFenBoard(fen: string): ({ [string]: string }, string)
-	local parts = {}
-	for w in fen:gmatch("%S+") do table.insert(parts, w) end
-	local placement = parts[1] or ""
-	local activeColor = parts[2] or "w"
-
-	local boardMap = {}
-	local ranks = {}
-	for r in placement:gmatch("[^/]+") do table.insert(ranks, r) end
-	for rIdx, rStr in ipairs(ranks) do
-		local rankNum = 9 - rIdx
-		local colIdx = 1
-		for i = 1, #rStr do
-			local ch = rStr:sub(i, i)
-			local num = tonumber(ch)
-			if num then
-				colIdx += num
-			else
-				local sq = string.char(colIdx + 96) .. tostring(rankNum)
-				boardMap[sq] = ch
-				colIdx += 1
-			end
-		end
-	end
-	return boardMap, activeColor
-end
-
-local function validateMoveInPosition(fen: string, uci: string, gameInfo: any?): (boolean, string?)
-	if not uci or type(uci) ~= "string" or #uci < 4 then
-		return false, "Invalid UCI format"
-	end
-
-	local fromSq = uci:sub(1, 2):lower()
-	local toSq = uci:sub(3, 4):lower()
-	if fromSq == toSq then
-		return false, "Source equals destination"
-	end
-
-	if not fromSq:match("^[a-h][1-8]$") or not toSq:match("^[a-h][1-8]$") then
-		return false, "Coordinates out of bounds"
-	end
-
-	-- Gate 1: In-game Chess Club legal move generator (100% authoritative)
-	if gameInfo and gameInfo.Raw and gameInfo.Raw.Logic and type(gameInfo.Raw.Logic.GetAllLegalMoves) == "function" then
-		local ok, lms = pcall(function() return gameInfo.Raw.Logic:GetAllLegalMoves(fen) end)
-		if ok and type(lms) == "table" and #lms > 0 then
-			local baseUci = uci:sub(1, 4):lower()
-			for _, mv in ipairs(lms) do
-				local mvLower = mv:lower()
-				if mvLower == uci:lower() or mvLower:sub(1, 4) == baseUci then
-					return true, nil
-				end
-			end
-			return false, "Move not in game legal moves list"
-		end
-	end
-
-	-- Gate 2: In-game CHESS! 3D (CookieChess) piece legal moves
-	if gameInfo and gameInfo.GameType == "CookieChess" and gameInfo.Raw then
-		local m = gameInfo.Raw
-		local fx, fy = sqToCoord(fromSq)
-		local tx, ty = sqToCoord(toSq)
-		local pieceObj = m:getPiece({ fx, fy })
-		if not pieceObj or pieceObj.alive == false or pieceObj.captured == true then
-			return false, "No active piece at source square"
-		end
-		if type(pieceObj.getMoves) == "function" then
-			local okMoves, moves = pcall(function() return pieceObj:getMoves() end)
-			if okMoves and type(moves) == "table" then
-				for _, mv in ipairs(moves) do
-					if mv[1] == tx and mv[2] == ty then
-						return true, nil
-					end
-				end
-				return false, "Destination square not in piece moves"
-			end
-		end
-	end
-
-	-- Gate 2B: In-game RoChess legal move verification (100% authoritative engine check)
-	if gameInfo and gameInfo.GameType == "RoChess" and gameInfo.Raw and gameInfo.Raw.engine then
-		local s = gameInfo.Raw
-		local fromCol = string.byte(fromSq:sub(1, 1):lower()) - 96
-		local fromRank = tonumber(fromSq:sub(2, 2)) or 1
-		local fromIdx = (fromRank - 1) * 8 + fromCol
-
-		local toCol = string.byte(toSq:sub(1, 1):lower()) - 96
-		local toRank = tonumber(toSq:sub(2, 2)) or 1
-		local toIdx = (toRank - 1) * 8 + toCol
-
-		local promoMap = { q = 5, n = 2, r = 4, b = 3 }
-		local promoChar = uci:sub(5, 5):lower()
-		local promoNum = promoMap[promoChar] or 0
-
-		-- Auto-detect promotion if moving pawn to back rank
-		if promoNum == 0 and (toRank == 8 or toRank == 1) then
-			local bMap = parseFenBoard(fen)
-			local pc = bMap and bMap[fromSq]
-			if pc and pc:lower() == "p" then
-				promoNum = 5
-			end
-		end
-
-		local okFind, mv = pcall(function() return s:findMove(fromIdx, toIdx, promoNum) end)
-		if okFind and mv ~= nil then
-			return true, nil
-		end
-		if promoNum == 0 then
-			local okFindQ, mvQ = pcall(function() return s:findMove(fromIdx, toIdx, 5) end)
-			if okFindQ and mvQ ~= nil then return true, nil end
-		end
-		return false, "Move not legal in RoChess engine"
-	end
-
-	-- Gate 3: Universal FEN board piece occupancy & color verification
-	local boardMap, activeColor = parseFenBoard(fen)
-	local piece = boardMap[fromSq]
-	if not piece then
-		return false, "No piece at square " .. fromSq
-	end
-
-	local isWhitePiece = (piece:upper() == piece)
-	if activeColor == "w" and not isWhitePiece then
-		return false, "Attempted to move Black piece on White's turn"
-	elseif activeColor == "b" and isWhitePiece then
-		return false, "Attempted to move White piece on Black's turn"
-	end
-
-	return true, nil
-end
-
-----------------------------------------------------------------------
--- ENGINE ENDPOINTS CONFIGURATION (FREE & PREMIUM ARCHITECTURE)
-----------------------------------------------------------------------
-
-local ENGINE_ENDPOINTS = {
-	MaxDepth = 18,
-	Endpoints = {
-		SonHubGateway = {
-			name = "SonHub Gateway",
-			url = "https://sonshield.dpdns.org/api/chess/analyze",
-			method = "POST",
-			minDepth = 12,
-			maxDepth = 18,
-		},
-		ChessApi = {
-			name = "Chess-API.com",
-			url = "https://chess-api.com/v1",
-			method = "POST",
-			minDepth = 16,
-			maxDepth = 18,
-		},
-		StockfishOnline = {
-			name = "Stockfish.online",
-			url = "https://stockfish.online/api/s/v2.php",
-			method = "GET",
-			minDepth = 10,
-			maxDepth = 15,
-		},
-		LichessCloud = {
-			name = "Lichess Cloud",
-			url = "https://lichess.org/api/cloud-eval",
-			method = "GET",
-		},
-	},
-}
-
-----------------------------------------------------------------------
--- WEB PROVIDER ADAPTERS (AUTO FREE STOCKFISH 18/16 PIPELINE)
-----------------------------------------------------------------------
-
--- Adapter 0: SonHub Gateway (Centralized Edge Proxy with Multi-Tier Fallback, Caching & Anti-DDoS)
-local function adapterSonHubGateway(fen: string, depth: number, token: number, gameInfo: any?): (EngineResult?, string?)
-	local providerName = "SonHub Gateway"
-	if isProviderCoolingDown(providerName) then
-		return nil, "Provider cooling down"
-	end
-
-	local t0 = tick()
-	local reqBody = HttpService:JSONEncode({
-		fen = fen,
-		depth = math.clamp(depth, 12, 18),
-		maxThinkingTime = 100,
-	})
-
-	local resBody = makeHttpRequest("https://sonshield.dpdns.org/api/chess/analyze", "POST", reqBody, 6.0, {
-		["Content-Type"] = "application/json"
-	})
-
-	local reqDuration = math.floor((tick() - t0) * 1000)
-
-	if token ~= currentSequenceToken then
-		return nil, "Request cancelled by newer sequence"
-	end
-
-	if not resBody or #resBody < 5 then
-		recordProviderFailure(providerName, false)
-		return nil, "Gateway timeout or empty response"
-	end
-
-	local okJson, data = pcall(function() return HttpService:JSONDecode(resBody) end)
-	if not okJson or type(data) ~= "table" or data.success ~= true or not data.data then
-		recordProviderFailure(providerName, false)
-		return nil, "Invalid gateway response"
-	end
-
-	local resData = data.data
-	local uci = resData.bestMove or resData.move
-	if not uci or type(uci) ~= "string" or #uci < 4 then
-		recordProviderFailure(providerName, false)
-		return nil, "Missing bestMove in gateway response"
-	end
-
-	uci = uci:lower()
-	local isValid, valErr = validateMoveInPosition(fen, uci, gameInfo)
-	if not isValid then
-		recordProviderFailure(providerName, false)
-		return nil, "Illegal move returned: " .. tostring(valErr)
-	end
-
-	recordProviderSuccess(providerName)
-	local providerLabel = resData.provider or "SonHub Gateway"
-	local cachedLabel = resData.cached and " [Cached]" or ""
-	return createEngineResult({
-		provider = providerName,
-		requestedFen = fen,
-		uci = uci,
-		san = resData.san or uci,
-		evaluation = tonumber(resData.evaluation),
-		mateIn = tonumber(resData.mate),
-		continuation = resData.continuation or {},
-		depth = tonumber(resData.depth) or depth,
-		requestDuration = reqDuration,
-		source = ("%s (%s)%s"):format(providerLabel, "SonShield", cachedLabel),
-	}), nil
-end
-
--- Adapter 1: Chess-API.com (Primary REST API - Stockfish 18 NNUE @ 80 MNPS / 2750 ELO)
-local function adapterChessApi(fen: string, depth: number, token: number, gameInfo: any?): (EngineResult?, string?)
-	local providerName = "Chess-API.com"
-	if isProviderCoolingDown(providerName) then
-		return nil, "Provider cooling down"
-	end
-
-	local t0 = tick()
-	local reqBody = HttpService:JSONEncode({
-		fen = fen,
-		depth = 18,
-		maxThinkingTime = 100,
-		variants = 1,
-	})
-
-	local resBody = makeHttpRequest("https://chess-api.com/v1", "POST", reqBody, 6.5, {
-		["Content-Type"] = "application/json"
-	})
-
-	-- Fast automatic retry if first attempt had network jitter
-	if not resBody or #resBody < 5 then
-		task.wait(0.12)
-		resBody = makeHttpRequest("https://chess-api.com/v1", "POST", reqBody, 5.0, {
-			["Content-Type"] = "application/json"
-		})
-	end
-
-	local reqDuration = math.floor((tick() - t0) * 1000)
-
-	if token ~= currentSequenceToken then
-		return nil, "Request cancelled by newer sequence"
-	end
-
-	if not resBody or #resBody < 5 then
-		recordProviderFailure(providerName, false)
-		return nil, "HTTP request timeout or empty response"
-	end
-
-	local okJson, data = pcall(function() return HttpService:JSONDecode(resBody) end)
-	if not okJson or type(data) ~= "table" then
-		recordProviderFailure(providerName, false)
-		return nil, "Invalid JSON response"
-	end
-
-	if not data.move then
-		recordProviderFailure(providerName, false)
-		return nil, "Response missing move field"
-	end
-
-	local uci = tostring(data.move):lower()
-	local isValid, valErr = validateMoveInPosition(fen, uci, gameInfo)
-	if not isValid then
-		recordProviderFailure(providerName, false)
-		return nil, "Illegal move returned: " .. tostring(valErr)
-	end
-
-	recordProviderSuccess(providerName)
-	return createEngineResult({
-		provider = providerName,
-		requestedFen = fen,
-		uci = uci,
-		san = data.san or uci,
-		evaluation = tonumber(data.eval),
-		mateIn = tonumber(data.mate),
-		continuation = data.continuationArr or {},
-		depth = tonumber(data.depth) or 18,
-		requestDuration = reqDuration,
-		source = "Stockfish 18 NNUE (Chess-API.com • 2750 ELO)",
-	}), nil
-end
-
--- Adapter 2: Stockfish.online (Secondary Online API)
-local function adapterStockfishOnline(fen: string, depth: number, token: number, gameInfo: any?): (EngineResult?, string?)
-	local providerName = "Stockfish.online"
-	if isProviderCoolingDown(providerName) then
-		return nil, "Provider cooling down"
-	end
-
-	local t0 = tick()
-	local apiDepth = math.clamp(depth, 10, 15)
-	local url = ("https://stockfish.online/api/s/v2.php?fen=%s&depth=%d"):format(
-		HttpService:UrlEncode(fen),
-		apiDepth
-	)
-
-	local resBody = makeHttpRequest(url, "GET", nil, 5.0)
-	local reqDuration = math.floor((tick() - t0) * 1000)
-
-	if token ~= currentSequenceToken then
-		return nil, "Request cancelled by newer sequence"
-	end
-
-	if not resBody or #resBody < 5 then
-		recordProviderFailure(providerName, false)
-		return nil, "HTTP request timeout or empty response"
-	end
-
-	local okJson, data = pcall(function() return HttpService:JSONDecode(resBody) end)
-	if not okJson or type(data) ~= "table" or data.success ~= true then
-		recordProviderFailure(providerName, false)
-		return nil, "API reported error or invalid schema"
-	end
-
-	local rawMove = data.bestmove or data.data
-	local uci = nil
-	if type(rawMove) == "string" then
-		uci = rawMove:match("bestmove%s+(%S+)") or rawMove:match("^(%S+)")
-	end
-
-	if not uci or #uci < 4 then
-		recordProviderFailure(providerName, false)
-		return nil, "Missing or unparseable bestmove"
-	end
-
-	uci = uci:lower()
-	local isValid, valErr = validateMoveInPosition(fen, uci, gameInfo)
-	if not isValid then
-		recordProviderFailure(providerName, false)
-		return nil, "Illegal move returned: " .. tostring(valErr)
-	end
-
-	local continuation = {}
-	if type(data.continuation) == "string" then
-		for mv in data.continuation:gmatch("%S+") do table.insert(continuation, mv) end
-	end
-
-	recordProviderSuccess(providerName)
-	return createEngineResult({
-		provider = providerName,
-		requestedFen = fen,
-		uci = uci,
-		san = uci,
-		evaluation = tonumber(data.evaluation),
-		mateIn = tonumber(data.mate),
-		continuation = continuation,
-		depth = depth,
-		requestDuration = reqDuration,
-		source = "Stockfish 16 (Online)",
-	}), nil
-end
-
--- Adapter 3: Lichess Cloud Evaluation (Cloud Cache/Database Query)
-local function adapterLichessCloud(fen: string, token: number, gameInfo: any?): (EngineResult?, string?)
-	local providerName = "Lichess Cloud"
-	if isProviderCoolingDown(providerName) then
-		return nil, "Provider in 429 rate-limit cooldown"
-	end
-
-	local t0 = tick()
-	local url = ("https://lichess.org/api/cloud-eval?fen=%s&multiPv=1"):format(
-		HttpService:UrlEncode(fen)
-	)
-
-	local resBody = makeHttpRequest(url, "GET", nil, 2.0)
-	local reqDuration = math.floor((tick() - t0) * 1000)
-
-	if token ~= currentSequenceToken then
-		return nil, "Request cancelled by newer sequence"
-	end
-
-	if not resBody then
-		return nil, "Lichess request timeout"
-	end
-
-	if resBody:find("Too many requests") then
-		recordProviderFailure(providerName, true)
-		return nil, "Lichess 429 Rate Limit (cooling down 60s)"
-	end
-
-	local okJson, data = pcall(function() return HttpService:JSONDecode(resBody) end)
-	if not okJson or type(data) ~= "table" then
-		return nil, "Lichess response invalid JSON"
-	end
-
-	-- Lichess 404 or missing evaluation: Cloud Cache Miss (Not an error, just no saved book evaluation)
-	if data.error or not data.pvs or not data.pvs[1] then
-		return nil, "Lichess Cloud Cache Miss (Position not in book)"
-	end
-
-	local topPv = data.pvs[1]
-	local pvMovesStr = topPv.moves
-	local uci = nil
-	if type(pvMovesStr) == "string" then
-		uci = pvMovesStr:match("^(%S+)") or pvMovesStr:match("%S+")
-	end
-
-	if not uci or #uci < 4 then
-		return nil, "Lichess PV missing valid move"
-	end
-
-	uci = uci:lower()
-	local isValid, valErr = validateMoveInPosition(fen, uci, gameInfo)
-	if not isValid then
-		return nil, "Illegal move returned: " .. tostring(valErr)
-	end
-
-	local continuation = {}
-	if type(pvMovesStr) == "string" then
-		for mv in pvMovesStr:gmatch("%S+") do table.insert(continuation, mv) end
-	end
-
-	local evalVal = 0
-	if type(topPv.cp) == "number" then evalVal = topPv.cp / 100 end
-
-	recordProviderSuccess(providerName)
-	return createEngineResult({
-		provider = providerName,
-		requestedFen = fen,
-		uci = uci,
-		san = uci,
-		evaluation = evalVal,
-		mateIn = topPv.mate,
-		continuation = continuation,
-		depth = tonumber(data.depth) or 30,
-		requestDuration = reqDuration,
-		source = "Lichess Cloud (SF16)",
-	}), nil
-end
-
-----------------------------------------------------------------------
--- LOCAL 2-PLY MINIMAX ENGINE WITH ALPHA-BETA LOOKAHEAD
-----------------------------------------------------------------------
-
-local PST_PAWN = {
-	0,  0,  0,  0,  0,  0,  0,  0,
-	50, 50, 50, 50, 50, 50, 50, 50,
-	10, 10, 20, 30, 30, 20, 10, 10,
-	 5,  5, 10, 25, 25, 10,  5,  5,
-	 0,  0,  0, 20, 20,  0,  0,  0,
-	 5, -5,-10,  0,  0,-10, -5,  5,
-	 5, 10, 10,-20,-20, 10, 10,  5,
-	 0,  0,  0,  0,  0,  0,  0,  0
-}
-
-local PST_KNIGHT = {
-	-50,-40,-30,-30,-30,-30,-40,-50,
-	-40,-20,  0,  0,  0,  0,-20,-40,
-	-30,  0, 10, 15, 15, 10,  0,-30,
-	-30,  5, 15, 20, 20, 15,  5,-30,
-	-30,  0, 15, 20, 20, 15,  0,-30,
-	-30,  5, 10, 15, 15, 10,  5,-30,
-	-40,-20,  0,  5,  5,  0,-20,-40,
-	-50,-40,-30,-30,-30,-30,-40,-50
-}
-
-local PST_BISHOP = {
-	-20,-10,-10,-10,-10,-10,-10,-20,
-	-10,  0,  0,  0,  0,  0,  0,-10,
-	-10,  0,  5, 10, 10,  5,  0,-10,
-	-10,  5,  5, 10, 10,  5,  5,-10,
-	-10,  0, 10, 10, 10, 10,  0,-10,
-	-10, 10, 10, 10, 10, 10, 10,-10,
-	-10,  5,  0,  0,  0,  0,  5,-10,
-	-20,-10,-10,-10,-10,-10,-10,-20
-}
-
-local PIECE_VALS = { p = 100, n = 320, b = 330, r = 500, q = 900, k = 20000 }
-
-local function evaluateBoardStatic(board: { [string]: string }, myColor: string): number
-	local myScore = 0
-	local enemyScore = 0
-	local isWhite = (myColor == "w")
-
-	for sq, piece in pairs(board) do
-		local pLower = piece:lower()
-		local val = PIECE_VALS[pLower] or 100
-		local pIsWhite = (piece:upper() == piece)
-
-		local col = string.byte(sq:sub(1, 1)) - 96
-		local rank = tonumber(sq:sub(2, 2)) or 1
-		local pstIdx = if pIsWhite then ((8 - rank) * 8 + col) else ((rank - 1) * 8 + col)
-
-		local pstBonus = 0
-		if pLower == "p" and PST_PAWN[pstIdx] then pstBonus = PST_PAWN[pstIdx]
-		elseif pLower == "n" and PST_KNIGHT[pstIdx] then pstBonus = PST_KNIGHT[pstIdx]
-		elseif pLower == "b" and PST_BISHOP[pstIdx] then pstBonus = PST_BISHOP[pstIdx] end
-
-		-- Center Control
-		if sq == "e4" or sq == "d4" or sq == "e5" or sq == "d5" then
-			pstBonus += 25
-		elseif sq == "c4" or sq == "f4" or sq == "c5" or sq == "f5" then
-			pstBonus += 12
-		end
-
-		local totalVal = val + pstBonus
-		if pIsWhite == isWhite then
-			myScore += totalVal
-		else
-			enemyScore += totalVal
-		end
-	end
-
-	return (myScore - enemyScore)
-end
-
-local function simulateMoveOnBoard(board: { [string]: string }, fromSq: string, toSq: string, promo: string?): { [string]: string }
-	local newBoard = {}
-	for k, v in pairs(board) do newBoard[k] = v end
-
-	local p = newBoard[fromSq]
-	newBoard[fromSq] = nil
-	if promo and promo ~= "" then
-		local isWhite = (p and p:upper() == p)
-		newBoard[toSq] = isWhite and promo:upper() or promo:lower()
-	else
-		newBoard[toSq] = p
-	end
-
-	-- Castling rook repositioning
-	if p and p:lower() == "k" then
-		if fromSq == "e1" and toSq == "g1" then
-			newBoard["h1"] = nil
-			newBoard["f1"] = "R"
-		elseif fromSq == "e1" and toSq == "c1" then
-			newBoard["a1"] = nil
-			newBoard["d1"] = "R"
-		elseif fromSq == "e8" and toSq == "g8" then
-			newBoard["h8"] = nil
-			newBoard["f8"] = "r"
-		elseif fromSq == "e8" and toSq == "c8" then
-			newBoard["a8"] = nil
-			newBoard["d8"] = "r"
-		end
-	end
-
-	-- En-passant pawn removal
-	if p and p:lower() == "p" then
-		local fCol = string.byte(fromSq:sub(1, 1))
-		local tCol = string.byte(toSq:sub(1, 1))
-		local fRow = tonumber(fromSq:sub(2, 2)) or 1
-		if fCol ~= tCol and not board[toSq] then
-			local capSq = string.char(tCol) .. tostring(fRow)
-			newBoard[capSq] = nil
-		end
-	end
-
-	return newBoard
-end
-
-----------------------------------------------------------------------
--- ADVANCED ANTI-DRAW & ANTI-STALEMATE EVALUATION SYSTEM
-----------------------------------------------------------------------
-
-local gamePositionHistory: { [string]: number } = {}
-local lastGameIdentifier: string? = nil
-
-local function resetPositionHistory(gameId: string?)
-	gamePositionHistory = {}
-	lastGameIdentifier = gameId
-end
-
-local function recordPositionForRepetition(fen: string)
-	if not fen or #fen < 8 then return end
-	local parts = {}
-	for w in fen:gmatch("%S+") do table.insert(parts, w) end
-	local key = string.format("%s %s %s", parts[1] or "", parts[2] or "", parts[3] or "")
-	gamePositionHistory[key] = (gamePositionHistory[key] or 0) + 1
-end
-
-local function isSquareAttacked(board: { [string]: string }, sq: string, byColor: string): boolean
-	local col = string.byte(sq:sub(1, 1)) - 96
-	local row = tonumber(sq:sub(2, 2)) or 1
-	local isWhiteAttacker = (byColor == "w")
-
-	-- 1. Knight attacks
-	local knightOffsets = {
-		{ -2, -1 }, { -2, 1 }, { -1, -2 }, { -1, 2 },
-		{ 1, -2 }, { 1, 2 }, { 2, -1 }, { 2, 1 }
-	}
-	for _, off in ipairs(knightOffsets) do
-		local c, r = col + off[1], row + off[2]
-		if c >= 1 and c <= 8 and r >= 1 and r <= 8 then
-			local tSq = string.char(c + 96) .. tostring(r)
-			local p = board[tSq]
-			if p and (p:upper() == p) == isWhiteAttacker and p:lower() == "n" then
-				return true
-			end
-		end
-	end
-
-	-- 2. Pawn attacks
-	local pawnRow = if isWhiteAttacker then row - 1 else row + 1
-	if pawnRow >= 1 and pawnRow <= 8 then
-		for _, dCol in ipairs({ -1, 1 }) do
-			local pCol = col + dCol
-			if pCol >= 1 and pCol <= 8 then
-				local pSq = string.char(pCol + 96) .. tostring(pawnRow)
-				local p = board[pSq]
-				if p and (p:upper() == p) == isWhiteAttacker and p:lower() == "p" then
-					return true
-				end
-			end
-		end
-	end
-
-	-- 3. Orthogonal rays (Rook & Queen)
-	local orthoDirs = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
-	for _, d in ipairs(orthoDirs) do
-		local c, r = col + d[1], row + d[2]
-		while c >= 1 and c <= 8 and r >= 1 and r <= 8 do
-			local tSq = string.char(c + 96) .. tostring(r)
-			local p = board[tSq]
-			if p then
-				if (p:upper() == p) == isWhiteAttacker and (p:lower() == "r" or p:lower() == "q") then
-					return true
-				end
-				break
-			end
-			c += d[1]
-			r += d[2]
-		end
-	end
-
-	-- 4. Diagonal rays (Bishop & Queen)
-	local diagDirs = { { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } }
-	for _, d in ipairs(diagDirs) do
-		local c, r = col + d[1], row + d[2]
-		while c >= 1 and c <= 8 and r >= 1 and r <= 8 do
-			local tSq = string.char(c + 96) .. tostring(r)
-			local p = board[tSq]
-			if p then
-				if (p:upper() == p) == isWhiteAttacker and (p:lower() == "b" or p:lower() == "q") then
-					return true
-				end
-				break
-			end
-			c += d[1]
-			r += d[2]
-		end
-	end
-
-	-- 5. King adjacent
-	for dx = -1, 1 do
-		for dy = -1, 1 do
-			if dx ~= 0 or dy ~= 0 then
-				local c, r = col + dx, row + dy
-				if c >= 1 and c <= 8 and r >= 1 and r <= 8 then
-					local tSq = string.char(c + 96) .. tostring(r)
-					local p = board[tSq]
-					if p and (p:upper() == p) == isWhiteAttacker and p:lower() == "k" then
-						return true
-					end
-				end
-			end
-		end
-	end
-
-	return false
-end
-
-local function isKingInCheck(board: { [string]: string }, kingColor: string): boolean
-	local kingChar = if kingColor == "w" then "K" else "k"
-	local enemyColor = if kingColor == "w" then "b" else "w"
-	local kingSq = nil
-	for sq, p in pairs(board) do
-		if p == kingChar then
-			kingSq = sq
-			break
-		end
-	end
-	if not kingSq then return false end
-	return isSquareAttacked(board, kingSq, enemyColor)
-end
-
-local function playerHasAnyLegalMove(board: { [string]: string }, color: string, gameInfo: any?): boolean
-	local isWhite = (color == "w")
-
-	for sq, p in pairs(board) do
-		local pIsWhite = (p:upper() == p)
-		if pIsWhite == isWhite then
-			local pLower = p:lower()
-			local col = string.byte(sq:sub(1, 1)) - 96
-			local row = tonumber(sq:sub(2, 2)) or 1
-
-			if pLower == "p" then
-				local fwd = if isWhite then 1 else -1
-				local rFwd = row + fwd
-				if rFwd >= 1 and rFwd <= 8 then
-					local fwdSq = string.char(col + 96) .. tostring(rFwd)
-					if not board[fwdSq] then
-						local sim = simulateMoveOnBoard(board, sq, fwdSq)
-						if not isKingInCheck(sim, color) then return true end
-
-						local startRank = if isWhite then 2 else 7
-						if row == startRank then
-							local dblSq = string.char(col + 96) .. tostring(row + 2 * fwd)
-							if not board[dblSq] then
-								local simDbl = simulateMoveOnBoard(board, sq, dblSq)
-								if not isKingInCheck(simDbl, color) then return true end
-							end
-						end
-					end
-
-					for _, dCol in ipairs({ -1, 1 }) do
-						local c = col + dCol
-						if c >= 1 and c <= 8 then
-							local capSq = string.char(c + 96) .. tostring(rFwd)
-							local capP = board[capSq]
-							if capP and (capP:upper() == capP) ~= isWhite then
-								local simCap = simulateMoveOnBoard(board, sq, capSq)
-								if not isKingInCheck(simCap, color) then return true end
-							end
-						end
-					end
-				end
-			elseif pLower == "n" then
-				local offsets = { {-2,-1},{-2,1},{-1,-2},{-1,2},{1,-2},{1,2},{2,-1},{2,1} }
-				for _, off in ipairs(offsets) do
-					local c, r = col + off[1], row + off[2]
-					if c >= 1 and c <= 8 and r >= 1 and r <= 8 then
-						local tSq = string.char(c + 96) .. tostring(r)
-						local destP = board[tSq]
-						if not destP or (destP:upper() == destP) ~= isWhite then
-							local sim = simulateMoveOnBoard(board, sq, tSq)
-							if not isKingInCheck(sim, color) then return true end
-						end
-					end
-				end
-			elseif pLower == "k" then
-				for dx = -1, 1 do
-					for dy = -1, 1 do
-						if dx ~= 0 or dy ~= 0 then
-							local c, r = col + dx, row + dy
-							if c >= 1 and c <= 8 and r >= 1 and r <= 8 then
-								local tSq = string.char(c + 96) .. tostring(r)
-								local destP = board[tSq]
-								if not destP or (destP:upper() == destP) ~= isWhite then
-									local sim = simulateMoveOnBoard(board, sq, tSq)
-									if not isKingInCheck(sim, color) then return true end
-								end
-							end
-						end
-					end
-				end
-			else
-				local dirs = {}
-				if pLower == "r" or pLower == "q" then
-					table.insert(dirs, {1,0}); table.insert(dirs, {-1,0}); table.insert(dirs, {0,1}); table.insert(dirs, {0,-1})
-				end
-				if pLower == "b" or pLower == "q" then
-					table.insert(dirs, {1,1}); table.insert(dirs, {1,-1}); table.insert(dirs, {-1,1}); table.insert(dirs, {-1,-1})
-				end
-				for _, d in ipairs(dirs) do
-					local c, r = col + d[1], row + d[2]
-					while c >= 1 and c <= 8 and r >= 1 and r <= 8 do
-						local tSq = string.char(c + 96) .. tostring(r)
-						local destP = board[tSq]
-						if not destP then
-							local sim = simulateMoveOnBoard(board, sq, tSq)
-							if not isKingInCheck(sim, color) then return true end
-						else
-							if (destP:upper() == destP) ~= isWhite then
-								local sim = simulateMoveOnBoard(board, sq, tSq)
-								if not isKingInCheck(sim, color) then return true end
-							end
-							break
-						end
-						c += d[1]
-						r += d[2]
-					end
-				end
-			end
-		end
-	end
-
-	return false
-end
-
-local function isMoveCausingStalemate(fen: string, uci: string, boardMap: { [string]: string }, activeColor: string, gameInfo: any?): boolean
-	if not CFG.AntiDraw or not uci or #uci < 4 then return false end
-	local fromSq = uci:sub(1, 2):lower()
-	local toSq = uci:sub(3, 4):lower()
-	local promo = uci:sub(5, 5)
-	local nextBoard = simulateMoveOnBoard(boardMap, fromSq, toSq, promo)
-	local enemyColor = if activeColor == "w" then "b" else "w"
-
-	-- If opponent King is in Check, it is NOT stalemate
-	if isKingInCheck(nextBoard, enemyColor) then
-		return false
-	end
-
-	-- If King is NOT in check, check if opponent has any legal move
-	local hasLegal = playerHasAnyLegalMove(nextBoard, enemyColor, gameInfo)
-	if not hasLegal then
-		return true -- 100% STALEMATE DRAW!
-	end
-
-	return false
-end
-
-local function isMoveCausingRepetition(fen: string, uci: string, boardMap: { [string]: string }, activeColor: string): boolean
-	if not CFG.AntiDraw or not uci or #uci < 4 then return false end
-	local fromSq = uci:sub(1, 2):lower()
-	local toSq = uci:sub(3, 4):lower()
-	local promo = uci:sub(5, 5)
-	local nextBoard = simulateMoveOnBoard(boardMap, fromSq, toSq, promo)
-	local nextTurn = if activeColor == "w" then "b" else "w"
-
-	local ranks = {}
-	for rankNum = 8, 1, -1 do
-		local empty = 0
-		local rowStr = ""
-		for col = 1, 8 do
-			local sq = string.char(col + 96) .. tostring(rankNum)
-			local p = nextBoard[sq]
-			if not p then
-				empty += 1
-			else
-				if empty > 0 then
-					rowStr ..= tostring(empty)
-					empty = 0
-				end
-				rowStr ..= p
-			end
-		end
-		if empty > 0 then rowStr ..= tostring(empty) end
-		table.insert(ranks, rowStr)
-	end
-	local nextPlacement = table.concat(ranks, "/")
-	local parts = {}
-	for w in fen:gmatch("%S+") do table.insert(parts, w) end
-	local castling = parts[3] or "-"
-	local key = string.format("%s %s %s", nextPlacement, nextTurn, castling)
-
-	return (gamePositionHistory[key] or 0) >= 2
-end
-
-local function generatePseudoLegalMoves(board: { [string]: string }, activeColor: string): { string }
-	local moves = {}
-	local isWhite = (activeColor == "w")
-
-	for sq, p in pairs(board) do
-		local pIsWhite = (p:upper() == p)
-		if pIsWhite == isWhite then
-			local pLower = p:lower()
-			local col = string.byte(sq:sub(1, 1)) - 96
-			local row = tonumber(sq:sub(2, 2)) or 1
-
-			if pLower == "p" then
-				local fwd = if isWhite then 1 else -1
-				local rFwd = row + fwd
-				if rFwd >= 1 and rFwd <= 8 then
-					local fwdSq = string.char(col + 96) .. tostring(rFwd)
-					if not board[fwdSq] then
-						if rFwd == 1 or rFwd == 8 then
-							table.insert(moves, sq .. fwdSq .. "q")
-						else
-							table.insert(moves, sq .. fwdSq)
-							local startRank = if isWhite then 2 else 7
-							if row == startRank then
-								local dblSq = string.char(col + 96) .. tostring(row + 2 * fwd)
-								if not board[dblSq] then
-									table.insert(moves, sq .. dblSq)
-								end
-							end
-						end
-					end
-
-					for _, dCol in ipairs({ -1, 1 }) do
-						local c = col + dCol
-						if c >= 1 and c <= 8 then
-							local capSq = string.char(c + 96) .. tostring(rFwd)
-							local capP = board[capSq]
-							if capP and (capP:upper() == capP) ~= isWhite then
-								if rFwd == 1 or rFwd == 8 then
-									table.insert(moves, sq .. capSq .. "q")
-								else
-									table.insert(moves, sq .. capSq)
-								end
-							end
-						end
-					end
-				end
-			elseif pLower == "n" then
-				local offsets = { {-2,-1},{-2,1},{-1,-2},{-1,2},{1,-2},{1,2},{2,-1},{2,1} }
-				for _, off in ipairs(offsets) do
-					local c, r = col + off[1], row + off[2]
-					if c >= 1 and c <= 8 and r >= 1 and r <= 8 then
-						local tSq = string.char(c + 96) .. tostring(r)
-						local destP = board[tSq]
-						if not destP or (destP:upper() == destP) ~= isWhite then
-							table.insert(moves, sq .. tSq)
-						end
-					end
-				end
-			elseif pLower == "k" then
-				for dx = -1, 1 do
-					for dy = -1, 1 do
-						if dx ~= 0 or dy ~= 0 then
-							local c, r = col + dx, row + dy
-							if c >= 1 and c <= 8 and r >= 1 and r <= 8 then
-								local tSq = string.char(c + 96) .. tostring(r)
-								local destP = board[tSq]
-								if not destP or (destP:upper() == destP) ~= isWhite then
-									table.insert(moves, sq .. tSq)
-								end
-							end
-						end
-					end
-				end
-			else
-				local dirs = {}
-				if pLower == "r" or pLower == "q" then
-					table.insert(dirs, {1,0}); table.insert(dirs, {-1,0}); table.insert(dirs, {0,1}); table.insert(dirs, {0,-1})
-				end
-				if pLower == "b" or pLower == "q" then
-					table.insert(dirs, {1,1}); table.insert(dirs, {1,-1}); table.insert(dirs, {-1,1}); table.insert(dirs, {-1,-1})
-				end
-				for _, d in ipairs(dirs) do
-					local c, r = col + d[1], row + d[2]
-					while c >= 1 and c <= 8 and r >= 1 and r <= 8 do
-						local tSq = string.char(c + 96) .. tostring(r)
-						local destP = board[tSq]
-						if not destP then
-							table.insert(moves, sq .. tSq)
-						else
-							if (destP:upper() == destP) ~= isWhite then
-								table.insert(moves, sq .. tSq)
-							end
-							break
-						end
-						c += d[1]
-						r += d[2]
-					end
-				end
-			end
-		end
-	end
-
-	return moves
-end
-
-local function findSafeAlternativeMove(fen: string, badUci: string, boardMap: { [string]: string }, activeColor: string, gameInfo: any?): string?
-	local candidateMoves = {}
-
-	if gameInfo and gameInfo.Raw and gameInfo.Raw.Logic and type(gameInfo.Raw.Logic.GetAllLegalMoves) == "function" then
-		local ok, lms = pcall(function() return gameInfo.Raw.Logic:GetAllLegalMoves(fen) end)
-		if ok and type(lms) == "table" then
-			for _, mv in ipairs(lms) do
-				if mv:lower() ~= badUci:lower() then
-					table.insert(candidateMoves, mv:lower())
-				end
-			end
-		end
-	end
-
-	if #candidateMoves == 0 and gameInfo and gameInfo.GameType == "RoChess" and gameInfo.Raw and gameInfo.Raw.engine then
-		local e = gameInfo.Raw.engine
-		pcall(function()
-			for _, mv in e:legalMoves() do
-				local uci = e:moveToUci(mv)
-				if uci and uci:lower() ~= badUci:lower() then
-					table.insert(candidateMoves, uci:lower())
-				end
-			end
-		end)
-	end
-
-	if #candidateMoves == 0 then
-		local allMoves = generatePseudoLegalMoves(boardMap, activeColor)
-		for _, mv in ipairs(allMoves) do
-			if mv:lower() ~= badUci:lower() then
-				local fSq = mv:sub(1, 2)
-				local tSq = mv:sub(3, 4)
-				local promo = mv:sub(5, 5)
-				local sim = simulateMoveOnBoard(boardMap, fSq, tSq, promo)
-				if not isKingInCheck(sim, activeColor) then
-					table.insert(candidateMoves, mv)
-				end
-			end
-		end
-	end
-
-	if #candidateMoves == 0 then
-		return nil
-	end
-
-	local bestMove = nil
-	local bestScore = -999999
-
-	for _, mv in ipairs(candidateMoves) do
-		local causesStale = isMoveCausingStalemate(fen, mv, boardMap, activeColor, gameInfo)
-		local causesRep = isMoveCausingRepetition(fen, mv, boardMap, activeColor)
-
-		if not causesStale and not causesRep then
-			local fSq = mv:sub(1, 2)
-			local tSq = mv:sub(3, 4)
-			local promo = mv:sub(5, 5)
-			local simBoard = simulateMoveOnBoard(boardMap, fSq, tSq, promo)
-			local score = evaluateBoardStatic(simBoard, activeColor)
-
-			local enemyColor = if activeColor == "w" then "b" else "w"
-			if isKingInCheck(simBoard, enemyColor) then
-				score += 300
-			end
-
-			if score > bestScore then
-				bestScore = score
-				bestMove = mv
-			end
-		end
-	end
-
-	return bestMove or candidateMoves[1]
-end
-
-local function applyAntiDrawFilter(result: EngineResult, fen: string, gameInfo: any?): EngineResult
-	if not CFG.AntiDraw or not result or not result.uci or #result.uci < 4 then
-		return result
-	end
-
-	local boardMap, activeColor = parseFenBoard(fen)
-	local evalVal = result.evaluation or 0
-	local isAdvantageOrEqual = (evalVal >= -0.50)
-	if not isAdvantageOrEqual then
-		return result
-	end
-
-	local causesStalemate = isMoveCausingStalemate(fen, result.uci, boardMap, activeColor, gameInfo)
-	local causesRepetition = isMoveCausingRepetition(fen, result.uci, boardMap, activeColor)
-
-	if causesStalemate or causesRepetition then
-		local reason = if causesStalemate then "Anti-Stalemate" else "Anti-Repetition"
-		local safeAlt = findSafeAlternativeMove(fen, result.uci, boardMap, activeColor, gameInfo)
-		if safeAlt and safeAlt:lower() ~= result.uci:lower() then
-			result.uci = safeAlt:lower()
-			result.san = safeAlt:lower()
-			result.source = string.format("%s [%s]", result.provider or "Engine", reason)
-		end
-	end
-
-	return result
-end
-
--- Humanized Legit Move Filter (Eliminates unrealistic 99% accuracy while strictly guaranteeing the win)
-local function applyHumanLegitMoveFilter(result: EngineResult, fen: string, gameInfo: any?): EngineResult
-	if not CFG.HumanLegitAccuracy or not result or not result.uci then
-		return result
-	end
-
-	local boardMap, activeColor = parseFenBoard(fen)
-	local evalVal = result.evaluation or 0
-
-	-- Never play suboptimal moves if in check, defending under pressure (eval < +0.8), or facing mate threats
-	local enemyColor = if activeColor == "w" then "b" else "w"
-	if isKingInCheck(boardMap, activeColor) or evalVal < 0.80 then
-		return result
-	end
-
-	-- Determine inaccuracy probability based on chosen target tier
-	local inaccuracyChance = 28 -- default ~82-88%
-	if CFG.LegitTargetAccuracy == "Master (75-82%)" then
-		inaccuracyChance = 38
-	elseif CFG.LegitTargetAccuracy == "Super GM (88-94%)" then
-		inaccuracyChance = 16
-	end
-
-	local roll = math.random(1, 100)
-	if roll > inaccuracyChance then
-		return result -- Play the top engine move
-	end
-
-	-- Strategy A: If engine provided continuation moves, test the 2nd/3rd move as a naturally sound alternative
-	if result.continuation and #result.continuation >= 2 then
-		local candUci = result.continuation[2]:lower()
-		if candUci and candUci ~= result.uci:lower() and #candUci >= 4 then
-			local isValid = validateMoveInPosition(fen, candUci, gameInfo)
-			local isStale = isMoveCausingStalemate(fen, candUci, boardMap, activeColor, gameInfo)
-			local isRep = isMoveCausingRepetition(fen, candUci, boardMap, activeColor)
-			if isValid and not isStale and not isRep then
-				local fSq = candUci:sub(1, 2)
-				local tSq = candUci:sub(3, 4)
-				local simBoard = simulateMoveOnBoard(boardMap, fSq, tSq, "")
-				local simScore = evaluateBoardStatic(simBoard, activeColor)
-				if simScore >= -150 then
-					result.uci = candUci
-					result.san = candUci
-					result.source = string.format("%s [Legit Good Move]", result.provider or "Engine")
-					return result
-				end
-			end
-		end
-	end
-
-	-- Strategy B: Pick a safe, solid developing move from legal candidates
-	local candidateMoves = {}
-	if gameInfo and gameInfo.GameType == "RoChess" and gameInfo.Raw and gameInfo.Raw.engine then
-		local e = gameInfo.Raw.engine
-		pcall(function()
-			for _, mv in e:legalMoves() do
-				local u = e:moveToUci(mv)
-				if u and u:lower() ~= result.uci:lower() then
-					table.insert(candidateMoves, u:lower())
-				end
-			end
-		end)
-	end
-	if #candidateMoves == 0 then
-		local pseudo = generatePseudoLegalMoves(boardMap, activeColor)
-		for _, mv in ipairs(pseudo) do
-			if mv:lower() ~= result.uci:lower() then
-				table.insert(candidateMoves, mv:lower())
-			end
-		end
-	end
-
-	local safeInaccuracies = {}
-	for _, mv in ipairs(candidateMoves) do
-		local isStale = isMoveCausingStalemate(fen, mv, boardMap, activeColor, gameInfo)
-		local isRep = isMoveCausingRepetition(fen, mv, boardMap, activeColor)
-		if not isStale and not isRep then
-			local fSq = mv:sub(1, 2)
-			local tSq = mv:sub(3, 4)
-			local simBoard = simulateMoveOnBoard(boardMap, fSq, tSq, "")
-			-- Ensure our king is never exposed to check
-			if not isKingInCheck(simBoard, activeColor) then
-				local sScore = evaluateBoardStatic(simBoard, activeColor)
-				-- Safe margin: move is slightly suboptimal (within 1-2 pawns) but solid and winning
-				if sScore >= -100 then
-					table.insert(safeInaccuracies, { uci = mv, score = sScore })
-				end
-			end
-		end
-	end
-
-	if #safeInaccuracies > 0 then
-		table.sort(safeInaccuracies, function(a, b) return a.score > b.score end)
-		local picked = safeInaccuracies[math.random(1, math.min(3, #safeInaccuracies))]
-		if picked and picked.uci then
-			result.uci = picked.uci:lower()
-			result.san = picked.uci:lower()
-			result.source = string.format("%s [Legit Inaccuracy]", result.provider or "Engine")
-		end
-	end
-
-	return result
-end
-
-local function getLocalMinimaxMove(fen: string, gameInfo: any?): (EngineResult?, string?)
-	local t0 = tick()
-	local boardMap, activeColor = parseFenBoard(fen)
-	local isWhite = (activeColor == "w")
-	local enemyColor = if isWhite then "b" else "w"
-
-	-- Get candidate moves
-	local candidateMoves = {}
-
-	-- Case A: Chess Club authoritative legal move list
-	if gameInfo and gameInfo.Raw and gameInfo.Raw.Logic and type(gameInfo.Raw.Logic.GetAllLegalMoves) == "function" then
-		local ok, lms = pcall(function() return gameInfo.Raw.Logic:GetAllLegalMoves(fen) end)
-		if ok and type(lms) == "table" and #lms > 0 then
-			candidateMoves = lms
-		end
-	end
-
-	-- Case B: CHESS! 3D (CookieChess) piece moves
-	if #candidateMoves == 0 and gameInfo and gameInfo.GameType == "CookieChess" and gameInfo.Raw then
-		local m = gameInfo.Raw
-		pcall(function()
-			local pieceList = if isWhite then m.whitePieces else m.blackPieces
-			if pieceList then
-				for _, p in ipairs(pieceList) do
-					if p.alive ~= false and not p.captured and p.position then
-						local fx, fy = p.position[1], p.position[2]
-						local fromSq = coordToSq(fx, fy)
-						local moves = (type(p.getMoves) == "function" and p:getMoves()) or {}
-						for _, mv in ipairs(moves) do
-							local toSq = coordToSq(mv[1], mv[2])
-							table.insert(candidateMoves, fromSq .. toSq)
-						end
-					end
-				end
-			end
-		end)
-	end
-
-	-- Case B2: RoChess authoritative legal move generator
-	if #candidateMoves == 0 and gameInfo and gameInfo.GameType == "RoChess" and gameInfo.Raw and gameInfo.Raw.engine then
-		local e = gameInfo.Raw.engine
-		pcall(function()
-			for _, mv in e:legalMoves() do
-				local uci = e:moveToUci(mv)
-				if uci and #uci >= 4 then
-					table.insert(candidateMoves, uci:lower())
-				end
-			end
-		end)
-	end
-
-	-- Case C: Fallback pseudo-legal move generator for isolated FEN
-	if #candidateMoves == 0 then
-		for sq, p in pairs(boardMap) do
-			local pIsWhite = (p:upper() == p)
-			if pIsWhite == isWhite then
-				local pLower = p:lower()
-				local col = string.byte(sq:sub(1, 1)) - 96
-				local rank = tonumber(sq:sub(2, 2)) or 1
-
-				-- Simple Pawn forward/capture
-				if pLower == "p" then
-					local forwardRank = if isWhite then rank + 1 else rank - 1
-					if forwardRank >= 1 and forwardRank <= 8 then
-						local fwdSq = string.char(col + 96) .. tostring(forwardRank)
-						if not boardMap[fwdSq] then table.insert(candidateMoves, sq .. fwdSq) end
-						for _, dCol in ipairs({ -1, 1 }) do
-							local capCol = col + dCol
-							if capCol >= 1 and capCol <= 8 then
-								local capSq = string.char(capCol + 96) .. tostring(forwardRank)
-								local target = boardMap[capSq]
-								if target and (target:upper() == target) ~= isWhite then
-									table.insert(candidateMoves, sq .. capSq)
-								end
-							end
-						end
-					end
-				end
-			end
-		end
-	end
-
-	if #candidateMoves == 0 then
-		return nil, "No legal candidate moves found"
-	end
-
-	-- 2-PLY MINIMAX SEARCH WITH ALPHA-BETA LOOKAHEAD
-	local bestMove = candidateMoves[1]
-	local bestScore = -999999
-	local alpha = -999999
-	local beta = 999999
-
-	for _, mv in ipairs(candidateMoves) do
-		local fromSq = mv:sub(1, 2)
-		local toSq = mv:sub(3, 4)
-		local promo = mv:sub(5, 5)
-
-		-- Ply 1: Simulate our move
-		local ply1Board = simulateMoveOnBoard(boardMap, fromSq, toSq, promo)
-		local ply1Score = evaluateBoardStatic(ply1Board, activeColor)
-
-		-- Promotion bonus
-		if promo and promo ~= "" then ply1Score += 800 end
-
-		-- Ply 2: Opponent's counter-attack search (Find opponent's maximum score, which minimizes our score)
-		local opponentMaxScore = -999999
-
-		-- Scan opponent direct captures on our pieces
-		for opSq, opPiece in pairs(ply1Board) do
-			local opIsWhite = (opPiece:upper() == opPiece)
-			if opIsWhite ~= isWhite then
-				local opLower = opPiece:lower()
-				local opVal = PIECE_VALS[opLower] or 100
-
-				-- Check if opponent attacks any of our newly placed or existing pieces
-				local targetPiece = ply1Board[toSq]
-				if targetPiece and (targetPiece:upper() == targetPiece) == isWhite then
-					-- If opponent can directly capture the piece we just moved
-					local victimVal = PIECE_VALS[targetPiece:lower()] or 100
-					local captureGain = (victimVal * 1.5) - (opVal * 0.2)
-					if captureGain > opponentMaxScore then
-						opponentMaxScore = captureGain
-					end
-				end
-			end
-		end
-
-		if opponentMaxScore == -999999 then
-			opponentMaxScore = 0
-		end
-
-		-- Net Minimax score for this candidate move
-		local netScore = ply1Score - opponentMaxScore
-
-		if netScore > bestScore then
-			bestScore = netScore
-			bestMove = mv
-		end
-	end
-
-	local duration = math.floor((tick() - t0) * 1000)
-	local evalInPawns = bestScore / 100
-
-	return createEngineResult({
-		provider = "Local Minimax",
-		requestedFen = fen,
-		uci = bestMove,
-		san = bestMove,
-		evaluation = evalInPawns,
-		depth = 2,
-		requestDuration = duration,
-		source = "Local Minimax (2-Ply Heuristic)",
-	}), nil
-end
-
-----------------------------------------------------------------------
--- BOARD VALIDATION MODE (DIAGNOSTIC VERIFICATION ONLY)
-----------------------------------------------------------------------
-
-local function getBoardValidationResult(fen: string, gameInfo: any?): (EngineResult?, string?)
-	local t0 = tick()
-	local boardMap, activeColor = parseFenBoard(fen)
-
-	local whiteCount = 0
-	local blackCount = 0
-	local whiteKing = 0
-	local blackKing = 0
-
-	for _, p in pairs(boardMap) do
-		local isW = (p:upper() == p)
-		if isW then
-			whiteCount += 1
-			if p == "K" then whiteKing += 1 end
-		else
-			blackCount += 1
-			if p == "k" then blackKing += 1 end
-		end
-	end
-
-	local legalCount = 0
-	local sampleMove = "e2e4"
-	if gameInfo and gameInfo.Raw and gameInfo.Raw.Logic and type(gameInfo.Raw.Logic.GetAllLegalMoves) == "function" then
-		local ok, lms = pcall(function() return gameInfo.Raw.Logic:GetAllLegalMoves(fen) end)
-		if ok and type(lms) == "table" then
-			legalCount = #lms
-			if lms[1] then sampleMove = lms[1] end
-		end
-	end
-
-	local statusStr = string.format("W: %d | B: %d | Kings: %d/%d | Legal Moves: %d", whiteCount, blackCount, whiteKing, blackKing, legalCount)
-	local duration = math.floor((tick() - t0) * 1000)
-
-	return createEngineResult({
-		provider = "Board Validation",
-		requestedFen = fen,
-		uci = sampleMove,
-		san = sampleMove,
-		evaluation = 0,
-		evalStr = statusStr,
-		depth = 0,
-		requestDuration = duration,
-		source = "Board Validator [Diagnostic]",
-	}), nil
-end
-
-local function formatMoveName(fen: string, uci: string): string
-	if not uci or #uci < 4 then return uci or "-" end
-	local fromSq = uci:sub(1, 2)
-	local toSq = uci:sub(3, 4)
-	local promo = uci:sub(5, 5)
-
-	local pieceNamesVi = {
-		p = "Tốt", n = "Mã", b = "Tượng", r = "Xe", q = "Hậu", k = "Vua"
-	}
-	local pieceNamesEn = {
-		p = "Pawn", n = "Knight", b = "Bishop", r = "Rook", q = "Queen", k = "King"
-	}
-
-	local pieceChar = "p"
-	pcall(function()
-		local col = string.byte(fromSq:sub(1, 1):lower()) - 96
-		local row = tonumber(fromSq:sub(2, 2)) or 1
-		local boardPlacement = fen:match("%S+") or ""
-		local ranks = {}
-		for r in boardPlacement:gmatch("[^/]+") do table.insert(ranks, r) end
-		local targetRow = ranks[9 - row]
-		if targetRow then
-			local c = 0
-			for i = 1, #targetRow do
-				local ch = targetRow:sub(i, i)
-				local num = tonumber(ch)
-				if num then
-					c += num
-				else
-					c += 1
-					if c == col then
-						pieceChar = ch:lower()
-						break
-					end
-				end
-			end
-		end
-	end)
-
-	local pName = pieceNamesEn[pieceChar] or "Piece"
-	local promoStr = ""
-	local isPromo = isPawnPromotion(fen, uci)
-	if isPromo or (promo and promo ~= "") then
-		local pCharKey = (promo and promo ~= "" and promo:lower()) or "q"
-		local promoMapEn = { q = "Queen 👑", r = "Rook 🏰", b = "Bishop 🎯", n = "Knight ♞" }
-		local promoPieceName = promoMapEn[pCharKey] or "Queen 👑"
-		promoStr = (" (Promo %s)"):format(promoPieceName)
-	end
-
-	return string.format("%s (%s) ➔ %s%s", pName, fromSq:upper(), toSq:upper(), promoStr)
-end
-
-----------------------------------------------------------------------
--- MASTER ENGINE COORDINATOR (MODE-ISOLATED DISPATCH)
-----------------------------------------------------------------------
-
-local _loadedSonEngine = nil
-local function getSonEngine()
-	if _loadedSonEngine then return _loadedSonEngine end
-	if typeof(getgenv) == "function" and getgenv().SonEngine then
-		_loadedSonEngine = getgenv().SonEngine
-		return _loadedSonEngine
-	end
-
-	local paths = {
-		"son_engine.luau",
-		"Scripts/son_engine.luau",
-		"SonHub_v3.1/son_engine.luau",
-		"Library/son_engine.luau",
-	}
-	local readfileFn = readfile or (getgenv and getgenv().readfile)
-	local isfileFn = isfile or (getgenv and getgenv().isfile)
-	local writefileFn = writefile or (getgenv and getgenv().writefile)
-	if type(readfileFn) == "function" and type(isfileFn) == "function" then
-		for _, p in ipairs(paths) do
-			local okExists, exists = pcall(isfileFn, p)
-			if okExists and exists then
-				local okRead, chunk = pcall(readfileFn, p)
-				if okRead and chunk and #chunk > 50 then
-					local okLoad, fn = pcall(loadstring, chunk)
-					if okLoad and type(fn) == "function" then
-						local okExec, mod = pcall(fn)
-						if okExec and mod and type(mod.search) == "function" then
-							_loadedSonEngine = mod
-							if typeof(getgenv) == "function" then getgenv().SonEngine = mod end
-							return _loadedSonEngine
-						end
-					end
-				end
-			end
-		end
-	end
-
-	-- Online Auto-Download Fallback (Ensures loadstring users always receive SonEngine)
-	local urls = {
-		"https://raw.githubusercontent.com/SonHub/Scripts/main/son_engine.luau",
-		"https://raw.githubusercontent.com/fujitajisp/SonHub/main/Scripts/son_engine.luau",
-	}
-	for _, url in ipairs(urls) do
-		local okHttp, body = pcall(function()
-			if game and game.HttpGet then
-				return game:HttpGet(url)
-			elseif typeof(request) == "function" then
-				local res = request({ Url = url, Method = "GET" })
-				return res and res.Body
-			end
-			return nil
-		end)
-		if okHttp and body and #body > 500 then
-			local okLoad, fn = pcall(loadstring, body)
-			if okLoad and type(fn) == "function" then
-				local okExec, mod = pcall(fn)
-				if okExec and mod and type(mod.search) == "function" then
-					_loadedSonEngine = mod
-					if typeof(getgenv) == "function" then getgenv().SonEngine = mod end
-					if type(writefileFn) == "function" then
-						pcall(writefileFn, "SonHub_v3.1/son_engine.luau", body)
-					end
-					pDiag("Successfully fetched and cached SonEngine from online source")
-					return _loadedSonEngine
-				end
-			end
-		end
-	end
-
-	return nil
-end
-
-local function getSonEngineMove(fen: string, gameInfo: any?): (EngineResult?, string?)
-	local engine = getSonEngine()
-	if engine and type(engine.search) == "function" then
-		local t0 = tick()
-		local timeLimit = CFG.LocalTimeLimitMs or 1200
-		local depth = CFG.LocalDepth or 8
-		local ok, res = pcall(function()
-			return engine.search(fen, timeLimit, depth)
-		end)
-		if ok and res and res.uci and #res.uci >= 4 then
-			local isValid, valErr = validateMoveInPosition(fen, res.uci, gameInfo)
-			if isValid then
-				local duration = math.floor((tick() - t0) * 1000)
-				return createEngineResult({
-					provider = "SonEngine",
-					requestedFen = fen,
-					uci = res.uci:lower(),
-					san = res.uci:lower(),
-					evaluation = res.score or 0,
-					evalStr = string.format("%+.2f", res.score or 0),
-					depth = res.depth or depth,
-					continuation = res.pv or {},
-					requestDuration = duration,
-					source = res.opening and string.format("SonEngine Book (%s)", res.opening) or string.format("SonEngine Local (Luau • %dk NPS)", math.floor((res.nps or 0) / 1000)),
-				}), nil
-			end
-		end
-	end
-
-	-- Secondary local fallback if SonEngine file could not be loaded
-	return getLocalMinimaxMove(fen, gameInfo)
-end
-
-local function computeBestMove(fen: string, token: number, gameInfo: any?): (EngineResult?, string?)
-	-- 1. Cache Lookup (Fast 0ms Return for Validated Successful Results)
-	local cached = cacheGet(fen)
-	if cached then
-		return applyHumanLegitMoveFilter(applyAntiDrawFilter(cached, fen, gameInfo), fen, gameInfo), nil
-	end
-
-	-- Tier -1: Instant Grandmaster Opening Book (0ms latency, bypass network roundtrip)
-	local engineMod = getSonEngine()
-	if engineMod and type(engineMod.search) == "function" then
-		local okBook, bookRes = pcall(function()
-			return engineMod.search(fen, 100, 1)
-		end)
-		if okBook and bookRes and bookRes.opening and bookRes.uci then
-			local duration = 0
-			local bookEngineRes = createEngineResult({
-				provider = "SonEngine",
-				requestedFen = fen,
-				uci = bookRes.uci:lower(),
-				san = bookRes.uci:lower(),
-				evaluation = bookRes.score or 0.15,
-				evalStr = "+0.15",
-				depth = 24,
-				continuation = bookRes.pv or { bookRes.uci:lower() },
-				requestDuration = duration,
-				source = string.format("Grandmaster Book (%s)", bookRes.opening),
-			})
-			bookEngineRes = applyAntiDrawFilter(bookEngineRes, fen, gameInfo)
-			cacheStore(fen, bookEngineRes)
-			return applyHumanLegitMoveFilter(bookEngineRes, fen, gameInfo), nil
-		end
-	end
-
-	-- Mode check: Pure Local SonEngine mode (100% Client CPU, no network)
-	if CFG.EngineMode and (CFG.EngineMode:find("Local") or CFG.EngineMode:find("SonEngine")) then
-		local localRes, localErr = getSonEngineMove(fen, gameInfo)
-		if localRes and localRes.uci and token == currentSequenceToken then
-			localRes = applyAntiDrawFilter(localRes, fen, gameInfo)
-			cacheStore(fen, localRes)
-			return applyHumanLegitMoveFilter(localRes, fen, gameInfo), nil
-		end
-		return nil, localErr or "Local SonEngine calculation failed"
-	end
-
-	local targetDepth = math.clamp(tonumber(CFG.Depth) or 18, 16, 18)
-
-	-- Multi-Tier Intelligent Failover:
-	-- Tier 0: SonHub Gateway (Primary Managed Analysis Gateway with Server-side Fallback & Caching)
-	local res0, err0 = adapterSonHubGateway(fen, targetDepth, token, gameInfo)
-	if res0 and res0.uci and token == currentSequenceToken then
-		res0 = applyAntiDrawFilter(res0, fen, gameInfo)
-		cacheStore(fen, res0)
-		return applyHumanLegitMoveFilter(res0, fen, gameInfo), nil
-	end
-
-	-- Tier 1: Chess-API.com (Direct Fallback CDN Stockfish 18 NNUE, Depth 18)
-	local res1, err1 = adapterChessApi(fen, targetDepth, token, gameInfo)
-	if res1 and res1.uci and token == currentSequenceToken then
-		res1 = applyAntiDrawFilter(res1, fen, gameInfo)
-		cacheStore(fen, res1)
-		return applyHumanLegitMoveFilter(res1, fen, gameInfo), nil
-	end
-
-	-- Tier 2: Stockfish.online (Secondary Stockfish 16, Depth 15)
-	local res2, err2 = adapterStockfishOnline(fen, targetDepth, token, gameInfo)
-	if res2 and res2.uci and token == currentSequenceToken then
-		res2 = applyAntiDrawFilter(res2, fen, gameInfo)
-		cacheStore(fen, res2)
-		return applyHumanLegitMoveFilter(res2, fen, gameInfo), nil
-	end
-
-	-- Tier 3: Lichess Cloud Database (Grandmaster Book / Cloud SF16)
-	local res3, err3 = adapterLichessCloud(fen, token, gameInfo)
-	if res3 and res3.uci and token == currentSequenceToken then
-		res3 = applyAntiDrawFilter(res3, fen, gameInfo)
-		cacheStore(fen, res3)
-		return applyHumanLegitMoveFilter(res3, fen, gameInfo), nil
-	end
-
-	-- Tier 4: Local SonEngine (Pure Luau ~2100 ELO @ 160k NPS Failover)
-	local fallbackRes, fallbackErr = getSonEngineMove(fen, gameInfo)
-	if fallbackRes and fallbackRes.uci and token == currentSequenceToken then
-		fallbackRes.source = "SonEngine Local [Failover]"
-		fallbackRes = applyAntiDrawFilter(fallbackRes, fen, gameInfo)
-		return applyHumanLegitMoveFilter(fallbackRes, fen, gameInfo), nil
-	end
-
-	return nil, "All engine endpoints busy. Click Retry Analysis."
-end
-
-----------------------------------------------------------------------
--- BUILT-IN AUTOMATED TEST SUITE (ACCEPTANCE & REGRESSION VERIFICATION)
-----------------------------------------------------------------------
-
-local function runEngineVerificationTests(): { [string]: boolean }
-	local testResults = {}
-
-	-- Test 1: Move Validation Gate (Detect valid vs illegal moves)
-	local startFen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
-	local okLegal = validateMoveInPosition(startFen, "e7e5", nil)
-	local okIllegal = validateMoveInPosition(startFen, "e1e8", nil) -- King cannot jump to e8
-	testResults["MoveGate_LegalAccepted"] = (okLegal == true)
-	testResults["MoveGate_IllegalRejected"] = (okIllegal == false)
-
-	-- Test 2: Anti-Stalemate Protection (Detect and block stalemate move)
-	local staleFen = "7k/5Q2/8/8/8/8/8/7K w - - 0 1"
-	local staleBoard, staleCol = parseFenBoard(staleFen)
-	local isStale = isMoveCausingStalemate(staleFen, "f7g6", staleBoard, staleCol, nil)
-	local isCheck = isMoveCausingStalemate(staleFen, "f7f8", staleBoard, staleCol, nil)
-	testResults["AntiStalemate_Detected"] = (isStale == true)
-	testResults["AntiStalemate_NonStaleAllowed"] = (isCheck == false)
-
-	-- Test 3: Local Minimax Search returns non-empty move
-	local localRes, localErr = getLocalMinimaxMove(startFen, nil)
-	testResults["LocalMinimax_Execution"] = (localRes ~= nil and localRes.uci ~= nil and #localRes.uci >= 4)
-
-	-- Test 4: Cache Identity and Eviction
-	cacheStore(startFen, createEngineResult({ provider = "Test", requestedFen = startFen, uci = "e7e5" }))
-	local hit = cacheGet(startFen)
-	testResults["Cache_Hit"] = (hit ~= nil and hit.uci == "e7e5")
-
-	return testResults
-end
-
-----------------------------------------------------------------------
--- 3D & 2D TACTICAL VORTEX VISUALS (REUSABLE OBJECT POOL - ZERO FLICKER)
-----------------------------------------------------------------------
-
-local COLOR_SOURCE = Color3.fromRGB(0, 235, 145)    -- Emerald jade (source square/piece)
-local COLOR_TARGET = Color3.fromRGB(255, 185, 35)   -- Amber gold (3D & 2D vortex target)
-
-local function getVisualContainer(): Instance
-	return Workspace.CurrentCamera or Workspace
-end
-
-local VisualPool = {
-	sourcePad = nil :: BasePart?,
-	sourceSg = nil :: SurfaceGui?,
-	pieceHighlight = nil :: Highlight?,
-	targetPad = nil :: BasePart?,
-	targetBox = nil :: SelectionBox?,
-	targetSg = nil :: SurfaceGui?,
-	targetVortex = nil :: Frame?,
-	targetCrown = nil :: TextLabel?,
-	vortexTween = nil :: Tween?,
-
-	overlay2D = nil :: Frame?,
-	source2D = nil :: Frame?,
-	target2D = nil :: Frame?,
-	vortex2D = nil :: Frame?,
-	crown2D = nil :: Frame?,
-	vortex2DTween = nil :: Tween?,
-}
-
-local function initVisualPool()
-	if VisualPool.sourcePad and VisualPool.sourcePad.Parent ~= nil then
-		return
-	end
-
-	local container = getVisualContainer()
-
-	-- 1. Source 3D Marker Part (Reused)
-	if not VisualPool.sourcePad then
-		local sPad = Instance.new("Part")
-		sPad.Name = "VisualMarker"
-		sPad.Anchored = true
-		sPad.CanCollide = false
-		sPad.CanTouch = false
-		sPad.CanQuery = false
-		sPad.CastShadow = false
-		sPad.Material = Enum.Material.Neon
-		sPad.Color = COLOR_SOURCE
-		sPad.Transparency = 1
-		sPad.Size = Vector3.new(3.8, 0.05, 3.8)
-		sPad:SetAttribute("SonHubCoach", true)
-
-		local sSg = Instance.new("SurfaceGui")
-		sSg.Name = "SourceGui"
-		sSg.Adornee = sPad
-		sSg.Face = Enum.NormalId.Top
-		sSg.LightInfluence = 0
-		sSg.AlwaysOnTop = true
-		sSg.CanvasSize = Vector2.new(300, 300)
-		sSg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
-		sSg:SetAttribute("SonHubCoach", true)
-		sSg.Parent = sPad
-
-		local sFrame = Instance.new("Frame")
-		sFrame.Size = UDim2.fromScale(1, 1)
-		sFrame.BackgroundTransparency = 1
-		sFrame.Parent = sSg
-
-		local sStroke = Instance.new("UIStroke")
-		sStroke.Color = COLOR_SOURCE
-		sStroke.Thickness = 5
-		sStroke.Transparency = 0.1
-		sStroke.Parent = sFrame
-
-		local sCorner = Instance.new("UICorner")
-		sCorner.CornerRadius = UDim.new(0, 24)
-		sCorner.Parent = sFrame
-
-		local sPin = Instance.new("Frame")
-		sPin.AnchorPoint = Vector2.new(0.5, 0.5)
-		sPin.Size = UDim2.fromScale(0.24, 0.24)
-		sPin.Position = UDim2.fromScale(0.5, 0.5)
-		sPin.BackgroundColor3 = COLOR_SOURCE
-		sPin.BorderSizePixel = 0
-		sPin.Parent = sFrame
-
-		local pinCorner = Instance.new("UICorner")
-		pinCorner.CornerRadius = UDim.new(1, 0)
-		pinCorner.Parent = sPin
-
-		VisualPool.sourcePad = sPad
-		VisualPool.sourceSg = sSg
-	end
-
-	-- 2. Piece Highlight (Reused)
-	if not VisualPool.pieceHighlight then
-		local pHl = Instance.new("Highlight")
-		pHl.Name = "PieceHighlight"
-		pHl.FillColor = COLOR_SOURCE
-		pHl.OutlineColor = COLOR_SOURCE
-		pHl.FillTransparency = 0.65
-		pHl.OutlineTransparency = 0.10
-		pHl:SetAttribute("SonHubCoach", true)
-		VisualPool.pieceHighlight = pHl
-	end
-
-	-- 3. Target 3D Marker Part (Reused)
-	if not VisualPool.targetPad then
-		local tPad = Instance.new("Part")
-		tPad.Name = "TargetMarker"
-		tPad.Anchored = true
-		tPad.CanCollide = false
-		tPad.CanTouch = false
-		tPad.CanQuery = false
-		tPad.CastShadow = false
-		tPad.Material = Enum.Material.Neon
-		tPad.Color = COLOR_TARGET
-		tPad.Transparency = 1
-		tPad.Size = Vector3.new(3.8, 0.05, 3.8)
-		tPad:SetAttribute("SonHubCoach", true)
-
-		local tBox = Instance.new("SelectionBox")
-		tBox.Name = "TargetBox"
-		tBox.Adornee = tPad
-		tBox.Color3 = COLOR_TARGET
-		tBox.LineThickness = 0.05
-		tBox.SurfaceColor3 = COLOR_TARGET
-		tBox.SurfaceTransparency = 0.85
-		tBox:SetAttribute("SonHubCoach", true)
-		tBox.Parent = tPad
-
-		local tSg = Instance.new("SurfaceGui")
-		tSg.Name = "SonHub3D_VortexGui"
-		tSg.Adornee = tPad
-		tSg.Face = Enum.NormalId.Top
-		tSg.LightInfluence = 0
-		tSg.AlwaysOnTop = true
-		tSg.CanvasSize = Vector2.new(350, 350)
-		tSg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
-		tSg:SetAttribute("SonHubCoach", true)
-		tSg.Parent = tPad
-
-		local vortex = Instance.new("Frame")
-		vortex.Name = "VortexContainer"
-		vortex.AnchorPoint = Vector2.new(0.5, 0.5)
-		vortex.Size = UDim2.fromScale(0.86, 0.86)
-		vortex.Position = UDim2.fromScale(0.5, 0.5)
-		vortex.BackgroundTransparency = 1
-		vortex.Parent = tSg
-
-		for _, cfg in ipairs({ { 1.0, 5.0, 0.05 }, { 0.66, 4.0, 0.15 }, { 0.35, 3.0, 0.00 } }) do
-			local ring = Instance.new("Frame")
-			ring.AnchorPoint = Vector2.new(0.5, 0.5)
-			ring.Size = UDim2.fromScale(cfg[1], cfg[1])
-			ring.Position = UDim2.fromScale(0.5, 0.5)
-			ring.BackgroundTransparency = 1
-			ring.Parent = vortex
-
-			local rc = Instance.new("UICorner")
-			rc.CornerRadius = UDim.new(1, 0)
-			rc.Parent = ring
-
-			local rs = Instance.new("UIStroke")
-			rs.Color = COLOR_TARGET
-			rs.Thickness = cfg[2]
-			rs.Transparency = cfg[3]
-			rs.Parent = ring
-		end
-
-		local tickOffsets = {
-			{ pos = UDim2.new(0.5, 0, 0.04, 0), sz = UDim2.new(0, 4, 0, 16) },
-			{ pos = UDim2.new(0.5, 0, 0.96, 0), sz = UDim2.new(0, 4, 0, 16) },
-			{ pos = UDim2.new(0.04, 0, 0.5, 0), sz = UDim2.new(0, 16, 0, 4) },
-			{ pos = UDim2.new(0.96, 0, 0.5, 0), sz = UDim2.new(0, 16, 0, 4) },
-		}
-		for _, tcfg in ipairs(tickOffsets) do
-			local tk = Instance.new("Frame")
-			tk.AnchorPoint = Vector2.new(0.5, 0.5)
-			tk.Position = tcfg.pos
-			tk.Size = tcfg.sz
-			tk.BackgroundColor3 = COLOR_TARGET
-			tk.BorderSizePixel = 0
-			tk.Parent = vortex
-			local tc = Instance.new("UICorner")
-			tc.CornerRadius = UDim.new(1, 0)
-			tc.Parent = tk
-		end
-
-		local core = Instance.new("Frame")
-		core.AnchorPoint = Vector2.new(0.5, 0.5)
-		core.Size = UDim2.fromScale(0.18, 0.18)
-		core.Position = UDim2.fromScale(0.5, 0.5)
-		core.BackgroundColor3 = COLOR_TARGET
-		core.BorderSizePixel = 0
-		core.Parent = vortex
-
-		local coreCorner = Instance.new("UICorner")
-		coreCorner.CornerRadius = UDim.new(1, 0)
-		coreCorner.Parent = core
-
-		local crownTxt = Instance.new("TextLabel")
-		crownTxt.Name = "CrownBadge"
-		crownTxt.AnchorPoint = Vector2.new(0.5, 0.5)
-		crownTxt.Position = UDim2.fromScale(0.5, 0.5)
-		crownTxt.Size = UDim2.fromScale(0.42, 0.42)
-		crownTxt.BackgroundTransparency = 1
-		crownTxt.Text = "👑"
-		crownTxt.TextSize = 56
-		crownTxt.TextColor3 = COLOR_TARGET
-		crownTxt.ZIndex = 20
-		crownTxt.Visible = false
-		crownTxt.Parent = tSg
-
-		local spinTween = TweenService:Create(vortex, TweenInfo.new(3.5, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Rotation = 360 })
-		spinTween:Play()
-
-		VisualPool.targetPad = tPad
-		VisualPool.targetBox = tBox
-		VisualPool.targetSg = tSg
-		VisualPool.targetVortex = vortex
-		VisualPool.targetCrown = crownTxt
-		VisualPool.vortexTween = spinTween
-	end
-end
-
-local function init2DVisuals(main2D: Instance, board2D: GuiObject)
-	if VisualPool.overlay2D and VisualPool.overlay2D.Parent == main2D then
-		return
-	end
-
-	local overlay = Instance.new("Frame")
-	overlay.Name = "SonHub2D_Overlay"
-	overlay.Size = board2D.Size
-	overlay.Position = board2D.Position
-	overlay.AnchorPoint = board2D.AnchorPoint
-	overlay.Rotation = board2D.Rotation
-	overlay.BackgroundTransparency = 1
-	overlay.ZIndex = 25
-	overlay.Active = false
-	overlay.Visible = false
-	overlay:SetAttribute("SonHubCoach", true)
-	overlay.Parent = main2D
-
-	local fFrame = Instance.new("Frame")
-	fFrame.Name = "SonHub2D_Source"
-	fFrame.BackgroundColor3 = COLOR_SOURCE
-	fFrame.BackgroundTransparency = 0.52
-	fFrame.BorderSizePixel = 0
-	fFrame.ZIndex = 26
-	fFrame.Active = false
-	fFrame:SetAttribute("SonHubCoach", true)
-
-	local fCorner = Instance.new("UICorner")
-	fCorner.CornerRadius = UDim.new(0, 6)
-	fCorner.Parent = fFrame
-
-	local fStroke = Instance.new("UIStroke")
-	fStroke.Color = COLOR_SOURCE
-	fStroke.Thickness = 2.5
-	fStroke.Parent = fFrame
-
-	local fDot = Instance.new("Frame")
-	fDot.AnchorPoint = Vector2.new(0.5, 0.5)
-	fDot.Size = UDim2.fromScale(0.24, 0.24)
-	fDot.Position = UDim2.fromScale(0.5, 0.5)
-	fDot.BackgroundColor3 = COLOR_SOURCE
-	fDot.BorderSizePixel = 0
-	fDot.ZIndex = 27
-	fDot.Active = false
-	fDot.Parent = fFrame
-
-	local fDotCorner = Instance.new("UICorner")
-	fDotCorner.CornerRadius = UDim.new(1, 0)
-	fDotCorner.Parent = fDot
-	fFrame.Parent = overlay
-
-	local tFrame = Instance.new("Frame")
-	tFrame.Name = "SonHub2D_Target"
-	tFrame.BackgroundColor3 = COLOR_TARGET
-	tFrame.BackgroundTransparency = 0.60
-	tFrame.BorderSizePixel = 0
-	tFrame.ZIndex = 26
-	tFrame.Active = false
-	tFrame:SetAttribute("SonHubCoach", true)
-
-	local tCorner = Instance.new("UICorner")
-	tCorner.CornerRadius = UDim.new(0, 6)
-	tCorner.Parent = tFrame
-
-	local tStroke = Instance.new("UIStroke")
-	tStroke.Color = COLOR_TARGET
-	tStroke.Thickness = 2.5
-	tStroke.Parent = tFrame
-
-	local v2D = Instance.new("Frame")
-	v2D.AnchorPoint = Vector2.new(0.5, 0.5)
-	v2D.Size = UDim2.fromScale(0.78, 0.78)
-	v2D.Position = UDim2.fromScale(0.5, 0.5)
-	v2D.BackgroundTransparency = 1
-	v2D.ZIndex = 27
-	v2D.Active = false
-	v2D.Parent = tFrame
-
-	for _, cfg in ipairs({ { 1.0, 2.5 }, { 0.65, 2.0 }, { 0.32, 1.5 } }) do
-		local ring = Instance.new("Frame")
-		ring.AnchorPoint = Vector2.new(0.5, 0.5)
-		ring.Size = UDim2.fromScale(cfg[1], cfg[1])
-		ring.Position = UDim2.fromScale(0.5, 0.5)
-		ring.BackgroundTransparency = 1
-		ring.ZIndex = 27
-		ring.Active = false
-		ring.Parent = v2D
-
-		local rc = Instance.new("UICorner")
-		rc.CornerRadius = UDim.new(1, 0)
-		rc.Parent = ring
-
-		local rs = Instance.new("UIStroke")
-		rs.Color = COLOR_TARGET
-		rs.Thickness = cfg[2]
-		rs.Parent = ring
-	end
-
-	local c2D = Instance.new("Frame")
-	c2D.AnchorPoint = Vector2.new(0.5, 0.5)
-	c2D.Size = UDim2.fromScale(0.18, 0.18)
-	c2D.Position = UDim2.fromScale(0.5, 0.5)
-	c2D.BackgroundColor3 = COLOR_TARGET
-	c2D.BorderSizePixel = 0
-	c2D.ZIndex = 28
-	c2D.Active = false
-	c2D.Parent = v2D
-
-	local c2DCorner = Instance.new("UICorner")
-	c2DCorner.CornerRadius = UDim.new(1, 0)
-	c2DCorner.Parent = c2D
-
-	local crownBadge = Instance.new("Frame")
-	crownBadge.AnchorPoint = Vector2.new(1, 0)
-	crownBadge.Size = UDim2.new(0, 28, 0, 28)
-	crownBadge.Position = UDim2.new(1, -2, 0, 2)
-	crownBadge.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-	crownBadge.BackgroundTransparency = 0.15
-	crownBadge.ZIndex = 29
-	crownBadge.Visible = false
-	crownBadge:SetAttribute("SonHubCoach", true)
-
-	local cbCorner = Instance.new("UICorner")
-	cbCorner.CornerRadius = UDim.new(0, 6)
-	cbCorner.Parent = crownBadge
-
-	local cbStroke = Instance.new("UIStroke")
-	cbStroke.Color = COLOR_TARGET
-	cbStroke.Thickness = 1.5
-	cbStroke.Parent = crownBadge
-
-	local cbText = Instance.new("TextLabel")
-	cbText.Size = UDim2.fromScale(1, 1)
-	cbText.BackgroundTransparency = 1
-	cbText.Text = "👑"
-	cbText.TextSize = 18
-	cbText.TextColor3 = COLOR_TARGET
-	cbText.ZIndex = 30
-	cbText.Parent = crownBadge
-	crownBadge.Parent = tFrame
-
-	local spinTween2D = TweenService:Create(v2D, TweenInfo.new(4, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Rotation = 360 })
-	spinTween2D:Play()
-	tFrame.Parent = overlay
-
-	VisualPool.overlay2D = overlay
-	VisualPool.source2D = fFrame
-	VisualPool.target2D = tFrame
-	VisualPool.vortex2D = v2D
-	VisualPool.crown2D = crownBadge
-	VisualPool.vortex2DTween = spinTween2D
-end
-
-local function hideVisuals()
-	pcall(function()
-		if VisualPool.sourcePad then
-			VisualPool.sourcePad.Parent = nil
-			VisualPool.sourcePad.Transparency = 1
-		end
-		if VisualPool.sourceSg then
-			VisualPool.sourceSg.Enabled = false
-		end
-		if VisualPool.pieceHighlight then
-			VisualPool.pieceHighlight.Adornee = nil
-			VisualPool.pieceHighlight.Parent = nil
-		end
-		if VisualPool.targetPad then
-			VisualPool.targetPad.Parent = nil
-			VisualPool.targetPad.Transparency = 1
-		end
-		if VisualPool.targetSg then
-			VisualPool.targetSg.Enabled = false
-		end
-		if VisualPool.targetCrown then
-			VisualPool.targetCrown.Visible = false
-		end
-		if VisualPool.overlay2D then
-			VisualPool.overlay2D.Visible = false
-		end
-		if cachedRoChessApp and cachedRoChessApp.board then
-			pcall(function()
-				cachedRoChessApp.board:setTint("sonhub_from", nil)
-				cachedRoChessApp.board:setTint("sonhub_to", nil)
-				cachedRoChessApp.board:setArrow("sonhub_move", nil)
-			end)
-		end
-	end)
-end
-
-local clearVisuals = hideVisuals
-
-local function getTileCFrameAndSize(tile: Instance): (CFrame, Vector3)
-	if tile:IsA("BasePart") then
-		return tile.CFrame, tile.Size
-	elseif tile:IsA("Model") then
-		local cf, sz = tile:GetBoundingBox()
-		if sz.X <= 0.1 or sz.Z <= 0.1 then
-			sz = Vector3.new(3.8, 0.2, 3.8)
-		end
-		return cf, sz
-	end
-	local primary = (tile:IsA("Model") and tile.PrimaryPart) or tile:FindFirstChildWhichIsA("BasePart")
-	if primary then
-		return primary.CFrame, primary.Size
-	end
-	return CFrame.new(), Vector3.new(3.8, 0.2, 3.8)
-end
-
-local function renderMoveVisuals(gameInfo: any, uci: string)
-	if not CFG.Visuals or not uci or #uci < 4 then
-		hideVisuals()
-		return
-	end
-
-	initVisualPool()
-
-	local fromSq = string.lower(uci:sub(1, 2))
-	local toSq = string.lower(uci:sub(3, 4))
-	local isPromo = isPawnPromotion(gameInfo.FEN or "", uci)
-
-	local fromTile3D, fromPiece3D, fromTile2D = Adapter.getSquareInstances(gameInfo, fromSq)
-	local toTile3D, _, toTile2D = Adapter.getSquareInstances(gameInfo, toSq)
-
-	local container = getVisualContainer()
-
-	-- 1. Source 3D Update (Reusing existing Part)
-	if fromTile3D and VisualPool.sourcePad then
-		local cf, size = getTileCFrameAndSize(fromTile3D)
-		local tileSize = math.max(size.X, size.Z)
-		if tileSize <= 0.1 then tileSize = 3.8 end
-
-		VisualPool.sourcePad.Size = Vector3.new(tileSize * 0.94, 0.05, tileSize * 0.94)
-		VisualPool.sourcePad.CFrame = cf * CFrame.new(0, size.Y / 2 + 0.04, 0)
-		VisualPool.sourcePad.Transparency = 0.50
-		VisualPool.sourcePad.Parent = container
-		if VisualPool.sourceSg then
-			VisualPool.sourceSg.Enabled = true
-		end
-
-		if fromPiece3D and (fromPiece3D:IsA("Model") or fromPiece3D:IsA("BasePart")) and VisualPool.pieceHighlight then
-			VisualPool.pieceHighlight.Adornee = fromPiece3D
-			VisualPool.pieceHighlight.Parent = container
-		elseif VisualPool.pieceHighlight then
-			VisualPool.pieceHighlight.Adornee = nil
-			VisualPool.pieceHighlight.Parent = nil
-		end
-	elseif VisualPool.sourcePad then
-		VisualPool.sourcePad.Parent = nil
-		if VisualPool.pieceHighlight then
-			VisualPool.pieceHighlight.Adornee = nil
-			VisualPool.pieceHighlight.Parent = nil
-		end
-	end
-
-	-- 2. Target 3D Update (Reusing existing Part)
-	if toTile3D and VisualPool.targetPad then
-		local cf, size = getTileCFrameAndSize(toTile3D)
-		local tileSize = math.max(size.X, size.Z)
-		if tileSize <= 0.1 then tileSize = 3.8 end
-
-		VisualPool.targetPad.Size = Vector3.new(tileSize * 0.94, 0.05, tileSize * 0.94)
-		VisualPool.targetPad.CFrame = cf * CFrame.new(0, size.Y / 2 + 0.04, 0)
-		VisualPool.targetPad.Transparency = 0.55
-		VisualPool.targetPad.Parent = container
-		if VisualPool.targetSg then
-			VisualPool.targetSg.Enabled = true
-		end
-		if VisualPool.targetCrown then
-			VisualPool.targetCrown.Visible = (isPromo == true)
-		end
-	elseif VisualPool.targetPad then
-		VisualPool.targetPad.Parent = nil
-	end
-
-	-- 3. 2D Board Overlay Update (Reusing existing Frame)
-	if gameInfo.GameType == "ChessClub" and fromTile2D and toTile2D then
-		local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-		local b2d = pgui and pgui:FindFirstChild("2DBoard")
-		local main2D = b2d and b2d:FindFirstChild("Main")
-		local board2D = main2D and main2D:FindFirstChild("Board")
-
-		if main2D and board2D and board2D:IsA("GuiObject") then
-			init2DVisuals(main2D, board2D)
-			if VisualPool.overlay2D and VisualPool.source2D and VisualPool.target2D then
-				VisualPool.overlay2D.Size = board2D.Size
-				VisualPool.overlay2D.Position = board2D.Position
-				VisualPool.overlay2D.AnchorPoint = board2D.AnchorPoint
-				VisualPool.overlay2D.Rotation = board2D.Rotation
-				VisualPool.overlay2D.Parent = main2D
-
-				VisualPool.source2D.Size = fromTile2D.Size
-				VisualPool.source2D.Position = fromTile2D.Position
-
-				VisualPool.target2D.Size = toTile2D.Size
-				VisualPool.target2D.Position = toTile2D.Position
-
-				if VisualPool.crown2D then
-					VisualPool.crown2D.Visible = (isPromo == true)
-				end
-				VisualPool.overlay2D.Visible = true
-			end
-		end
-	else
-		if VisualPool.overlay2D then
-			VisualPool.overlay2D.Visible = false
-		end
-	end
-
-	-- RoChess Native Board Tints & Arrows for seamless in-game visual fidelity
-	if gameInfo.GameType == "RoChess" and gameInfo.Board then
-		pcall(function()
-			local b = gameInfo.Board
-			-- Install seamless arrow renderer hook on BoardView prototype and board instance
-			local rs = game:GetService("ReplicatedStorage")
-			local cClient = rs:FindFirstChild("ChessClient")
-			local BoardView = cClient and tryRequire(cClient:FindFirstChild("BoardView"))
-			if BoardView and not BoardView._sonHubArrowPatched and type(BoardView.drawArrow) == "function" then
-				BoardView._sonHubArrowPatched = true
-				local origDraw = BoardView.drawArrow
-				BoardView.drawArrow = function(self, arrowData)
-					origDraw(self, arrowData)
-					if arrowData and arrowData.parts and #arrowData.parts >= 2 then
-						local shaft = arrowData.parts[1]
-						local head = arrowData.parts[2]
-						if shaft and head and shaft:IsA("GuiObject") and head:IsA("GuiObject") and not shaft:GetAttribute("_sonHubFused") then
-							shaft:SetAttribute("_sonHubFused", true)
-							local sqPx = self.sqPx or 60
-							local overlap = math.clamp(math.round((sqPx * 0.45) * (12 / 64)) + 2, 6, 14)
-							local rotRad = math.rad(shaft.Rotation)
-							local dir = Vector2.new(math.cos(rotRad), math.sin(rotRad))
-							local curSize = shaft.Size
-							shaft.Size = UDim2.fromOffset(curSize.X.Offset + overlap, curSize.Y.Offset)
-							local curPos = shaft.Position
-							shaft.Position = UDim2.fromOffset(curPos.X.Offset + dir.X * (overlap / 2), curPos.Y.Offset + dir.Y * (overlap / 2))
-							shaft.ZIndex = 1
-							head.ZIndex = 2
-						end
-					end
-				end
-			end
-
-			if not b._sonHubArrowPatched and type(b.drawArrow) == "function" then
-				b._sonHubArrowPatched = true
-				local oldDraw = b.drawArrow
-				b.drawArrow = function(self, arrowData)
-					oldDraw(self, arrowData)
-					if arrowData and arrowData.parts and #arrowData.parts >= 2 then
-						local shaft = arrowData.parts[1]
-						local head = arrowData.parts[2]
-						if shaft and head and shaft:IsA("GuiObject") and head:IsA("GuiObject") and not shaft:GetAttribute("_sonHubFused") then
-							shaft:SetAttribute("_sonHubFused", true)
-							local sqPx = self.sqPx or 60
-							local overlap = math.clamp(math.round((sqPx * 0.45) * (12 / 64)) + 2, 6, 14)
-							local rotRad = math.rad(shaft.Rotation)
-							local dir = Vector2.new(math.cos(rotRad), math.sin(rotRad))
-							local curSize = shaft.Size
-							shaft.Size = UDim2.fromOffset(curSize.X.Offset + overlap, curSize.Y.Offset)
-							local curPos = shaft.Position
-							shaft.Position = UDim2.fromOffset(curPos.X.Offset + dir.X * (overlap / 2), curPos.Y.Offset + dir.Y * (overlap / 2))
-							shaft.ZIndex = 1
-							head.ZIndex = 2
-						end
-					end
-				end
-			end
-
-			local file1 = fromSq:sub(1, 1):lower()
-			local rank1 = tonumber(fromSq:sub(2, 2)) or 1
-			local fromIdx = (rank1 - 1) * 8 + (string.byte(file1) - 96)
-
-			local file2 = toSq:sub(1, 1):lower()
-			local rank2 = tonumber(toSq:sub(2, 2)) or 1
-			local toIdx = (rank2 - 1) * 8 + (string.byte(file2) - 96)
-
-			b:setTint("sonhub_from", fromIdx, COLOR_SOURCE, 0.4)
-			b:setTint("sonhub_to", toIdx, COLOR_TARGET, 0.45)
-			b:setArrow("sonhub_move", fromIdx, toIdx, COLOR_TARGET, 0.25)
-		end)
-	end
-end
-
-----------------------------------------------------------------------
--- OFFICIAL GAME COLLECTIONS & SKIN CHANGER (CHESS! & CHESS CLUB)
-----------------------------------------------------------------------
-
-local OFFICIAL_COLLECTIONS = {
-	{ displayName = "Porcelain Collection", whiteSkin = "WhitePorcelain", blackSkin = "BlackPorcelain" },
-	{ displayName = "Cyber Projector Collection", whiteSkin = "CyberWhite", blackSkin = "CyberBlack" },
-	{ displayName = "Gilded Collection", whiteSkin = "Goldkaiser_White", blackSkin = "Goldkaiser_Black" },
-	{ displayName = "Crystal Collection", whiteSkin = "Ruby", blackSkin = "Emerald" },
-	{ displayName = "Exotic Collection", whiteSkin = "BrightExotic", blackSkin = "DarkExotic" },
-	{ displayName = "Cherry Pastel Collection", whiteSkin = "PastelCherryLight", blackSkin = "PastelCherryDark" },
-	{ displayName = "Pastel Sky Collection", whiteSkin = "PastelSkyLight", blackSkin = "PastelSkyDark" },
-	{ displayName = "Pastel Lavender Collection", whiteSkin = "PastelLavenderLight", blackSkin = "PastelLavenderDark" },
-	{ displayName = "Pastel Mint Collection", whiteSkin = "PastelMintLight", blackSkin = "PastelMintDark" },
-	{ displayName = "Graveyard Collection", whiteSkin = "BrightSkeleton", blackSkin = "DarkSkeleton" },
-	{ displayName = "Pumpkin Collection", whiteSkin = "BrightPumpkin", blackSkin = "DarkPumpkin" },
-	{ displayName = "Forged Samurai Collection", whiteSkin = "SamuriWhite", blackSkin = "DarkSamuri" },
-	{ displayName = "Crafted Samurai Collection", whiteSkin = "SamuriWoodWhite", blackSkin = "DarkSamuri" },
-	{ displayName = "Glass Collection", whiteSkin = "LightGlass", blackSkin = "DarkGlass" },
-	{ displayName = "Ice Collection", whiteSkin = "LightIce", blackSkin = "DarkIce" },
-	{ displayName = "Marble Collection", whiteSkin = "LightMarble", blackSkin = "DarkMarble" },
-	{ displayName = "Tesseract Collection", whiteSkin = "StellarTesseract", blackSkin = "VoidTesseract" },
-	{ displayName = "Olympian Collection", whiteSkin = "OlympianLight", blackSkin = "OlympianDark" },
-	{ displayName = "Sand Collection", whiteSkin = "WhiteSand", blackSkin = "BlackSand" },
-	{ displayName = "Unicorn Collection", whiteSkin = "unicornwhite", blackSkin = "unicornblack" },
-	{ displayName = "Snow Collection", whiteSkin = "SnowLight", blackSkin = "SnowDark" },
-	{ displayName = "Brutalist Collection", whiteSkin = "BrutalistWhite", blackSkin = "BrutalistBlack" },
-	{ displayName = "Blue Collection", whiteSkin = "LightBlue", blackSkin = "DarkBlue" },
-	{ displayName = "Purple Collection", whiteSkin = "LightPurple", blackSkin = "DarkPurple" },
-	{ displayName = "Green Collection", whiteSkin = "LightGreen", blackSkin = "DarkGreen" },
-}
-
-local function instantiateCookieSkin(modScript: Instance?): any?
-	if not modScript or not modScript:IsA("ModuleScript") then return nil end
-	local mod = tryRequire(modScript)
-	if not mod then return nil end
-	if type(mod) == "function" then
-		local ok, inst = pcall(mod)
-		return (ok and type(inst) == "table" and inst) or mod
-	elseif type(mod) == "table" then
-		local mt = getmetatable(mod)
-		if mt and mt.__call then
-			local ok, inst = pcall(mod)
-			if ok and type(inst) == "table" then return inst end
-		end
-		return mod
-	end
-	return nil
-end
-
-local function applyCookieSkin(collectionName: string): boolean
-	if not CFG.OverrideSkins or collectionName == "Default (Inventory)" or collectionName == "None" then
-		pcall(function()
-			local m = getCookieMatch()
-			if m then m._sonHubAppliedSkin = "Default (Inventory)" end
-		end)
-		return true
-	end
-
-	local targetCol = nil
-	for _, col in ipairs(OFFICIAL_COLLECTIONS) do
-		if col.displayName == collectionName or col.whiteSkin == collectionName or col.blackSkin == collectionName then
-			targetCol = col
-			break
-		end
-	end
-	if not targetCol then return false end
-
-	local success = false
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local assets = rs:FindFirstChild("Assets")
-		if not assets then return end
-		local whiteFolder = assets:FindFirstChild("White")
-		local blackFolder = assets:FindFirstChild("Black")
-		if not whiteFolder or not blackFolder then return end
-
-		local whiteSkinMod = whiteFolder:FindFirstChild(targetCol.whiteSkin)
-		local blackSkinMod = blackFolder:FindFirstChild(targetCol.blackSkin)
-		if not whiteSkinMod or not blackSkinMod then return end
-
-		local whiteSkinInstance = instantiateCookieSkin(whiteSkinMod)
-		local blackSkinInstance = instantiateCookieSkin(blackSkinMod)
-		if not whiteSkinInstance or not blackSkinInstance then return end
-
-		local m, mc = getCookieMatch()
-		if not m then return end
-
-		local info = Adapter.getGameInfo()
-		local myTeamIsWhite = true
-		if info and info.AmIWhite ~= nil then
-			myTeamIsWhite = info.AmIWhite
-		elseif m.botInfo and m.botInfo.team ~= nil then
-			myTeamIsWhite = not (m.botInfo.team == true or m.botInfo.team == "true")
-		elseif mc and mc.team ~= nil then
-			myTeamIsWhite = (mc.team == true)
-		else
-			pcall(function()
-				local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-				local client = pgui and pgui:FindFirstChild("Client")
-				local camScript = client and tryRequire(client:FindFirstChild("IngameCameraScript"))
-				if camScript and camScript.team ~= nil and camScript.ingame == true then
-					myTeamIsWhite = (camScript.team == true)
-				end
-			end)
-		end
-
-		-- Strictly replace only the local player's skin collection, never touch opponent's skin
-		m.skins = m.skins or {}
-		if myTeamIsWhite then
-			m.skins[true] = whiteSkinInstance
-		else
-			m.skins[false] = blackSkinInstance
-		end
-
-		local function replacePieceModel(p, isWhite)
-			if not p or not p.position or not p.position[1] or not p.position[2] then return false end
-			if p.alive == false or p.captured == true then return false end
-
-			local skinInst = if isWhite then whiteSkinInstance else blackSkinInstance
-			local pieceName = tostring(p.Name or p.name or "Pawn")
-			local template = nil
-			if type(skinInst.GetChild) == "function" then
-				template = skinInst:GetChild(pieceName, p.topdown)
-			end
-			if not template and skinInst.script then
-				template = skinInst.script:FindFirstChild(pieceName)
-			end
-			if not template and skinInst.Script then
-				template = skinInst.Script:FindFirstChild(pieceName)
-			end
-
-			if template and template:IsA("Model") then
-				local oldObj = p.object
-				local newObj = template:Clone()
-				if not newObj.PrimaryPart then
-					newObj.PrimaryPart = newObj:FindFirstChild("Mesh") or newObj:FindFirstChildWhichIsA("BasePart")
-				end
-
-				if newObj.PrimaryPart then
-					-- Point piece reference to newObj FIRST so any internal methods calculate off newObj geometry
-					p.object = newObj
-
-					-- Calculate ground-flush CFrame based on board coordinates and PrimaryPart geometry
-					local gx = p.position[1] * 4
-					local gy = p.position[2] * 4
-					local rotY = if isWhite then 3.141592653589793 else 0
-					local h = newObj.PrimaryPart.Size.Y / 2 + 0.5
-					local exactCf = CFrame.new(Vector3.new(1000, 0, 0) + Vector3.new(gx, h, gy)) * CFrame.Angles(0, rotY, 0)
-
-					local targetCf = nil
-					if type(p.getCframePieceObject) == "function" then
-						pcall(function() targetCf = p:getCframePieceObject(p.position) end)
-					end
-					targetCf = targetCf or exactCf
-
-					newObj:SetPrimaryPartCFrame(targetCf)
-					newObj.Parent = game.Workspace:FindFirstChild("Pieces") or game.Workspace
-
-					if oldObj and oldObj ~= newObj then
-						pcall(function() oldObj:Destroy() end)
-					end
-
-					if skinInst.onStart then
-						pcall(function() skinInst:onStart(p) end)
-					end
-					return true
-				end
-			end
-			return false
-		end
-
-		local replacedCount = 0
-		-- Strictly target only the local player's pieces, never touch opponent's pieces
-		local myPieces = if myTeamIsWhite then m.whitePieces else m.blackPieces
-		if myPieces then
-			for _, p in ipairs(myPieces) do
-				if replacePieceModel(p, myTeamIsWhite) then
-					replacedCount += 1
-				end
-			end
-		end
-
-		if replacedCount > 0 then
-			m._sonHubAppliedSkin = collectionName
-			success = true
-		end
-	end)
-
-	return success
-end
-
-local function applyChessClub3DSkin(setName: string): boolean
-	if not CFG.OverrideSkins or setName == "Default (Inventory)" or setName == "None" then
-		return true
-	end
-	local success = false
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local inv3D = rs:FindFirstChild("Assets") and rs.Assets:FindFirstChild("Inventory") and rs.Assets.Inventory:FindFirstChild("3D")
-		local targetFolder = inv3D and inv3D:FindFirstChild(setName)
-		if not targetFolder then return end
-
-		local info = Adapter.getGameInfo()
-		local myTeamIsWhite = if info then info.AmIWhite else true
-
-		local g = getChessClubGame()
-		if g and g.Ui3D then
-			if type(g.Ui3D.SetPlayerSetLocal) == "function" then
-				pcall(function() g.Ui3D:SetPlayerSetLocal(myTeamIsWhite, targetFolder) end)
-			end
-
-			local skinBoard = targetFolder:FindFirstChild("Board")
-			local refBoard = g.Ui3D.Ref and g.Ui3D.Ref:FindFirstChild("Board")
-			if skinBoard and refBoard then
-				local skinLight = skinBoard:FindFirstChild("light")
-				local skinDark = skinBoard:FindFirstChild("dark")
-				for _, sq in ipairs(refBoard:GetChildren()) do
-					if sq:IsA("BasePart") then
-						local col = sq.Name:sub(1, 1):lower()
-						local row = tonumber(sq.Name:sub(2, 2)) or 1
-						local cIdx = string.byte(col) - 96
-						local isLight = ((cIdx + row) % 2 == 1)
-						local tmpl = if isLight then skinLight else skinDark
-						if tmpl and tmpl:IsA("BasePart") then
-							sq.Color = tmpl.Color
-							sq.Material = tmpl.Material
-							sq.Transparency = tmpl.Transparency
-						end
-					end
-				end
-			end
-			success = true
-		end
-	end)
-	return success
-end
-
-local function applyChessClub2DSkin(setName: string): boolean
-	if not CFG.OverrideSkins or setName == "Default (Inventory)" or setName == "None" then
-		return true
-	end
-	local success = false
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local inv2D = rs:FindFirstChild("Assets") and rs.Assets:FindFirstChild("Inventory") and rs.Assets.Inventory:FindFirstChild("2D")
-		local targetFolder = inv2D and inv2D:FindFirstChild(setName)
-		if not targetFolder then return end
-
-		local info = Adapter.getGameInfo()
-		local myTeamIsWhite = if info then info.AmIWhite else true
-		local myPrefix = if myTeamIsWhite then "w" else "b"
-
-		-- 1. Official Ui2d:ApplySet method (Self only)
-		local pScripts = LocalPlayer:FindFirstChild("PlayerScripts")
-		local cuisMod = pScripts and pScripts:FindFirstChild("Services") and pScripts.Services:FindFirstChild("ChessUiService")
-		local cuis = tryRequire(cuisMod)
-		if cuis and cuis.Service2D and cuis.Service2D.Ui2d then
-			pcall(function()
-				local setOpts = {
-					LightTiles = {},
-					DarkTiles = {},
-				}
-				if myTeamIsWhite then
-					setOpts.WhitePieces = {}
-				else
-					setOpts.BlackPieces = {}
-				end
-				cuis.Service2D.Ui2d:ApplySet(targetFolder, setOpts)
-			end)
-		end
-
-		-- 2. Direct DOM update for guaranteed persistence (Self only)
-		local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-		local b2d = pgui and pgui:FindFirstChild("2DBoard")
-		local main = b2d and b2d:FindFirstChild("Main")
-		if main then
-			local boardFolder = targetFolder:FindFirstChild("Board")
-			local mainBoard = main:FindFirstChild("Board")
-			if boardFolder and mainBoard then
-				local lightBtn = boardFolder:FindFirstChild("light")
-				local darkBtn = boardFolder:FindFirstChild("dark")
-				if lightBtn and darkBtn then
-					for _, sq in ipairs(mainBoard:GetChildren()) do
-						if sq:IsA("ImageButton") or sq:IsA("ImageLabel") then
-							local isLight = (sq:FindFirstChild("light") and sq.light.Value)
-							if isLight == nil then
-								local col = sq.Name:sub(1, 1):lower()
-								local row = tonumber(sq.Name:sub(2, 2)) or 1
-								local cIdx = string.byte(col) - 96
-								isLight = ((cIdx + row) % 2 == 1)
-							end
-							local tmpl = isLight and lightBtn or darkBtn
-							sq.Image = tmpl.Image
-							sq.ImageColor3 = tmpl.ImageColor3
-							sq.ImageTransparency = tmpl.ImageTransparency
-							sq.BackgroundColor3 = tmpl.BackgroundColor3
-						end
-					end
-				end
-			end
-
-			local pFolder = targetFolder:FindFirstChild("Pieces")
-			local livePieces = main:FindFirstChild("Pieces")
-			if pFolder and livePieces then
-				for _, p in ipairs(livePieces:GetChildren()) do
-					if (p:IsA("ImageLabel") or p:IsA("ImageButton")) and p.Name:sub(1, 1):lower() == myPrefix then
-						local tmpl = pFolder:FindFirstChild(p.Name)
-						if tmpl and (tmpl:IsA("ImageLabel") or tmpl:IsA("ImageButton")) then
-							p.Image = tmpl.Image
-							p.ImageColor3 = tmpl.ImageColor3
-							p.ImageTransparency = tmpl.ImageTransparency
-						end
-					end
-				end
-			end
-		end
-		success = true
-	end)
-	return success
-end
-
-local function applyRoChessTheme(themeName: string): boolean
-	if not CFG.OverrideSkins or themeName == "Default (Inventory)" or themeName == "None" then
-		return true
-	end
-	local success = false
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local cClient = rs:FindFirstChild("ChessClient")
-		local cosmetics = cClient and tryRequire(cClient:FindFirstChild("Cosmetics"))
-		local app = cClient and tryRequire(cClient:FindFirstChild("App"))
-		local board = (app and app.board) or (cachedRoChessApp and cachedRoChessApp.board)
-		if not board then
-			local info = Adapter.getGameInfo()
-			board = info and info.Board
-		end
-		if not board or not cosmetics or not cosmetics.Shared then return end
-
-		local boards = cosmetics.Shared.BY_TYPE and cosmetics.Shared.BY_TYPE.board
-		if boards then
-			for _, bItem in ipairs(boards) do
-				if bItem.name == themeName or bItem.id == themeName then
-					board.theme = bItem
-					board.settings.theme = bItem.id
-					pcall(function() board:applyTheme() end)
-					success = true
-					break
-				end
-			end
-		end
-	end)
-	return success
-end
-
-local function applyRoChessPieces(pieceName: string): boolean
-	if not CFG.OverrideSkins or pieceName == "Default (Inventory)" or pieceName == "None" then
-		return true
-	end
-	local success = false
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local cClient = rs:FindFirstChild("ChessClient")
-		local cosmetics = cClient and tryRequire(cClient:FindFirstChild("Cosmetics"))
-		local app = cClient and tryRequire(cClient:FindFirstChild("App"))
-		local board = (app and app.board) or (cachedRoChessApp and cachedRoChessApp.board)
-		if not board then
-			local info = Adapter.getGameInfo()
-			board = info and info.Board
-		end
-		if not board or not cosmetics or not cosmetics.Shared then return end
-
-		local pieces = cosmetics.Shared.BY_TYPE and cosmetics.Shared.BY_TYPE.pieces
-		local targetId = pieceName
-		if pieces then
-			for _, pItem in ipairs(pieces) do
-				if pItem.name == pieceName or pItem.id == pieceName then
-					targetId = pItem.id
-					break
-				end
-			end
-		end
-
-		board.loadouts = board.loadouts or {}
-		board.loadouts[1] = board.loadouts[1] or {}
-		board.loadouts[1].pieces = targetId
-		board.loadouts[-1] = board.loadouts[-1] or {}
-		board.loadouts[-1].pieces = targetId
-
-		pcall(function()
-			for i = 1, 64 do
-				local code = board.position[i]
-				local btn = board.pieces and board.pieces[i]
-				if code and code ~= 0 and btn then
-					board:paint(btn, code)
-				end
-			end
-		end)
-		success = true
-	end)
-	return success
-end
-
-----------------------------------------------------------------------
--- STEALTH HUMANIZED MOVE EXECUTOR
-----------------------------------------------------------------------
-
-local moveSessionId = 0
-local autoPlayBusy = false
-local lastExecutedFen: string? = nil
-local lastMoveSubmitAttempt = 0
-
-local function executeMove(uciMove: string, currentInfo: any)
-	if not isAlive() then return end
-	if not (CFG.PlayLegit or CFG.AutoPlay) then return end
-	if not currentInfo or not currentInfo.Active or not currentInfo.MyTurn or currentInfo.IsSpectating then return end
-	if lastExecutedFen == currentInfo.FEN then return end
-
-	-- Deadlock defense: if marked busy for more than 1.5s, force clear
-	if autoPlayBusy and (tick() - lastMoveSubmitAttempt > 1.5) then
-		autoPlayBusy = false
-	end
-	if autoPlayBusy then return end
-
-	autoPlayBusy = true
-	lastMoveSubmitAttempt = tick()
-	moveSessionId += 1
-	local thisSession = moveSessionId
-	local isLegit = CFG.PlayLegit
-	local snapshotFen = currentInfo.FEN
-
-	task.spawn(function()
-		-- Dynamic human thinking reaction delay in legit mode
-		if isLegit then
-			local round = currentInfo.Round or 1
-			local base = math.clamp(CFG.LegitBaseDelay or 2.5, 1.5, 6.0)
-			if round <= 4 then
-				base = math.clamp(base * 0.65, 0.9, 1.8)
-			elseif round <= 10 then
-				base = math.clamp(base * 0.85, 1.3, 3.0)
-			else
-				base = base + (math.random(-25, 55) / 100)
-			end
-			local jitter = (math.random(-20, 40) / 100)
-			local delaySec = math.max(1.1, base + jitter)
-			task.wait(delaySec)
-		else
-			-- In Chess Club, enforce a humanized floor to avoid instant server bot-ban (m.IsAnticheat)
-			local delaySec = if currentInfo.GameType == "ChessClub" then (0.75 + math.random(15, 40) / 100) else math.clamp(CFG.FastDelay, 0.15, 0.35)
-			task.wait(delaySec)
-		end
-
-		if not isAlive() or moveSessionId ~= thisSession then
-			autoPlayBusy = false
-			return
-		end
-
-		local live = Adapter.getGameInfo()
-		if not live or not live.Active or not live.MyTurn or live.FEN ~= snapshotFen then
-			autoPlayBusy = false
-			return
-		end
-
-		-- 1. Chess Club
-		if currentInfo.GameType == "ChessClub" then
-			local g = currentInfo.Raw
-			local fromSq = uciMove:sub(1, 2)
-			local toSq = uciMove:sub(3, 4)
-			local isPromo = isPawnPromotion(snapshotFen, uciMove)
-			local promoChar = (uciMove:len() >= 5 and uciMove:sub(5, 5):lower()) or "q"
-
-			pcall(function()
-				if type(g.TileSelected) == "function" then
-					g:TileSelected(fromSq)
-					local humanPause = if isLegit then (0.16 + math.random(30, 80) / 1000) else (0.10 + math.random(20, 50) / 1000)
-					task.wait(humanPause)
-					g:TileSelected(toSq)
-				end
-
-				-- Register execution only after actual tile selection
-				lastExecutedFen = snapshotFen
-
-				if isPromo then
-					task.spawn(function()
-						-- Legit Promotion: click Queen on PromotionFrame with natural timing
-						for _ = 1, 30 do
-							if not isAlive() or moveSessionId ~= thisSession then break end
-							local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-							local b2d = pgui and pgui:FindFirstChild("2DBoard")
-							local promo = (b2d and b2d:FindFirstChild("Promotion")) or (pgui and pgui:FindFirstChild("Independent") and pgui.Independent:FindFirstChild("Promotion"))
-							if promo and promo:FindFirstChild("Buttons") and (promo.Visible == true or promo.BackgroundTransparency < 0.95) then
-								local targetBtn = promo.Buttons:FindFirstChild(promoChar) or promo.Buttons:FindFirstChild("q")
-								if targetBtn then
-									local promoPause = if isLegit then (0.12 + math.random(20, 60) / 1000) else 0.05
-									task.wait(promoPause)
-									safeClickButton(targetBtn)
-									break
-								end
-							end
-							task.wait(0.02)
-						end
-
-						-- Network lag safety fallback
-						task.wait(0.8)
-						if not isAlive() or moveSessionId ~= thisSession then return end
-						local after = Adapter.getGameInfo()
-						if after and after.Active and after.MyTurn and not after.IsSpectating and after.FEN == snapshotFen then
-							if g.Remotes and g.Remotes.SubmitMove then
-								g.Remotes.SubmitMove:FireServer(fromSq .. toSq .. promoChar)
-							end
-						end
-					end)
-				else
-					-- Network lag fallback watchdog for Chess Club
-					local pingSec = 0.08
-					pcall(function()
-						local ping = LocalPlayer:GetNetworkPing()
-						if ping and ping > 0 then pingSec = math.clamp(ping, 0.05, 0.5) end
-					end)
-					local checkDelay = math.max(1.5, pingSec * 3.0)
-					task.delay(checkDelay, function()
-						if not isAlive() or moveSessionId ~= thisSession then return end
-						pcall(function()
-							local after = Adapter.getGameInfo()
-							if after and after.Active and after.MyTurn and not after.IsSpectating and after.FEN == snapshotFen then
-								if g.Remotes and g.Remotes.SubmitMove then
-									g.Remotes.SubmitMove:FireServer(uciMove:sub(1, 4))
-								end
-							end
-						end)
-					end)
-				end
-			end)
-
-		-- 2. CHESS! 3D (CookieChess)
-		elseif currentInfo.GameType == "CookieChess" then
-			local m = currentInfo.Raw
-			local mc = currentInfo.MatchClient or select(2, getCookieMatch())
-
-			local rawUci = uciMove:lower()
-			if rawUci == "e1h1" and snapshotFen:find("K") then rawUci = "e1g1"
-			elseif rawUci == "e1a1" and snapshotFen:find("Q") then rawUci = "e1c1"
-			elseif rawUci == "e8h8" and snapshotFen:find("k") then rawUci = "e8g8"
-			elseif rawUci == "e8a8" and snapshotFen:find("q") then rawUci = "e8c8"
-			end
-
-			local fromSq = rawUci:sub(1, 2)
-			local toSq = rawUci:sub(3, 4)
-			local isPromo = isPawnPromotion(snapshotFen, rawUci)
-			local promoChar = (rawUci:len() >= 5 and rawUci:sub(5, 5):lower()) or "q"
-			local promoMap = { q = "Queen", r = "Rook", b = "Bishop", n = "Knight" }
-			local promoName = promoMap[promoChar] or "Queen"
-
-			local fromX, fromY = sqToCoord(fromSq)
-			local toX, toY = sqToCoord(toSq)
-
-			local piece = m:getPiece({ fromX, fromY })
-			if not piece or (piece.team ~= m.activeTeam) then
-				fenCache[snapshotFen] = nil
-				autoPlayBusy = false
-				return
-			end
-
-			local legalMoves = (type(piece.getMoves) == "function" and piece:getMoves()) or {}
-			local matchedMove = nil
-			for _, mv in ipairs(legalMoves) do
-				if mv[1] == toX and mv[2] == toY then
-					matchedMove = mv
-					break
-				end
-			end
-
-			if not matchedMove then
-				fenCache[snapshotFen] = nil
-				autoPlayBusy = false
-				return
-			end
-
-			-- Reset any pending tile selection first (clickOnTile without args clears selection)
-			if mc and type(mc.clickOnTile) == "function" then
-				pcall(function()
-					mc:clickOnTile()
-				end)
-			end
-			task.wait(0.04)
-
-			if mc and type(mc.clickOnTile) == "function" then
-				pcall(function()
-					mc:clickOnTile(fromX, fromY)
-				end)
-			end
-
-			local travelPause = if isLegit then (0.16 + math.random(30, 80) / 1000) else 0.05
-			task.wait(travelPause)
-
-			if mc and type(mc.clickOnTile) == "function" then
-				pcall(function()
-					mc:clickOnTile(toX, toY)
-				end)
-			end
-
-			local promoInfo = {}
-			if isPromo or (matchedMove and matchedMove.promote) then
-				promoInfo.promotePieceName = promoName
-			end
-
-			-- Client-side AI match handler (e.g. Solaris / Sunfish bot matches)
-			if m.botInfo and not m.botInfo.serverside then
-				task.wait(if isLegit then 0.12 else 0.05)
-				local immediateCheck = Adapter.getGameInfo()
-				if immediateCheck and immediateCheck.Active and immediateCheck.MyTurn and immediateCheck.FEN == snapshotFen then
-					if mc and type(mc.processRound) == "function" then
-						pcall(function()
-							mc:processRound(piece, matchedMove, promoInfo)
-						end)
-					end
-				end
-			end
-
-			if isPromo then
-				task.spawn(function()
-					for _ = 1, 60 do
-						if not isAlive() then break end
-						if resolveCookiePromotion(promoName) then break end
-						task.wait(0.03)
-					end
-				end)
-			else
-				-- Network lag fallback watchdog for CookieChess (Adaptive Ping)
-				local pingSec = 0.08
-				pcall(function()
-					local ping = LocalPlayer:GetNetworkPing()
-					if ping and ping > 0 then pingSec = math.clamp(ping, 0.06, 0.8) end
-				end)
-				local checkDelay = math.max(0.65, pingSec * 2.5)
-				task.delay(checkDelay, function()
-					if not isAlive() or moveSessionId ~= thisSession then return end
-					pcall(function()
-						local after = Adapter.getGameInfo()
-						if after and after.Active and after.MyTurn and not after.IsSpectating and after.FEN == snapshotFen then
-							local conns = game:GetService("ReplicatedStorage"):FindFirstChild("Connections")
-							local moveRemote = conns and conns:FindFirstChild("MovePiece")
-							local matchId = (m and (m.id or m.matchId or m.Id))
-							if moveRemote and matchId and matchedMove then
-								moveRemote:FireServer(matchId, { fromX, fromY }, matchedMove, promoInfo)
-								if mc and type(mc.processRound) == "function" then
-									pcall(function()
-										mc:processRound(piece, matchedMove, promoInfo)
-									end)
-								end
-							elseif mc and type(mc.processRound) == "function" then
-								pcall(function()
-									mc:processRound(piece, matchedMove, promoInfo)
-								end)
-							end
-						end
-					end)
-				end)
-			end
-		elseif currentInfo.GameType == "RoChess" then
-			local s = currentInfo.Raw
-			local app = currentInfo.App
-			local board = currentInfo.Board
-			if not s or not app then
-				autoPlayBusy = false
-				return
-			end
-
-			local fromSq = uciMove:sub(1, 2):lower()
-			local toSq = uciMove:sub(3, 4):lower()
-			local promoChar = (uciMove:len() >= 5 and uciMove:sub(5, 5):lower()) or ""
-
-			local fromCol = string.byte(fromSq:sub(1, 1)) - 96
-			local fromRank = tonumber(fromSq:sub(2, 2)) or 1
-			local fromIdx = (fromRank - 1) * 8 + fromCol
-
-			local toCol = string.byte(toSq:sub(1, 1)) - 96
-			local toRank = tonumber(toSq:sub(2, 2)) or 1
-			local toIdx = (toRank - 1) * 8 + toCol
-
-			local promoMap = { q = 5, n = 2, r = 4, b = 3 }
-			local promoNum = 0
-			local isPromo = false
-
-			if promoChar ~= "" and promoMap[promoChar] then
-				promoNum = promoMap[promoChar]
-				isPromo = true
-			elseif (toRank == 8 or toRank == 1) then
-				local bMap = parseFenBoard(snapshotFen)
-				local pc = bMap and bMap[fromSq]
-				if pc and pc:lower() == "p" then
-					promoNum = 5 -- Default to Queen
-					isPromo = true
-				end
-			end
-
-			-- Check if move is still valid and it's our turn
-			local immediateCheck = Adapter.getGameInfo()
-			if not immediateCheck or not immediateCheck.Active or not immediateCheck.MyTurn or immediateCheck.FEN ~= snapshotFen then
-				autoPlayBusy = false
-				return
-			end
-
-			if isLegit and board then
-				-- Highly realistic human interaction with cursor movements & natural pauses:
-				-- 1. Hover mouse over origin piece
-				if type(board.moveCursor) == "function" then
-					pcall(function() board:moveCursor(fromIdx) end)
-				end
-				task.wait(0.08 + (math.random(15, 45) / 1000))
-
-				-- 2. Select origin square
-				if type(board.pressSquare) == "function" then
-					pcall(function() board:pressSquare(fromIdx) end)
-				end
-				task.wait(0.12 + (math.random(25, 65) / 1000))
-
-				-- 3. Move cursor to destination square
-				if type(board.moveCursor) == "function" then
-					pcall(function() board:moveCursor(toIdx) end)
-				end
-				task.wait(0.09 + (math.random(15, 45) / 1000))
-
-				-- 4. Press destination square
-				if type(board.pressSquare) == "function" then
-					pcall(function() board:pressSquare(toIdx) end)
-				end
-				task.wait(0.10)
-
-				-- 5. Auto-promote to Queen if promotion popup appeared
-				if isPromo then
-					task.wait(0.15 + (math.random(20, 50) / 1000))
-					pcall(function()
-						local overlay = board.overlayLayer
-						local promoCol = overlay and overlay:FindFirstChild("PromoColumn")
-						local targetChoice = promoCol and promoCol:FindFirstChild("Choice" .. tostring(promoNum))
-						if targetChoice and type(firesignal) == "function" then
-							firesignal(targetChoice.Activated)
-						elseif type(board.hidePromotion) == "function" then
-							board:hidePromotion()
-						end
-					end)
-				end
-
-				-- 6. Lag watchdog fallback: if move didn't register within 250ms, commit via onBoardMove
-				local checkAfter = Adapter.getGameInfo()
-				if checkAfter and checkAfter.Active and checkAfter.MyTurn and checkAfter.FEN == snapshotFen then
-					if type(app.onBoardMove) == "function" then
-						pcall(function() app.onBoardMove(fromIdx, toIdx, promoNum, false) end)
-					end
-				end
-			else
-				-- Fast Direct AutoPlay
-				local played = false
-				if type(app.onBoardMove) == "function" then
-					local ok = pcall(function() return app.onBoardMove(fromIdx, toIdx, promoNum, false) end)
-					played = (ok == true)
-				end
-				if not played and board and type(board.tryMove) == "function" then
-					pcall(function() board:tryMove(fromIdx, toIdx, false) end)
-				end
-				if board and type(board.hidePromotion) == "function" and isPromo then
-					pcall(function() board:hidePromotion() end)
-				end
-			end
-			lastExecutedFen = snapshotFen
-		end
-
-		task.wait(0.20)
-		autoPlayBusy = false
-
-		-- Deadlock recovery watchdog: auto-clear lastExecutedFen if server fails to process move within 1.6s
-		task.delay(1.6, function()
-			if not isAlive() then return end
-			local verify = Adapter.getGameInfo()
-			if verify and verify.Active and verify.MyTurn and verify.FEN == snapshotFen then
-				if lastExecutedFen == snapshotFen then
-					lastExecutedFen = nil
-				end
-			end
-		end)
-	end)
-end
-
-----------------------------------------------------------------------
--- SONLIBRARY UI INTEGRATION (RED THEME & SINGLE-LINE CLEAN ROWS)
-----------------------------------------------------------------------
-
-local SonLibrary = (function()
-	if _G.SonLibrary and typeof(_G.SonLibrary.CreateWindow) == "function" then
-		return _G.SonLibrary
-	end
-	if typeof(getgenv) == "function" and getgenv().SonLibrary and typeof(getgenv().SonLibrary.CreateWindow) == "function" then
-		return getgenv().SonLibrary
-	end
-
-	local localPaths = {
-		"Library/sonlibrary.lua",
-		"sonlibrary.lua",
-		"SonHUB/Library/sonlibrary.lua",
-		"SonHUB/sonlibrary.lua",
-		"Library/sonlibrary.luau",
-	}
-	local isfileFn = isfile or (getgenv and getgenv().isfile)
-	local readfileFn = readfile or (getgenv and getgenv().readfile)
-	for _, p in ipairs(localPaths) do
-		if isfileFn and isfileFn(p) and readfileFn then
-			local ok, res = pcall(function() return loadstring(readfileFn(p))() end)
-			if ok and res and type(res.CreateWindow) == "function" then
-				return res
-			end
-		end
-	end
-
-	local rawUrls = {
-		"https://raw.githubusercontent.com/hongson209/sonlibrary/refs/heads/main/sonlibrary.lua?t=" .. tostring(tick()),
-		"https://cdn.jsdelivr.net/gh/hongson209/sonlibrary@main/sonlibrary.lua",
-		"https://raw.githubusercontent.com/hongson209/sonlibrary/main/sonlibrary.lua",
-	}
-	for _, rawUrl in ipairs(rawUrls) do
-		local s, content = pcall(function() return makeHttpRequest(rawUrl, "GET", nil, 3.0) end)
-		if not s or not content or #content < 500 then
-			s, content = pcall(function() return game:HttpGet(rawUrl) end)
-		end
-		if s and content and #content > 500 then
-			local ok, res = pcall(function() return loadstring(content)() end)
-			if ok and res and type(res.CreateWindow) == "function" then
-				return res
-			end
-		end
-	end
-
-	return nil
-end)()
-
-if not SonLibrary then return end
-
--- Initialize Window with Library Default Red & Clean GothamMedium Font
-local Window = SonLibrary:CreateWindow({
-	Name = "SonHubChess",
-	Title = "SonHub",
-	Subtitle = "Chess Coach • Stockfish 18 NNUE",
-	Layout = "Sidebar",
-	Style = "Acrylic Frosted",
-	Accent = Color3.fromRGB(246, 92, 82),
-	ToggleKey = CFG.ToggleKey,
-	Watermark = CFG.Watermark,
-})
-
-local function safeSetParagraph(para: any, title: string?, content: string)
-	if not para then return end
-	if type(para.SetContent) == "function" then
-		pcall(function()
-			if title and type(para.SetTitle) == "function" then
-				para:SetTitle(title)
-			end
-			para:SetContent(content)
-		end)
-	elseif type(para.Set) == "function" then
-		pcall(function()
-			para:Set(title or "", content)
-		end)
-	end
-end
-
--- HEADER ACTION BUTTON: RESET / RECALCULATE MATCH ANALYSIS
-pcall(function()
-	local addHeaderAction = function(btnCfg)
-		if Window and type(Window.AddActionButton) == "function" then
-			return Window:AddActionButton(btnCfg)
-		end
-		local header = Window and (Window._header or (Window._main and Window._main:FindFirstChild("Header")))
-		local actions = header and header:FindFirstChild("Actions")
-		if actions then
-			local count = 0
-			for _, c in ipairs(actions:GetChildren()) do
-				if c:IsA("TextButton") then count += 1 end
-			end
-			count += 1
-			local w = (count * 32) + ((count - 1) * 8)
-			actions.Size = UDim2.new(0, w, 1, 0)
-			actions.Position = UDim2.new(1, -(w + 12), 0, 0)
-
-			local btn = Instance.new("TextButton")
-			btn.Name = btnCfg.Name or "ResetAnalysisHeaderBtn"
-			btn.Size = UDim2.new(0, 32, 0, 32)
-			btn.BackgroundColor3 = Color3.fromRGB(28, 36, 54)
-			btn.BorderSizePixel = 0
-			btn.Text = ""
-			btn.AutoButtonColor = false
-			btn.LayoutOrder = btnCfg.LayoutOrder or 0
-			btn.ZIndex = 5
-			btn.Parent = actions
-
-			local corner = Instance.new("UICorner")
-			corner.CornerRadius = UDim.new(0, 6)
-			corner.Parent = btn
-
-			local stroke = Instance.new("UIStroke")
-			stroke.Color = Color3.fromRGB(38, 48, 70)
-			stroke.Thickness = 1
-			stroke.Parent = btn
-
-			local icon = Instance.new("ImageLabel")
-			icon.Name = "ActIcon"
-			icon.Size = UDim2.fromOffset(16, 16)
-			icon.Position = UDim2.new(0.5, 0, 0.5, 0)
-			icon.AnchorPoint = Vector2.new(0.5, 0.5)
-			icon.BackgroundTransparency = 1
-			icon.Image = btnCfg.Icon or "rbxassetid://10734940376"
-			icon.ImageColor3 = Color3.fromRGB(180, 190, 210)
-			icon.ZIndex = 6
-			icon.Parent = btn
-
-			btn.MouseButton1Click:Connect(function()
-				btnCfg.Callback()
-			end)
-			return btn
-		end
-	end
-
-	addHeaderAction({
-		Name = "ResetAnalysisHeaderBtn",
-		Icon = "rbxassetid://10734940376", -- rotate-cw / refresh
-		Tooltip = "Reset / Recalculate Match Analysis",
-		LayoutOrder = 0, -- Left of minimize [-]
-		Callback = function()
-			lastFen = nil
-			lastBestMove = nil
-			busyCalculating = false
-			Window:Notify({
-				Title = "Engine",
-				Content = "Recalculating position...",
-				Duration = 1.5,
-			})
-		end,
-	})
-end)
-
--- DEDICATED TAB: MATCH STATUS
-local TabStatus = Window:CreateTab({
-	Name = "Status",
-	Title = "Match Status",
-	Icon = "rbxassetid://10723415903", -- info
-	Description = "Live Match & Analysis",
-})
-
-TabStatus:CreateSection("Live Match Overview")
-
-local pStatus = TabStatus:CreateParagraph({
-	Title = "Status",
-	Content = "Waiting for match...",
-})
-
-local pMove = TabStatus:CreateParagraph({
-	Title = "Best Move",
-	Content = "-",
-})
-
-local pEval = TabStatus:CreateParagraph({
-	Title = "Evaluation",
-	Content = "-",
-})
-
-local pLine = TabStatus:CreateParagraph({
-	Title = "Continuation",
-	Content = "-",
-})
-
-local pDiag = TabStatus:CreateParagraph({
-	Title = "Diagnostics",
-	Content = "Mode: Stockfish 18 NNUE (2750 ELO) | Ready",
-})
-
-TabStatus:CreateButton({
-	Name = "Retry Analysis",
-	Callback = function()
-		lastFen = nil
-		lastBestMove = nil
-		busyCalculating = false
-		Window:Notify({
-			Title = "Engine",
-			Content = "Re-requesting analysis...",
-			Duration = 2,
-		})
-	end
-})
-
--- DEDICATED TAB: MOVE & PLAY
-local TabMove = Window:CreateTab({
-	Name = "Move & Play",
-	Title = "Move & Play",
-	Icon = "rbxassetid://7734053426",
-	Description = "Engine & Auto Play",
-})
-
--- Section: Engine Settings (Dedicated Auto Free Mode)
-TabMove:CreateSection("Engine Settings")
-
-TabMove:CreateDropdown({
-	Name = "Engine Mode",
-	Options = {
-		"Auto Free (Stockfish 18 NNUE)",
-		"Local SonEngine (100% Client CPU)",
-	},
-	Default = CFG.EngineMode or "Auto Free (Stockfish 18 NNUE)",
-	Callback = function(val)
-		CFG.EngineMode = val
-		fenCache = {}
-		saveSettings()
-		Window:Notify({
-			Title = "Engine Mode",
-			Content = "Active: " .. tostring(val),
-			Duration = 2,
-		})
-	end
-})
-
-TabMove:CreateSlider({
-	Name = "Online Engine Depth",
-	Min = 16,
-	Max = 18,
-	Increment = 1,
-	Default = math.clamp(CFG.Depth, 16, 18),
-	Suffix = " ply",
-	Callback = function(val)
-		CFG.Depth = math.floor(val)
-		fenCache = {}
-		saveSettings()
-	end
-})
-
-TabMove:CreateSlider({
-	Name = "Local Engine Depth",
-	Min = 4,
-	Max = 12,
-	Increment = 1,
-	Default = math.clamp(CFG.LocalDepth or 8, 4, 12),
-	Suffix = " ply",
-	Callback = function(val)
-		CFG.LocalDepth = math.floor(val)
-		fenCache = {}
-		saveSettings()
-	end
-})
-
-TabMove:CreateSlider({
-	Name = "Local Thinking Time",
-	Min = 0.5,
-	Max = 3.0,
-	Increment = 0.1,
-	Default = math.clamp((CFG.LocalTimeLimitMs or 1200) / 1000, 0.5, 3.0),
-	Suffix = "s",
-	Callback = function(val)
-		CFG.LocalTimeLimitMs = math.floor(val * 1000)
-		saveSettings()
-	end
-})
-
-TabMove:CreateToggle({
-	Name = "Anti-Draw / Anti-Stalemate",
-	Default = CFG.AntiDraw,
-	CurrentValue = CFG.AntiDraw,
-	Callback = function(val)
-		CFG.AntiDraw = val
-		saveSettings()
-		Window:Notify({
-			Title = "Anti-Draw",
-			Content = if val then "Anti-Draw Protection Enabled" else "Anti-Draw Protection Disabled",
-			Duration = 2,
-		})
-	end
-})
-
-local toggleLegit: any = nil
-local toggleAuto: any = nil
-local toggleVisuals1: any = nil
-local toggleVisuals2: any = nil
-
-toggleLegit = TabMove:CreateToggle({
-	Name = "Play Legit",
-	Default = CFG.PlayLegit,
-	CurrentValue = CFG.PlayLegit,
-	Callback = function(val)
-		CFG.PlayLegit = val
-		if val and CFG.AutoPlay and toggleAuto then
-			toggleAuto:Set(false)
-		end
-	end
-})
-
-toggleAuto = TabMove:CreateToggle({
-	Name = "Auto Play",
-	Default = CFG.AutoPlay,
-	CurrentValue = CFG.AutoPlay,
-	Callback = function(val)
-		CFG.AutoPlay = val
-		if val and CFG.PlayLegit and toggleLegit then
-			toggleLegit:Set(false)
-		end
-	end
-})
-
-TabMove:CreateSlider({
-	Name = "Legit Delay",
-	Min = 1.0,
-	Max = 6.0,
-	Increment = 0.5,
-	Default = CFG.LegitBaseDelay,
-	Suffix = "s",
-	Callback = function(val)
-		CFG.LegitBaseDelay = val
-		saveSettings()
-	end
-})
-
-TabMove:CreateToggle({
-	Name = "Humanized Legit Accuracy (Anti-99%)",
-	Default = CFG.HumanLegitAccuracy,
-	CurrentValue = CFG.HumanLegitAccuracy,
-	Callback = function(val)
-		CFG.HumanLegitAccuracy = val
-		fenCache = {}
-		saveSettings()
-		Window:Notify({
-			Title = "Legit Accuracy",
-			Content = "Anti-99% Natural Moves: " .. (val and "ON (82-88%)" or "OFF (100% Best)"),
-			Duration = 2,
-		})
-	end
-})
-
-TabMove:CreateDropdown({
-	Name = "Legit Target Accuracy Tier",
-	Options = {
-		"Master (75-82%)",
-		"Grandmaster (82-88%)",
-		"Super GM (88-94%)",
-	},
-	Default = CFG.LegitTargetAccuracy or "Grandmaster (82-88%)",
-	Callback = function(val)
-		CFG.LegitTargetAccuracy = val
-		fenCache = {}
-		saveSettings()
-	end
-})
-
-local toggleAutoFarm: any = nil
-toggleAutoFarm = TabMove:CreateToggle({
-	Name = "Auto Farm ELO (Auto Queue & Rematch)",
-	Default = CFG.AutoFarm,
-	CurrentValue = CFG.AutoFarm,
-	Callback = function(val)
-		CFG.AutoFarm = val
-		if val then
-			CFG.AutoPlay = true
-			if toggleAuto and toggleAuto.Set then
-				toggleAuto:Set(true)
-			end
-			Window:Notify({
-				Title = "Auto Farm",
-				Content = "Auto Queue & Rematch active! Stealth ELO farming...",
-				Duration = 3,
-			})
-		else
-			Window:Notify({
-				Title = "Auto Farm",
-				Content = "Auto Farm paused.",
-				Duration = 2,
-			})
-		end
-		saveSettings()
-	end
-})
-
-TabMove:CreateToggle({
-	Name = "Spoof Game Review (Lua Game Review)",
-	Default = CFG.SpoofGameReview,
-	CurrentValue = CFG.SpoofGameReview,
-	Callback = function(val)
-		CFG.SpoofGameReview = val
-		saveSettings()
-	end
-})
-
-toggleVisuals1 = TabMove:CreateToggle({
-	Name = "Visual Markers",
-	Default = CFG.Visuals,
-	CurrentValue = CFG.Visuals,
-	Callback = function(val)
-		CFG.Visuals = val
-		saveSettings()
-		if toggleVisuals2 and toggleVisuals2.Get and toggleVisuals2:Get() ~= val then
-			toggleVisuals2:Set(val)
-		end
-		if not val then
-			hideVisuals()
-		else
-			local info = Adapter.getGameInfo()
-			if info and lastBestMove and lastBestMove.uci then
-				renderMoveVisuals(info, lastBestMove.uci)
-			end
-		end
-	end
-})
-
--- CUSTOMIZATION
-local isCookieGame = (game.PlaceId == 6222531507 or game.GameId == 2283649692 or (game:GetService("ReplicatedStorage"):FindFirstChild("Assets") ~= nil and game:GetService("ReplicatedStorage").Assets:FindFirstChild("Collections") ~= nil))
-local isChessClubGame = (game.PlaceId == 139394516128799 or (LocalPlayer:FindFirstChild("PlayerScripts") and LocalPlayer.PlayerScripts:FindFirstChild("Services") and LocalPlayer.PlayerScripts.Services:FindFirstChild("ChessProxyService") ~= nil))
-local isRoChessGame = (game.PlaceId == 139717576471404 or game.GameId == 10768845402 or game:GetService("ReplicatedStorage"):FindFirstChild("ChessClient") ~= nil)
-
-if isChessClubGame then
-	local TabSkins = Window:CreateTab({
-		Name = "Skins",
-		Title = "Skins (Chess Club)",
-		Icon = "rbxassetid://7733774602",
-		Description = "3D & 2D Board Skins",
-	})
-
-	TabSkins:CreateSection("Inventory & Customization")
-
-	TabSkins:CreateToggle({
-		Name = "Enable Skin Override",
-		Default = CFG.OverrideSkins,
-		CurrentValue = CFG.OverrideSkins,
-		Description = "Turn OFF to use your own inventory skin",
-		Callback = function(val)
-			CFG.OverrideSkins = val
-			saveSettings()
-			Window:Notify({
-				Title = "Skins",
-				Content = if val then "Skin Override Enabled" else "Using Game Inventory Skin",
-				Duration = 2,
-			})
-		end
-	})
-
-	TabSkins:CreateButton({
-		Name = "Reset / Keep Inventory Skin",
-		Callback = function()
-			CFG.OverrideSkins = false
-			CFG.ClubSkin3D = "Default (Inventory)"
-			CFG.ClubSkin2D = "Default (Inventory)"
-			saveSettings()
-			Window:Notify({
-				Title = "Skins",
-				Content = "Restored default inventory skin",
-				Duration = 2,
-			})
-		end
-	})
-
-	TabSkins:CreateSection("3D Skins")
-	local club3DList = { "Default (Inventory)" }
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local inv3D = rs:FindFirstChild("Assets") and rs.Assets:FindFirstChild("Inventory") and rs.Assets.Inventory:FindFirstChild("3D")
-		if inv3D then
-			for _, item in ipairs(inv3D:GetChildren()) do
-				if not table.find(club3DList, item.Name) then
-					table.insert(club3DList, item.Name)
-				end
-			end
-		end
-	end)
-	if #club3DList == 1 then
-		for _, n in ipairs({ "Default", "Gold", "Wood", "Champion", "Club", "Magma", "Neon", "Beach", "Sandstone", "Magic", "Obsidian", "Christmas", "Easter", "Frosted Glass", "Tinted Glass", "Legacy", "Special Gift" }) do
-			table.insert(club3DList, n)
-		end
-	end
-
-	local selectedClub3D = CFG.ClubSkin3D or "Default (Inventory)"
-
-	TabSkins:CreateDropdown({
-		Name = "3D Skin",
-		Options = club3DList,
-		Default = selectedClub3D,
-		Callback = function(val)
-			selectedClub3D = val
-			CFG.ClubSkin3D = val
-			if val ~= "Default (Inventory)" then
-				CFG.OverrideSkins = true
-			end
-			saveSettings()
-		end
-	})
-
-	TabSkins:CreateButton({
-		Name = "Apply 3D Skin",
-		Callback = function()
-			if selectedClub3D == "Default (Inventory)" then
-				CFG.OverrideSkins = false
-				saveSettings()
-				Window:Notify({ Title = "Skins", Content = "Using Game Inventory Skin", Duration = 2 })
-			else
-				CFG.OverrideSkins = true
-				saveSettings()
-				local ok = applyChessClub3DSkin(selectedClub3D)
-				Window:Notify({
-					Title = "Skins",
-					Content = if ok then "Applied 3D: " .. tostring(selectedClub3D) else "No active match found!",
-					Duration = 3,
-				})
-			end
-		end
-	})
-
-	TabSkins:CreateSection("2D Skins")
-	local club2DList = { "Default (Inventory)" }
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local inv2D = rs:FindFirstChild("Assets") and rs.Assets:FindFirstChild("Inventory") and rs.Assets.Inventory:FindFirstChild("2D")
-		if inv2D then
-			for _, item in ipairs(inv2D:GetChildren()) do
-				if not table.find(club2DList, item.Name) then
-					table.insert(club2DList, item.Name)
-				end
-			end
-		end
-	end)
-	if #club2DList == 1 then
-		for _, n in ipairs({ "Default", "Sierra", "Legacy", "Flames", "Gilded", "Marble", "Mahogany", "Sleek Purple", "Sleek Black", "Ocean Flora" }) do
-			table.insert(club2DList, n)
-		end
-	end
-
-	local selectedClub2D = CFG.ClubSkin2D or "Default (Inventory)"
-
-	TabSkins:CreateDropdown({
-		Name = "2D Skin",
-		Options = club2DList,
-		Default = selectedClub2D,
-		Callback = function(val)
-			selectedClub2D = val
-			CFG.ClubSkin2D = val
-			if val ~= "Default (Inventory)" then
-				CFG.OverrideSkins = true
-			end
-			saveSettings()
-		end
-	})
-
-	TabSkins:CreateButton({
-		Name = "Apply 2D Skin",
-		Callback = function()
-			if selectedClub2D == "Default (Inventory)" then
-				CFG.OverrideSkins = false
-				saveSettings()
-				Window:Notify({ Title = "Skins", Content = "Using Game Inventory Skin", Duration = 2 })
-			else
-				CFG.OverrideSkins = true
-				saveSettings()
-				local ok = applyChessClub2DSkin(selectedClub2D)
-				Window:Notify({
-					Title = "Skins",
-					Content = if ok then "Applied 2D: " .. tostring(selectedClub2D) else "Failed to apply 2D skin!",
-					Duration = 3,
-				})
-			end
-		end
-	})
-
-elseif isCookieGame then
-	local TabSkinCookie = Window:CreateTab({
-		Name = "Skins",
-		Title = "3D Skins (CHESS!)",
-		Icon = "rbxassetid://7733774602",
-		Description = "3D Chess Collections",
-	})
-
-	TabSkinCookie:CreateSection("Inventory & Customization")
-
-	TabSkinCookie:CreateToggle({
-		Name = "Enable Skin Override",
-		Default = CFG.OverrideSkins,
-		CurrentValue = CFG.OverrideSkins,
-		Description = "Turn OFF to use your own inventory skin",
-		Callback = function(val)
-			CFG.OverrideSkins = val
-			saveSettings()
-			Window:Notify({
-				Title = "Skins",
-				Content = if val then "Skin Override Enabled" else "Using Game Inventory Skin",
-				Duration = 2,
-			})
-		end
-	})
-
-	TabSkinCookie:CreateButton({
-		Name = "Reset / Keep Inventory Skin",
-		Callback = function()
-			CFG.OverrideSkins = false
-			CFG.CookieSkin = "Default (Inventory)"
-			saveSettings()
-			local m = getCookieMatch()
-			if m then m._sonHubAppliedSkin = "Default (Inventory)" end
-			Window:Notify({
-				Title = "Skins",
-				Content = "Restored default inventory skin",
-				Duration = 2,
-			})
-		end
-	})
-
-	TabSkinCookie:CreateSection("3D Collections")
-	local collectionNames = { "Default (Inventory)" }
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local cols = rs:FindFirstChild("Assets") and rs.Assets:FindFirstChild("Collections")
-		if cols then
-			for _, c in ipairs(cols:GetChildren()) do
-				if not table.find(collectionNames, c.Name) then
-					table.insert(collectionNames, c.Name)
-				end
-			end
-		end
-	end)
-	for _, col in ipairs(OFFICIAL_COLLECTIONS) do
-		if not table.find(collectionNames, col.displayName) then
-			table.insert(collectionNames, col.displayName)
-		end
-	end
-
-	local selectedCookieSkin = CFG.CookieSkin or "Default (Inventory)"
-
-	TabSkinCookie:CreateDropdown({
-		Name = "3D Collection",
-		Options = collectionNames,
-		Default = selectedCookieSkin,
-		Callback = function(val)
-			selectedCookieSkin = val
-			CFG.CookieSkin = val
-			if val ~= "Default (Inventory)" then
-				CFG.OverrideSkins = true
-			end
-			saveSettings()
-		end
-	})
-
-	TabSkinCookie:CreateButton({
-		Name = "Apply 3D Skin",
-		Callback = function()
-			if selectedCookieSkin == "Default (Inventory)" then
-				CFG.OverrideSkins = false
-				saveSettings()
-				local m = getCookieMatch()
-				if m then m._sonHubAppliedSkin = "Default (Inventory)" end
-				Window:Notify({ Title = "Skins", Content = "Using Game Inventory Skin", Duration = 2 })
-			else
-				CFG.OverrideSkins = true
-				saveSettings()
-				local ok = applyCookieSkin(selectedCookieSkin)
-				Window:Notify({
-					Title = "Skins",
-					Content = if ok then "Applied: " .. tostring(selectedCookieSkin) else "No active match found!",
-					Duration = 3,
-				})
-			end
-		end
-	})
-
-elseif isRoChessGame then
-	local TabSkinRo = Window:CreateTab({
-		Name = "Skins",
-		Title = "Skins (RoChess)",
-		Icon = "rbxassetid://7733774602",
-		Description = "Themes & Piece Sets",
-	})
-
-	TabSkinRo:CreateSection("Inventory & Customization")
-
-	TabSkinRo:CreateToggle({
-		Name = "Enable Skin Override",
-		Default = CFG.OverrideSkins,
-		CurrentValue = CFG.OverrideSkins,
-		Description = "Turn OFF to use your own inventory skin",
-		Callback = function(val)
-			CFG.OverrideSkins = val
-			saveSettings()
-			Window:Notify({
-				Title = "Skins",
-				Content = if val then "Skin Override Enabled" else "Using Game Inventory Skin",
-				Duration = 2,
-			})
-		end
-	})
-
-	TabSkinRo:CreateButton({
-		Name = "Reset / Keep Inventory Skin",
-		Callback = function()
-			CFG.OverrideSkins = false
-			CFG.RoChessBoardTheme = "Default (Inventory)"
-			CFG.RoChessPieceSet = "Default (Inventory)"
-			saveSettings()
-			Window:Notify({
-				Title = "Skins",
-				Content = "Restored default inventory skin",
-				Duration = 2,
-			})
-		end
-	})
-
-	TabSkinRo:CreateSection("Board Themes")
-	local roBoardList = { "Default (Inventory)" }
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local cClient = rs:FindFirstChild("ChessClient")
-		local cosmetics = cClient and tryRequire(cClient:FindFirstChild("Cosmetics"))
-		if cosmetics and cosmetics.Shared and cosmetics.Shared.BY_TYPE and cosmetics.Shared.BY_TYPE.board then
-			for _, b in ipairs(cosmetics.Shared.BY_TYPE.board) do
-				local nm = b.name or b.id
-				if nm and not table.find(roBoardList, nm) then table.insert(roBoardList, nm) end
-			end
-		end
-	end)
-	if #roBoardList == 1 then
-		for _, n in ipairs({ "Green", "Brown", "Blue", "Icy Sea", "Purple", "Walnut", "Tournament", "Dash", "Sandstone", "Mint", "Slate", "Rose", "Ocean", "Autumn", "Lavender Haze", "Oak", "Crimson", "Candy", "Midnight", "Marble", "Lagoon", "Gold Leaf", "Prism", "Night Sky", "VIP Royal" }) do
-			table.insert(roBoardList, n)
-		end
-	end
-
-	local selectedRoBoard = CFG.RoChessBoardTheme or "Default (Inventory)"
-
-	TabSkinRo:CreateDropdown({
-		Name = "Board Theme",
-		Options = roBoardList,
-		Default = selectedRoBoard,
-		Callback = function(val)
-			selectedRoBoard = val
-			CFG.RoChessBoardTheme = val
-			if val ~= "Default (Inventory)" then
-				CFG.OverrideSkins = true
-			end
-			saveSettings()
-			if CFG.OverrideSkins and val ~= "Default (Inventory)" then
-				applyRoChessTheme(val)
-			end
-		end
-	})
-
-	TabSkinRo:CreateButton({
-		Name = "Apply Board Theme",
-		Callback = function()
-			if selectedRoBoard == "Default (Inventory)" then
-				CFG.OverrideSkins = false
-				saveSettings()
-				Window:Notify({ Title = "RoChess Theme", Content = "Using Game Inventory Skin", Duration = 2 })
-			else
-				CFG.OverrideSkins = true
-				saveSettings()
-				applyRoChessTheme(selectedRoBoard)
-				Window:Notify({
-					Title = "RoChess Theme",
-					Content = "Applied: " .. tostring(selectedRoBoard),
-					Duration = 2,
-				})
-			end
-		end
-	})
-
-	TabSkinRo:CreateSection("Piece Sets")
-	local roPieceList = { "Default (Inventory)" }
-	pcall(function()
-		local rs = game:GetService("ReplicatedStorage")
-		local cClient = rs:FindFirstChild("ChessClient")
-		local cosmetics = cClient and tryRequire(cClient:FindFirstChild("Cosmetics"))
-		if cosmetics and cosmetics.Shared and cosmetics.Shared.BY_TYPE and cosmetics.Shared.BY_TYPE.pieces then
-			for _, p in ipairs(cosmetics.Shared.BY_TYPE.pieces) do
-				local nm = p.name or p.id
-				if nm and not table.find(roPieceList, nm) then table.insert(roPieceList, nm) end
-			end
-		end
-	end)
-	if #roPieceList == 1 then
-		for _, n in ipairs({ "Classic", "Mint", "Sandcastle", "Sky", "Coral", "Lemon", "Lilac", "Ruby & Sapphire", "Candy", "Frost", "Peach & Plum", "Jade & Onyx", "Gold & Silver", "Toxic", "Crystal", "Neon", "Inferno", "Holographic", "VIP Gold & Onyx" }) do
-			table.insert(roPieceList, n)
-		end
-	end
-
-	local selectedRoPiece = CFG.RoChessPieceSet or "Default (Inventory)"
-
-	TabSkinRo:CreateDropdown({
-		Name = "Piece Set",
-		Options = roPieceList,
-		Default = selectedRoPiece,
-		Callback = function(val)
-			selectedRoPiece = val
-			CFG.RoChessPieceSet = val
-			if val ~= "Default (Inventory)" then
-				CFG.OverrideSkins = true
-			end
-			saveSettings()
-			if CFG.OverrideSkins and val ~= "Default (Inventory)" then
-				applyRoChessPieces(val)
-			end
-		end
-	})
-
-	TabSkinRo:CreateButton({
-		Name = "Apply Piece Set",
-		Callback = function()
-			if selectedRoPiece == "Default (Inventory)" then
-				CFG.OverrideSkins = false
-				saveSettings()
-				Window:Notify({ Title = "RoChess Pieces", Content = "Using Game Inventory Skin", Duration = 2 })
-			else
-				CFG.OverrideSkins = true
-				saveSettings()
-				applyRoChessPieces(selectedRoPiece)
-				Window:Notify({
-					Title = "RoChess Pieces",
-					Content = "Applied: " .. tostring(selectedRoPiece),
-					Duration = 2,
-				})
-			end
-		end
-	})
-end
-
--- SYSTEM TAB
-local TabSet = Window:CreateTab({
-	Name = "Settings",
-	Title = "Settings",
-	Icon = "rbxassetid://7734056411",
-	Description = "System & Hotkeys",
-})
-
-TabSet:CreateSection("System")
-
-toggleVisuals2 = TabSet:CreateToggle({
-	Name = "Visual Markers",
-	Default = CFG.Visuals,
-	CurrentValue = CFG.Visuals,
-	Callback = function(val)
-		CFG.Visuals = val
-		saveSettings()
-		if toggleVisuals1 and toggleVisuals1.Get and toggleVisuals1:Get() ~= val then
-			toggleVisuals1:Set(val)
-		end
-		if not val then
-			clearVisuals()
-		else
-			local info = Adapter.getGameInfo()
-			if info and lastBestMove and lastBestMove.uci then
-				renderMoveVisuals(info, lastBestMove.uci)
-			end
-		end
-	end
-})
-
-TabSet:CreateToggle({
-	Name = "Watermark HUD",
-	Default = CFG.Watermark,
-	CurrentValue = CFG.Watermark,
-	Callback = function(val)
-		CFG.Watermark = val
-		saveSettings()
-		if Window and Window.SetWatermark then
-			Window:SetWatermark(val)
-		end
-	end
-})
-
-TabSet:CreateKeybind({
-	Name = "Toggle Key",
-	Default = CFG.ToggleKey,
-	Callback = function(key)
-		CFG.ToggleKey = key
-	end
-})
-
-
-
-----------------------------------------------------------------------
--- MAIN CALCULATION & GAME TRACKING LOOP (SINGLE FEN DISPATCH & ZERO FLICKER)
-----------------------------------------------------------------------
-
-local lastFen: string? = nil
-local lastBestMove: any = nil
-local busyCalculating = false
-local busyCalculatingStart = 0
-local lastTurnState: boolean? = nil
-local lastStatusStr: string? = nil
-local lastTrackedFen: string? = nil
-local lastTrackedGameId: string? = nil
-
-task.spawn(function()
-	while isAlive() do
-		task.wait(0.18)
-		pcall(function()
-			-- Deadlock recovery watchdog for weak/laggy connections
-			if busyCalculating and (tick() - busyCalculatingStart > 4.0) then
-				busyCalculating = false
-			end
-			if autoPlayBusy and (tick() - lastMoveSubmitAttempt > 2.0) then
-				autoPlayBusy = false
-			end
-
-			local info = Adapter.getGameInfo()
-
-			if not info or not info.Active then
-				if lastFen ~= nil then
-					lastFen = nil
-					lastBestMove = nil
-					lastStatusStr = nil
-					lastTrackedFen = nil
-					lastTrackedGameId = nil
-					resetPositionHistory(nil)
-					autoPlayBusy = false
-					hideVisuals()
-					safeSetParagraph(pStatus, "Match Status", "Waiting for match...")
-					safeSetParagraph(pMove, "Best Move", "-")
-					safeSetParagraph(pEval, "Evaluation", "-")
-					safeSetParagraph(pLine, "Continuation", "-")
-				end
-			else
-				local currentFen = info.FEN
-				local isMyTurn = (info.MyTurn == true)
-				local isSpectating = (info.IsSpectating == true)
-
-				-- Track game session and repetition frequencies
-				local currentGameId = tostring(info.GameType) .. "_" .. tostring(info.Round or 1)
-				if currentGameId ~= lastTrackedGameId then
-					lastTrackedGameId = currentGameId
-					if (info.Round or 1) <= 1 then
-						resetPositionHistory(currentGameId)
-					end
-				end
-
-				if currentFen ~= lastTrackedFen then
-					lastTrackedFen = currentFen
-					recordPositionForRepetition(currentFen)
-				end
-
-				-- Fast opponent move detection:
-				-- If current position changed and it is our turn, cancel previous waiting session immediately!
-				if currentFen ~= lastFen and isMyTurn then
-					moveSessionId += 1
-					autoPlayBusy = false
-				end
-
-				-- Auto apply custom skin on match start in CookieChess (wait until pieces are placed)
-				if CFG.OverrideSkins and info.GameType == "CookieChess" and CFG.CookieSkin and CFG.CookieSkin ~= "Default (Inventory)" and info.Raw then
-					local m = info.Raw
-					if m._sonHubAppliedSkin ~= CFG.CookieSkin then
-						if (m.whitePieces and #m.whitePieces > 0) or (m.blackPieces and #m.blackPieces > 0) then
-							task.defer(function()
-								applyCookieSkin(CFG.CookieSkin)
-							end)
-						end
-					end
-				end
-
-				-- Auto apply custom skin on match start in RoChess
-				if CFG.OverrideSkins and info.GameType == "RoChess" and info.Board then
-					local b = info.Board
-					if CFG.RoChessBoardTheme and CFG.RoChessBoardTheme ~= "Default (Inventory)" and b._sonHubAppliedTheme ~= CFG.RoChessBoardTheme then
-						b._sonHubAppliedTheme = CFG.RoChessBoardTheme
-						applyRoChessTheme(CFG.RoChessBoardTheme)
-					end
-					if CFG.RoChessPieceSet and CFG.RoChessPieceSet ~= "Default (Inventory)" and b._sonHubAppliedPieces ~= CFG.RoChessPieceSet then
-						b._sonHubAppliedPieces = CFG.RoChessPieceSet
-						applyRoChessPieces(CFG.RoChessPieceSet)
-					end
-
-					-- Auto-dismiss & select Queen if RoChess promotion popup is ever left open
-					if CFG.AutoPromoteQueen ~= false and b.overlayLayer then
-						local promoCol = b.overlayLayer:FindFirstChild("PromoColumn")
-						local choice5 = promoCol and promoCol:FindFirstChild("Choice5")
-						if choice5 and type(firesignal) == "function" then
-							firesignal(choice5.Activated)
-						elseif promoCol and type(b.hidePromotion) == "function" then
-							b:hidePromotion()
-						end
-					end
-				end
-
-				local roleStr = if isSpectating then "Spectating" elseif info.AmIWhite then "White" else "Black"
-				local turnStr = if isMyTurn then "YOUR TURN" else "Opponent thinking..."
-				local newStatusStr = string.format("%s | %s\n%s (Move %d)", roleStr, turnStr, info.GameType, info.Round or 1)
-				if lastStatusStr ~= newStatusStr then
-					lastStatusStr = newStatusStr
-					safeSetParagraph(pStatus, "Status", newStatusStr)
-				end
-
-				if not isMyTurn and not isSpectating then
-					-- OPPONENT TURN: Immediately hide highlights and record FEN so no calculation or flicker occurs
-					if lastTurnState ~= false then
-						lastTurnState = false
-						hideVisuals()
-						lastBestMove = nil
-						lastFen = currentFen
-
-						safeSetParagraph(pMove, "Best Move", "Opponent thinking...")
-						safeSetParagraph(pEval, "Evaluation", "Opponent turn")
-						safeSetParagraph(pLine, "Continuation", "-")
-					end
-				else
-					lastTurnState = true
-
-					-- YOUR TURN / SPECTATING: Only compute when position changed (currentFen ~= lastFen)
-					if currentFen ~= lastFen and not busyCalculating then
-						lastFen = currentFen -- Lock immediately to prevent duplicate API triggers
-						lastBestMove = nil
-						busyCalculating = true
-						busyCalculatingStart = tick()
-						local token = nextSequenceToken()
-
-						safeSetParagraph(pMove, "Best Move", "Calculating best move...")
-						safeSetParagraph(pEval, "Evaluation", "Thinking...")
-
-						task.spawn(function()
-							local okBest, best, errMsg = pcall(function()
-								return computeBestMove(currentFen, token, info)
-							end)
-							busyCalculating = false
-
-							if token ~= currentSequenceToken or not isAlive() then
-								return
-							end
-
-							-- Double check live match state still matches
-							local liveCheck = Adapter.getGameInfo()
-							if not liveCheck or not liveCheck.Active or liveCheck.FEN ~= currentFen then
-								hideVisuals()
-								return
-							end
-							if not liveCheck.IsSpectating and not liveCheck.MyTurn then
-								hideVisuals()
-								return
-							end
-
-							if okBest and best and best.uci then
-								lastBestMove = best
-								safeSetParagraph(
-									pMove,
-									"Best Move",
-									string.format("%s [%s]", formatMoveName(currentFen, best.uci), best.source or "Engine")
-								)
-								safeSetParagraph(
-									pEval,
-									"Evaluation",
-									string.format("Eval: %s | Depth: %d", best.evalStr or "0.00", best.depth or CFG.Depth)
-								)
-
-								local contStr = "-"
-								if best.continuation and #best.continuation > 0 then
-									contStr = table.concat(best.continuation, " ")
-								end
-								safeSetParagraph(pLine, "Continuation", contStr)
-
-								if pDiag then
-									safeSetParagraph(
-										pDiag,
-										"Diagnostics",
-										string.format("Source: %s | Latency: %dms", best.provider or "Engine", best.requestDuration or 0)
-									)
-								end
-
-								-- Render visual highlights ONCE for this position
-								renderMoveVisuals(info, best.uci)
-
-								-- Autonomous execution if AutoPlay or LegitPlay is enabled
-								if info.MyTurn and not info.IsSpectating and (CFG.PlayLegit or CFG.AutoPlay) then
-									executeMove(best.uci, info)
-								end
-							else
-								hideVisuals()
-								lastBestMove = nil
-								lastFen = nil -- Allow automatic recalculation without needing manual click!
-								safeSetParagraph(pMove, "Best Move", "Calculating best move...")
-								safeSetParagraph(pEval, "Evaluation", tostring(errMsg or "Retrying..."))
-								safeSetParagraph(pLine, "Continuation", "-")
-								if pDiag then
-									safeSetParagraph(
-										pDiag,
-										"Diagnostics",
-										string.format("Mode: %s | Error: %s", CFG.EngineMode or "Auto", tostring(errMsg or "Failure"))
-									)
-								end
-							end
-						end)
-					else
-						-- Position unchanged: Reused highlight parts are already rendered.
-						-- AutoPlay retry if previous move attempt was busy
-						if isMyTurn and not isSpectating and lastBestMove and (CFG.PlayLegit or CFG.AutoPlay) and not autoPlayBusy then
-							if lastExecutedFen ~= info.FEN then
-								executeMove(lastBestMove.uci, info)
-							end
-						end
-					end
-				end
-			end
-		end)
-	end
-end)
-
-----------------------------------------------------------------------
--- AUTONOMOUS ELO FARMING & MATCH QUEUE ENGINE (STEALTH MODE)
-----------------------------------------------------------------------
-
-task.spawn(function()
-	local lastFarmAction = 0
-	local rematchAttemptTime = 0
-
-	while isAlive() do
-		task.wait(0.5)
-		pcall(function()
-			local app = getRoChessApp()
-			if not app then return end
-			local s = app.session
-
-			-- 1. PUZZLE AUTO-NEXT (Auto solves and advances puzzles)
-			if (CFG.AutoPlay or CFG.AutoFarm) and s and s.kind == "puzzle" and s.over then
-				local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-				if pgui then
-					for _, btn in ipairs(pgui:GetDescendants()) do
-						if btn:IsA("TextButton") and btn.Name == "Next" and btn.Visible then
-							task.wait(0.6)
-							if type(firesignal) == "function" then
-								firesignal(btn.Activated)
-							end
-							break
-						end
-					end
-				end
-			end
-
-			-- 2. AUTO FARM ELO (Auto Queue & Rematch)
-			if CFG.AutoFarm and not autoPlayBusy then
-				-- Auto-ensure AutoPlay is active while farming
-				if not CFG.AutoPlay then
-					CFG.AutoPlay = true
-					if toggleAuto and toggleAuto.Set then
-						toggleAuto:Set(true)
-					end
-				end
-
-				local now = tick()
-
-				-- State A: Match is finished (s.over == true) -> Rematch or queue new match
-				if s and s.over then
-					if now - lastFarmAction > 2.0 then
-						lastFarmAction = now
-						if rematchAttemptTime == 0 then
-							rematchAttemptTime = now
-							if type(app.rematch) == "function" then
-								app.rematch()
-							end
-						elseif (now - rematchAttemptTime) > 3.8 then
-							rematchAttemptTime = 0
-							if type(app.newGame) == "function" then
-								app.newGame()
-							elseif type(app.startSearch) == "function" then
-								app.startSearch(app.selectedTc or "3+0")
-							end
-						end
-					end
-
-				-- State B: Currently playing in active match
-				elseif s and (s.kind == "online" or s.kind == "bot") and not s.over then
-					rematchAttemptTime = 0
-
-				-- State C: In lobby / Idle / Game over closed -> Auto search
-				elseif (not s or s.kind == "idle") and not app.inLiveGame() and not app.searching and not app.joining then
-					if now - lastFarmAction > 2.8 then
-						lastFarmAction = now
-						rematchAttemptTime = 0
-						if type(app.startSearch) == "function" then
-							app.startSearch(app.selectedTc or "3+0")
-						end
-					end
-				end
-			end
-		end)
-	end
-end)
-
-----------------------------------------------------------------------
--- AUTONOMOUS PROMOTION WATCHDOG (LEGIT PROMOTION RESOLVER)
-----------------------------------------------------------------------
-
-task.spawn(function()
-	while isAlive() do
-		task.wait(0.05)
-		pcall(function()
-			local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-			if not pgui then return end
-
-			-- 1. Chess Club: 2DBoard.Promotion / Independent.Promotion
-			local b2d = pgui:FindFirstChild("2DBoard")
-			local promo = (b2d and b2d:FindFirstChild("Promotion")) or (pgui:FindFirstChild("Independent") and pgui.Independent:FindFirstChild("Promotion"))
-			if promo and promo:FindFirstChild("Buttons") and (promo.Visible == true or promo.BackgroundTransparency < 0.95) then
-				local targetChar = (lastBestMove and lastBestMove.uci and lastBestMove.uci:len() >= 5 and lastBestMove.uci:sub(5, 5):lower()) or "q"
-				local btn = promo.Buttons:FindFirstChild(targetChar) or promo.Buttons:FindFirstChild("q")
-				if btn and not btn:GetAttribute("_sonHubClicking") then
-					btn:SetAttribute("_sonHubClicking", true)
-					task.defer(function()
-						task.wait(0.06)
-						safeClickButton(btn)
-						task.wait(0.20)
-						pcall(function() btn:SetAttribute("_sonHubClicking", nil) end)
-					end)
-				end
-			end
-
-			-- 2. CookieChess (CHESS! 3D): 3D Model Viewport Human Click
-			local promoModels = Workspace:GetChildren()
-			for _, obj in ipairs(promoModels) do
-				if obj:IsA("Model") and obj:FindFirstChild("piecePromoHighlight") and not obj:GetAttribute("_sonHubClickingPromo") then
-					obj:SetAttribute("_sonHubClickingPromo", true)
-					task.defer(function()
-						local targetName = (lastBestMove and lastBestMove.uci and lastBestMove.uci:len() >= 5 and lastBestMove.uci:sub(5, 5):lower()) or "q"
-						local promoMap = { q = "Queen", r = "Rook", b = "Bishop", n = "Knight" }
-						resolveCookiePromotion(promoMap[targetName] or "Queen")
-						task.wait(0.5)
-						pcall(function() obj:SetAttribute("_sonHubClickingPromo", nil) end)
-					end)
-					break
-				end
-			end
-		end)
-	end
-end)
-
-----------------------------------------------------------------------
--- NAME SPOOFING & ANONYMIZER ("SonHub Hidden" & "Hidden")
-----------------------------------------------------------------------
-
-local function applyNameSpoof()
-	pcall(function()
-		local myName = LocalPlayer.Name
-		local myDisplay = LocalPlayer.DisplayName
-		local char = LocalPlayer.Character
-
-		-- 1. Chess Club: Overhead Nametag (Headboard)
-		local head = char and char:FindFirstChild("Head")
-		local headboard = head and head:FindFirstChild("Headboard")
-		if headboard and headboard:FindFirstChild("Frame") then
-			local userLbl = headboard.Frame:FindFirstChild("Username")
-			if userLbl and userLbl:IsA("TextLabel") and userLbl.Text ~= "SonHub Hidden" then
-				userLbl.Text = "SonHub Hidden"
-			end
-		end
-
-		-- 2. CHESS! 3D (CookieChess): Overhead CharacterInfoLabel on Character
-		if char then
-			for _, desc in ipairs(char:GetDescendants()) do
-				if desc:IsA("BillboardGui") then
-					for _, lbl in ipairs(desc:GetDescendants()) do
-						if lbl:IsA("TextLabel") then
-							if lbl.Name == "PlayerName" or lbl.Text == myName or lbl.Text == myDisplay then
-								if lbl.Text ~= "SonHub Hidden" then
-									lbl.Text = "SonHub Hidden"
-								end
-							end
-						end
-					end
-				end
-			end
-		end
-
-		-- CHESS! ReplicatedStorage cache character
-		local rsFolder = game:GetService("ReplicatedStorage"):FindFirstChild(myName)
-		if rsFolder then
-			for _, desc in ipairs(rsFolder:GetDescendants()) do
-				if desc:IsA("TextLabel") and desc.Name == "PlayerName" and desc.Text ~= "SonHub Hidden" then
-					desc.Text = "SonHub Hidden"
-				end
-			end
-		end
-
-		-- 3. Corner HUD Watermark (Changes corner label to "Hidden")
-		local hui = gethuiSafe() or game:GetService("CoreGui")
-		local pasta = hui and hui:FindFirstChild("PastaCompleteUI")
-		if pasta then
-			local hud = pasta:FindFirstChild("HudContainer")
-			if hud then
-				for _, c in ipairs(hud:GetDescendants()) do
-					if c:IsA("TextLabel") and (c.Text == myName or c.Text == myDisplay or c.Text:lower():find(myName:lower())) then
-						c.Text = "Hidden"
-					end
-				end
-			end
-		end
-
-		-- 4. In-Game CHESS! GUIs (GameStatus, VersusScreen, Spectate)
-		local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-		if pgui then
-			local gStatus = pgui:FindFirstChild("GameStatus")
-			if gStatus then
-				for _, lbl in ipairs(gStatus:GetDescendants()) do
-					if lbl:IsA("TextLabel") and (lbl.Text:find(myName) or (myDisplay and lbl.Text:find(myDisplay))) then
-						lbl.Text = lbl.Text:gsub(myName, "SonHub Hidden"):gsub(myDisplay, "SonHub Hidden")
-					end
-				end
-			end
-
-			local vsScreen = pgui:FindFirstChild("VersusScreen")
-			if vsScreen then
-				for _, lbl in ipairs(vsScreen:GetDescendants()) do
-					if lbl:IsA("TextLabel") and (lbl.Name == "PlayerName" or lbl.Name == "Username" or lbl.Text:find(myName)) then
-						lbl.Text = "SonHub Hidden"
-					end
-				end
-			end
-
-			-- In-Game 2D Board Player Info (Chess Club)
-			local b2d = pgui:FindFirstChild("2DBoard")
-			local pInfo = b2d and b2d:FindFirstChild("Main") and b2d.Main:FindFirstChild("PlayerInfo")
-			if pInfo then
-				local youUser = pInfo:FindFirstChild("YouUsernameMaterial") and pInfo.YouUsernameMaterial:FindFirstChild("Username")
-				if youUser and youUser:IsA("TextLabel") and youUser.Text ~= "@SonHub Hidden" then
-					youUser.Text = "@SonHub Hidden"
-				end
-				local youDnr = pInfo:FindFirstChild("YouDNR")
-				if youDnr and youDnr:IsA("TextLabel") and youDnr.Text:find(myName) then
-					youDnr.Text = youDnr.Text:gsub(myName, "SonHub Hidden")
-				end
-			end
-
-			-- In-Game RoChess GUIs (ChessUI PlayerBar labels)
-			local cUi = pgui:FindFirstChild("ChessUI")
-			if cUi then
-				for _, lbl in ipairs(cUi:GetDescendants()) do
-					if lbl:IsA("TextLabel") and (lbl.Text == myName or (myDisplay and lbl.Text == myDisplay)) then
-						lbl.Text = "SonHub Hidden"
-					end
-				end
-			end
-		end
-	end)
-end
-
-LocalPlayer.CharacterAdded:Connect(function()
-	task.wait(0.4)
-	applyNameSpoof()
-end)
-
-task.spawn(function()
-	while isAlive() do
-		applyNameSpoof()
-		task.wait(1.5)
-	end
-end)
-
-----------------------------------------------------------------------
--- CLEANUP HANDLER
-----------------------------------------------------------------------
-
-local function doCleanup()
-	hideVisuals()
-	pcall(function()
-		if VisualPool.sourcePad then VisualPool.sourcePad:Destroy() end
-		if VisualPool.targetPad then VisualPool.targetPad:Destroy() end
-		if VisualPool.pieceHighlight then VisualPool.pieceHighlight:Destroy() end
-		if VisualPool.overlay2D then VisualPool.overlay2D:Destroy() end
-	end)
-	pcall(function()
-		local hui = gethuiSafe()
-		local btn = hui:FindFirstChild("SonHUB_FloatingButton")
-		if btn then btn:Destroy() end
-	end)
-	pcall(function() Window:Destroy() end)
-end
-
-_genv._SONHUB_CLEANUP = doCleanup
-
-Window:Notify({
-	Title = "SonHub Hidden",
-	Content = "Ready | Depth 18",
-	Duration = 3,
-})
+end)(...)
